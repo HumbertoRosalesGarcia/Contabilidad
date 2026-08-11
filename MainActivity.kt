@@ -30,6 +30,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -59,7 +60,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.AnnotatedString
@@ -233,7 +236,8 @@ data class Transaction(
 
 @Entity(tableName = "reminders") data class Reminder(@PrimaryKey(autoGenerate = true) val id: Int = 0, val title: String, val targetDateInMillis: Long)
 @Entity(tableName = "fiadores") data class Fiador(@PrimaryKey(autoGenerate = true) val id: Int = 0, val name: String, val phone: String = "", val amount: Double, val reason: String, val targetDateInMillis: Long, val paidAmount: Double = 0.0, val paymentHistory: String = "")
-@Entity(tableName = "products") data class Product(@PrimaryKey(autoGenerate = true) val id: Int = 0, val name: String, val purchasePrice: Double = 0.0, val price: Double, val stock: Int, val unit: String = "Uds", val expirationDateInMillis: Long? = null, val entryDateInMillis: Long = System.currentTimeMillis(), val minStock: Int = 0)
+
+@Entity(tableName = "products") data class Product(@PrimaryKey(autoGenerate = true) val id: Int = 0, val name: String, val purchasePrice: Double = 0.0, val price: Double, val stock: Int, val unit: String = "Uds", val expirationDateInMillis: Long? = null, val entryDateInMillis: Long = System.currentTimeMillis(), val minStock: Int = 0, val imageUri: String? = null)
 
 @Dao
 interface FinanceDao {
@@ -271,8 +275,9 @@ val MIGRATION_8_9 = object : Migration(8, 9) { override fun migrate(db: SupportS
 val MIGRATION_9_10 = object : Migration(9, 10) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `products` ADD COLUMN `minStock` INTEGER NOT NULL DEFAULT 0") } }
 val MIGRATION_10_11 = object : Migration(10, 11) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `transactions` ADD COLUMN `cashAmount` REAL NOT NULL DEFAULT 0.0"); db.execSQL("ALTER TABLE `transactions` ADD COLUMN `digitalAmount` REAL NOT NULL DEFAULT 0.0") } }
 val MIGRATION_11_12 = object : Migration(11, 12) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `paidAmount` REAL NOT NULL DEFAULT 0.0"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `paymentHistory` TEXT NOT NULL DEFAULT ''") } }
+val MIGRATION_12_13 = object : Migration(12, 13) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `products` ADD COLUMN `imageUri` TEXT DEFAULT NULL") } }
 
-@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 12, exportSchema = false)
+@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 13, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun financeDao(): FinanceDao
     companion object {
@@ -281,7 +286,7 @@ abstract class AppDatabase : RoomDatabase() {
             return INSTANCES[userId] ?: synchronized(this) {
                 val dbName = "finance_database_$userId"
                 val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, dbName)
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                     .build()
                 INSTANCES[userId] = instance
                 instance
@@ -310,10 +315,43 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     var autoSyncHour by mutableStateOf(userPrefs.getInt("syncHour", 2)); private set
     var autoSyncMinute by mutableStateOf(userPrefs.getInt("syncMinute", 0)); private set
 
+    // --- Control de Deuda al Bolsillo (Vueltos) ---
+    var pocketDebt by mutableStateOf(userPrefs.getFloat("pocketDebt", 0f).toDouble()); private set
+
     init { scheduleAutoSync(application, autoSyncFrequency, autoSyncHour, autoSyncMinute) }
 
     fun updateMinBalance(amount: Double) { minBalanceThreshold = amount; userPrefs.edit().putFloat("minBalance", amount.toFloat()).apply() }
     fun updateSoundPreference(soundIndex: Int) { selectedSound = soundIndex; userPrefs.edit().putInt("selectedSound", soundIndex).apply(); AppSounds.play(soundIndex) }
+
+    fun addPocketDebt(amount: Double) {
+        val newDebt = pocketDebt + amount
+        pocketDebt = newDebt
+        userPrefs.edit().putFloat("pocketDebt", newDebt.toFloat()).apply()
+    }
+
+    fun reimbursePocketDebt(amount: Double) {
+        viewModelScope.launch {
+            val newDebt = pocketDebt - amount
+            if (newDebt >= 0) {
+                pocketDebt = newDebt
+                userPrefs.edit().putFloat("pocketDebt", newDebt.toFloat()).apply()
+
+                // Transacción para retirar el efectivo de la caja sin afectar las ganancias
+                dao.insertTransaction(
+                    Transaction(
+                        description = "Venta: Reembolso a Bolsillo",
+                        amount = 0.0,
+                        isIncome = true,
+                        note = "Vuelto devuelto de la caja al bolsillo personal",
+                        profit = 0.0,
+                        cashAmount = -amount,
+                        digitalAmount = 0.0
+                    )
+                )
+            }
+        }
+        AppSounds.play(selectedSound)
+    }
 
     fun updateAutoSyncSchedule(application: Application, frequencyDays: Int, hour: Int, minute: Int) {
         autoSyncFrequency = frequencyDays; autoSyncHour = hour; autoSyncMinute = minute
@@ -403,7 +441,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     fun deletePersonalTransactions() { viewModelScope.launch { dao.deletePersonalTransactions() } }
     fun resetAllProfits() { viewModelScope.launch { dao.resetAllProfits() }; AppSounds.play(selectedSound) }
 
-    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(selectedSound) }
+    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(selectedSound) }
     fun editProduct(product: Product, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateProduct(product); cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER"); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto actualizado") }; AppSounds.play(selectedSound) }
     fun deleteProductEntirely(product: Product, context: Context) { viewModelScope.launch { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") }; AppSounds.play(selectedSound) }
 
@@ -469,6 +507,42 @@ class FinanceViewModelFactory(private val application: Application, private val 
     @Suppress("UNCHECKED_CAST")
     override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
         return FinanceViewModel(application, userId) as T
+    }
+}
+
+class ProductDraftState {
+    var name by mutableStateOf("")
+    var purchasePriceRaw by mutableStateOf("")
+    var priceRaw by mutableStateOf("")
+    var stockRaw by mutableStateOf("")
+    var minStockRaw by mutableStateOf("")
+    var selectedUnit by mutableStateOf("Uds")
+    var hasExpiry by mutableStateOf(false)
+    var expiryDateMillis by mutableStateOf<Long?>(null)
+    var imageUri by mutableStateOf<String?>(null)
+
+    fun clear() {
+        name = ""
+        purchasePriceRaw = ""
+        priceRaw = ""
+        stockRaw = ""
+        minStockRaw = ""
+        selectedUnit = "Uds"
+        hasExpiry = false
+        expiryDateMillis = null
+        imageUri = null
+    }
+
+    fun loadFrom(product: Product) {
+        name = product.name
+        purchasePriceRaw = if (product.purchasePrice > 0) product.purchasePrice.toLong().toString() else ""
+        priceRaw = product.price.toLong().toString()
+        stockRaw = product.stock.toString()
+        minStockRaw = if (product.minStock > 0) product.minStock.toString() else ""
+        selectedUnit = product.unit
+        hasExpiry = product.expirationDateInMillis != null
+        expiryDateMillis = product.expirationDateInMillis
+        imageUri = product.imageUri
     }
 }
 
@@ -612,7 +686,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 val response = RetrofitInstance.api.addUserTime(UserTimeRequest(viewModel.userId, 30L))
                 if (response.isBanned && !isSuperAdmin) { Toast.makeText(context, "Tu tiempo ha culminado o has sido bloqueado.", Toast.LENGTH_LONG).show(); onLogout(); break }
 
-                // CORRECCIÓN 1: Si el servidor no envía el rol (null), mantenemos el currentRole en lugar de forzar "INVITADO"
                 val newRole = response.role ?: currentRole
                 if (newRole != currentRole && !isSuperAdmin) {
                     if (newRole == "INVITADO") { showRoleDowngradeDialog = true } else { showRoleUpgradeDialog = newRole }
@@ -620,7 +693,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     authPrefs.edit().putString("userRole", currentRole).putString("lastKnownRole", currentRole).apply()
                 }
 
-                // CORRECCIÓN 2: Evitamos fallos si el JSON del servidor omite estos valores (quedarían en 0 por defecto)
                 if (response.planDuration > 0L) {
                     currentConsumed = response.consumedSeconds
                     currentPlanDuration = response.planDuration
@@ -629,8 +701,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
                 if (currentRole != "INVITADO" && !isSuperAdmin) {
                     val timeLeftSecs = currentPlanDuration - currentConsumed
-
-                    // CORRECCIÓN 3: Validación local real de expiración del tiempo
                     if (timeLeftSecs <= 0) {
                         showRoleDowngradeDialog = true
                         currentRole = "INVITADO"
@@ -737,8 +807,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showInventoryScreen by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
+
     var showAddProductDialog by remember { mutableStateOf(false) }
     var productToEdit by remember { mutableStateOf<Product?>(null) }
+    val productDraftState = remember { ProductDraftState() }
+
     val shoppingCart = remember { mutableStateListOf<Pair<Product, Int>>() }
     var showCheckoutDialog by remember { mutableStateOf(false) }
     var productToAddToCart by remember { mutableStateOf<Product?>(null) }
@@ -760,6 +833,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showFiadoresListDialog by remember { mutableStateOf(false) }
     var showFiadorDialog by remember { mutableStateOf(false) }
     var fiadorToEdit by remember { mutableStateOf<Fiador?>(null) }
+
+    var checkoutToFiadorName by remember { mutableStateOf("") }
+    var checkoutToFiadorCart by remember { mutableStateOf<List<Pair<Product, Int>>>(emptyList()) }
+
     var customToastMessage by remember { mutableStateOf<String?>(null) }
     var backPressedOnce by remember { mutableStateOf(false) }
     var undoMessage by remember { mutableStateOf<String?>(null) }
@@ -851,7 +928,25 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
             if (showInventoryScreen) {
-                InventoryScreen(products = products, shoppingCart = shoppingCart, onBack = { showInventoryScreen = false }, onAddProductClick = { productToEdit = null; showAddProductDialog = true }, onAddToCartClick = { productToAddToCart = it }, onOpenCheckout = { showCheckoutDialog = true }, onEditClick = { productToEdit = it; showAddProductDialog = true }, onDeleteClick = { productToDelete = it; qtyToDelete = "1"; showDeleteQtyDialog = true }, onLongDeleteClick = { productToFullDelete = it }, onInfoClick = { productToInfo = it })
+                InventoryScreen(
+                    products = products,
+                    shoppingCart = shoppingCart,
+                    onBack = { showInventoryScreen = false },
+                    onAddProductClick = {
+                        productToEdit = null
+                        showAddProductDialog = true
+                    },
+                    onAddToCartClick = { productToAddToCart = it },
+                    onOpenCheckout = { showCheckoutDialog = true },
+                    onEditClick = {
+                        productToEdit = it
+                        productDraftState.loadFrom(it)
+                        showAddProductDialog = true
+                    },
+                    onDeleteClick = { productToDelete = it; qtyToDelete = "1"; showDeleteQtyDialog = true },
+                    onLongDeleteClick = { productToFullDelete = it },
+                    onInfoClick = { productToInfo = it }
+                )
             } else {
                 Crossfade(targetState = currentTab, label = "TabSwitch") { tab ->
                     if (tab == 0) {
@@ -1198,6 +1293,29 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Disponible en Digital (Banco):", fontSize = 14.sp, color = Color.Gray)
                         Text(formatCOP(totalStoreDigital), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                        // --- Lógica del Vuelto de Bolsillo ---
+                        if (viewModel.pocketDebt > 0) {
+                            Divider(modifier = Modifier.padding(vertical = 12.dp))
+                            Text("Deuda al Bolsillo (Vueltos):", fontSize = 14.sp, color = Color(0xFFE65100))
+                            Text(formatCOP(viewModel.pocketDebt), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            if (totalStoreCash >= viewModel.pocketDebt) {
+                                Button(
+                                    onClick = {
+                                        viewModel.reimbursePocketDebt(viewModel.pocketDebt)
+                                        customToastMessage = "Deuda al bolsillo recuperada"
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Recuperar Vuelto a mi Bolsillo")
+                                }
+                            } else {
+                                Text("⚠️ Aún no hay suficiente efectivo en caja para recuperar el vuelto.", color = Color.Red, fontSize = 12.sp)
+                            }
+                        }
                     }
                 },
                 confirmButton = { Button(onClick = { showResetProfitsDialog = false }) { Text("Cerrar") } },
@@ -1219,7 +1337,51 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        if (showAddProductDialog) { AddProductDialog(initialProduct = productToEdit, onDismiss = { showAddProductDialog = false; productToEdit = null }, onConfirm = { name, purchasePrice, price, stock, unit, expiryDate, minStock -> if (productToEdit != null) { viewModel.editProduct(productToEdit!!.copy(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expiryDate, minStock = minStock), context) { msg -> customToastMessage = msg } } else { viewModel.addProduct(name, purchasePrice, price, stock, unit, expiryDate, minStock, context) { msg -> customToastMessage = msg } }; showAddProductDialog = false; productToEdit = null }) }
+        if (showAddProductDialog) {
+            AddProductDialog(
+                isEditMode = productToEdit != null,
+                draftState = productDraftState,
+                onDismiss = {
+                    showAddProductDialog = false
+                    if (productToEdit != null) {
+                        productDraftState.clear()
+                        productToEdit = null
+                    }
+                },
+                onConfirm = {
+                    val parsedPrice = productDraftState.priceRaw.toDoubleOrNull() ?: 0.0
+                    val parsedPurchase = productDraftState.purchasePriceRaw.toDoubleOrNull() ?: 0.0
+                    val s = productDraftState.stockRaw.toIntOrNull()
+                    val minS = productDraftState.minStockRaw.toIntOrNull() ?: 0
+
+                    if (productDraftState.name.isNotBlank() && parsedPrice > 0 && s != null) {
+                        val capName = productDraftState.name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                        val expiry = if (productDraftState.hasExpiry) productDraftState.expiryDateMillis else null
+
+                        if (productToEdit != null) {
+                            viewModel.editProduct(
+                                productToEdit!!.copy(
+                                    name = capName, purchasePrice = parsedPurchase, price = parsedPrice,
+                                    stock = s, unit = productDraftState.selectedUnit, expirationDateInMillis = expiry,
+                                    minStock = minS, imageUri = productDraftState.imageUri
+                                ), context
+                            ) { msg -> customToastMessage = msg }
+                        } else {
+                            viewModel.addProduct(
+                                capName, parsedPurchase, parsedPrice, s, productDraftState.selectedUnit,
+                                expiry, minS, productDraftState.imageUri, context
+                            ) { msg -> customToastMessage = msg }
+                        }
+
+                        productDraftState.clear()
+                        showAddProductDialog = false
+                        productToEdit = null
+                    } else {
+                        Toast.makeText(context, "Llena los campos correctamente", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        }
 
         if (productToAddToCart != null) { AddToCartDialog(product = productToAddToCart!!, currentCartQty = shoppingCart.find { it.first.id == productToAddToCart!!.id }?.second ?: 0, onDismiss = { productToAddToCart = null }, onConfirm = { qty -> val existing = shoppingCart.find { it.first.id == productToAddToCart!!.id }; if (existing != null) { val idx = shoppingCart.indexOf(existing); shoppingCart[idx] = existing.copy(second = existing.second + qty) } else { shoppingCart.add(Pair(productToAddToCart!!, qty)) }; customToastMessage = "Añadido al carrito 🛒"; productToAddToCart = null }) }
 
@@ -1230,11 +1392,22 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 totalStoreCash = totalStoreCash,
                 totalStoreDigital = totalStoreDigital,
                 onDismiss = { showCheckoutDialog = false },
-                onConfirmSale = { items, buyer, summary, netCash, netDigital ->
+                onConfirmSale = { items, buyer, summary, netCash, netDigital, pocketDebtAmount ->
                     viewModel.processCartSale(items, buyer, summary, netCash, netDigital, context) { msg -> customToastMessage = msg }
+                    if (pocketDebtAmount > 0) {
+                        viewModel.addPocketDebt(pocketDebtAmount)
+                    }
                     shoppingCart.clear()
                     showCheckoutDialog = false
                     showInventoryScreen = false
+                },
+                onFiarVenta = { buyer ->
+                    checkoutToFiadorName = buyer
+                    checkoutToFiadorCart = shoppingCart.toList()
+                    showCheckoutDialog = false
+                    fiadorToEdit = null
+                    preselectedDateForEvent = null // Para que luego abra el selector de fecha
+                    showFiadorDialog = true
                 }
             )
         }
@@ -1251,164 +1424,38 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         if (showFiadorDialog) {
             FiadorDialog(
                 initialFiador = fiadorToEdit,
+                initialName = checkoutToFiadorName,
+                initialCart = checkoutToFiadorCart,
                 products = products,
                 preselectedDate = preselectedDateForEvent,
-                onDismiss = { showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadoresListDialog = true },
-                onConfirmNew = { n, p, cartItems, d -> viewModel.addFiador(n, p, cartItems, d, context) { customToastMessage = it }; showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadoresListDialog = true },
-                onConfirmEdit = { f, d -> viewModel.updateExistingFiador(f.copy(targetDateInMillis = d), context) { customToastMessage = it }; showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadoresListDialog = true },
-                onConfirmAbono = { f, abono, method -> viewModel.registerAbonoFiador(f, abono, method, context) { customToastMessage = it }; showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadoresListDialog = true }
+                onDismiss = {
+                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null;
+                    if (checkoutToFiadorCart.isEmpty()) showFiadoresListDialog = true
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList() // limpiar variables puente
+                },
+                onConfirmNew = { n, p, cartItemsFiado, d ->
+                    viewModel.addFiador(n, p, cartItemsFiado, d, context) { customToastMessage = it }
+                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null;
+
+                    if (checkoutToFiadorCart.isNotEmpty()) {
+                        shoppingCart.clear() // Vacía el carrito global porque la venta se fió
+                        showInventoryScreen = false
+                    } else {
+                        showFiadoresListDialog = true
+                    }
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList() // limpiar variables puente
+                },
+                onConfirmEdit = { f, d ->
+                    viewModel.updateExistingFiador(f.copy(targetDateInMillis = d), context) { customToastMessage = it }
+                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadoresListDialog = true
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList() // limpiar variables puente
+                },
+                onConfirmAbono = { f, abono, method ->
+                    viewModel.registerAbonoFiador(f, abono, method, context) { customToastMessage = it }
+                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadoresListDialog = true
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList() // limpiar variables puente
+                }
             )
-        }
-    }
-}
-
-// === COMPONENTES DE CHAT ===
-@Composable
-fun AdminChatListDialog(onDismiss: () -> Unit, onSelectClient: (String) -> Unit) {
-    var chats by remember { mutableStateOf<Map<String, List<ChatMessage>>>(emptyMap()) }
-    var isLoading by remember { mutableStateOf(true) }
-
-    LaunchedEffect(Unit) {
-        try { chats = RetrofitInstance.api.getAllChats() } catch (_: Exception) {}
-        isLoading = false
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss, title = { Text("Mensajes de Clientes 💬", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface,
-        text = {
-            if (isLoading) { CircularProgressIndicator() }
-            else if (chats.isEmpty()) { Text("No hay mensajes de clientes por ahora.", color = Color.Gray) }
-            else {
-                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                    items(chats.keys.toList()) { clientEmail ->
-                        val lastMsg = chats[clientEmail]?.lastOrNull()
-                        Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onSelectClient(clientEmail) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(clientEmail, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                if (lastMsg != null) {
-                                    Text("${if(lastMsg.sender=="zonacami77777@gmail.com") "Tú:" else "Cliente:"} ${lastMsg.text}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color.Gray, fontSize = 13.sp)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } }, properties = DialogProperties(usePlatformDefaultWidth = false)
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ChatDialog(currentUserEmail: String, targetClientEmail: String, isAdmin: Boolean, onDismiss: () -> Unit) {
-    var messages by remember { mutableStateOf<List<ChatMessage>>(emptyList()) }
-    var inputText by remember { mutableStateOf("") }
-    val coroutineScope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
-    val focusManager = LocalFocusManager.current
-    var showClearConfirm by remember { mutableStateOf(false) }
-
-    LaunchedEffect(targetClientEmail) {
-        while (true) {
-            try {
-                val newMsgs = RetrofitInstance.api.getChat(targetClientEmail)
-                if (newMsgs != messages) {
-                    messages = newMsgs
-                    if (messages.isNotEmpty()) { listState.animateScrollToItem(messages.size - 1) }
-                }
-            } catch (_: Exception) {}
-            delay(3000L)
-        }
-    }
-
-    if (showClearConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirm = false }, title = { Text("Borrar Chat 🗑️", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface,
-            text = { Text("¿Estás seguro de que deseas borrar este historial de chat? Esta acción es irreversible para ambas partes.") },
-            confirmButton = { Button(onClick = { coroutineScope.launch(Dispatchers.IO) { try { RetrofitInstance.api.clearChat(targetClientEmail); launch(Dispatchers.Main) { messages = emptyList(); showClearConfirm = false } } catch(_: Exception){} } }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("Borrar") } },
-            dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("Cancelar") } }
-        )
-    }
-
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
-    ) {
-        Surface(modifier = Modifier.fillMaxSize().systemBarsPadding().imePadding(), color = MaterialTheme.colorScheme.background) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primary).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.ArrowBack, null, tint = Color.White) }
-                    Text(if (isAdmin) "Chat: ${targetClientEmail.substringBefore("@")}" else "Soporte Técnico 💬", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { showClearConfirm = true }) { Icon(Icons.Filled.Delete, "Borrar Chat", tint = Color.White) }
-                }
-
-                LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp), state = listState) {
-                    item { Spacer(modifier = Modifier.height(16.dp)) }
-                    if (messages.isEmpty()) { item { Text("No hay mensajes todavía. ¡Escribe algo para empezar!", color = Color.Gray, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) } }
-                    items(messages) { msg ->
-                        val isMe = msg.sender == currentUserEmail
-                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start) {
-                            Box(modifier = Modifier.background(if (isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = if (isMe) 16.dp else 4.dp, bottomEnd = if (isMe) 4.dp else 16.dp)).padding(12.dp).widthIn(max = 250.dp)) {
-                                Column {
-                                    Text(msg.text, color = if (isMe) Color.White else MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
-                                    Text(SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(msg.timestamp)), fontSize = 10.sp, color = (if (isMe) Color.White else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.6f), modifier = Modifier.align(Alignment.End).padding(top = 4.dp))
-                                }
-                            }
-                        }
-                    }
-                    item { Spacer(modifier = Modifier.height(8.dp)) }
-                }
-
-                Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
-                        placeholder = { Text("Escribe un mensaje...") }, shape = RoundedCornerShape(24.dp), maxLines = 4
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    FloatingActionButton(onClick = {
-                        if (inputText.isNotBlank()) {
-                            focusManager.clearFocus()
-                            val textToSend = inputText; inputText = ""
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    val receiver = if (isAdmin) targetClientEmail else "zonacami77777@gmail.com"
-                                    RetrofitInstance.api.sendMessage(ChatSendRequest(currentUserEmail, receiver, textToSend))
-                                    val updated = RetrofitInstance.api.getChat(targetClientEmail)
-                                    launch(Dispatchers.Main) { messages = updated; if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) }
-                                } catch (_: Exception) {}
-                            }
-                        }
-                    }, containerColor = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Send, null, tint = Color.White) }
-                }
-            }
-        }
-    }
-}
-
-
-@Composable
-fun PlanCardInfo(title: String, subtitle: String, features: List<String>, restrictions: List<String>) {
-    Card(modifier = Modifier.width(280.dp).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.6f))) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
-            Text(subtitle, fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 12.dp))
-            features.forEach { feature ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-                    Icon(Icons.Filled.Check, contentDescription = "Permitido", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(feature, fontSize = 13.sp)
-                }
-            }
-            if (restrictions.isNotEmpty()) { Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha=0.2f)) }
-            restrictions.forEach { restriction ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp).alpha(0.5f)) {
-                    Icon(Icons.Filled.Close, contentDescription = "No Permitido", tint = Color.Red, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(restriction, fontSize = 13.sp, textDecoration = TextDecoration.LineThrough)
-                }
-            }
         }
     }
 }
@@ -1454,6 +1501,8 @@ fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppi
 @Composable
 fun InventoryScreen(products: List<Product>, shoppingCart: List<Pair<Product, Int>>, onBack: () -> Unit, onAddProductClick: () -> Unit, onAddToCartClick: (Product) -> Unit, onOpenCheckout: () -> Unit, onEditClick: (Product) -> Unit, onDeleteClick: (Product) -> Unit, onLongDeleteClick: (Product) -> Unit, onInfoClick: (Product) -> Unit) {
     var searchQuery by remember { mutableStateOf("") }; var sortBy by remember { mutableStateOf("A-Z") }
+    var expandedImageUri by remember { mutableStateOf<String?>(null) }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Atrás", tint = MaterialTheme.colorScheme.onPrimary) }; Text("Inventario 📦", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.weight(1f)) }
@@ -1473,16 +1522,31 @@ fun InventoryScreen(products: List<Product>, shoppingCart: List<Pair<Product, In
             }
             LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
                 if (sortedProducts.isEmpty()) { item { Text("No se encontraron productos.", color = Color.Gray, modifier = Modifier.padding(16.dp).fillMaxWidth(), textAlign = TextAlign.Center) } }
-                items(sortedProducts, key = { it.id }) { product -> ProductItem(product = product, onAddToCart = { onAddToCartClick(product) }, onEdit = { onEditClick(product) }, onDelete = { onDeleteClick(product) }, onLongDelete = { onLongDeleteClick(product) }, onInfo = { onInfoClick(product) }) }
+                items(sortedProducts, key = { it.id }) { product ->
+                    ProductItem(
+                        product = product,
+                        onAddToCart = { onAddToCartClick(product) },
+                        onEdit = { onEditClick(product) },
+                        onDelete = { onDeleteClick(product) },
+                        onLongDelete = { onLongDeleteClick(product) },
+                        onInfo = { onInfoClick(product) },
+                        onImageClick = { expandedImageUri = product.imageUri }
+                    )
+                }
             }
         }
-        FloatingActionButton(onClick = onAddProductClick, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = 16.dp)) { Icon(Icons.Filled.AddShoppingCart, contentDescription = "Agregar Producto") }
+        FloatingActionButton(onClick = onAddProductClick, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = 16.dp)) { Icon(Icons.Filled.Add, contentDescription = "Agregar Producto") }
+
+        if (expandedImageUri != null) {
+            ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null })
+        }
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ProductItem(product: Product, onAddToCart: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit, onLongDelete: () -> Unit, onInfo: () -> Unit) {
+fun ProductItem(product: Product, onAddToCart: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit, onLongDelete: () -> Unit, onInfo: () -> Unit, onImageClick: () -> Unit) {
+    val context = LocalContext.current
     val isOutOfStock = product.stock <= 0; val isLowStock = product.minStock > 0 && product.stock <= product.minStock && !isOutOfStock
     val isExpired = product.expirationDateInMillis != null && product.expirationDateInMillis < System.currentTimeMillis()
     val unitColor = when (product.unit) { "Kg" -> Color(0xFFFF9800); "L" -> Color(0xFF03A9F4); else -> Color.Gray }
@@ -1490,6 +1554,39 @@ fun ProductItem(product: Product, onAddToCart: () -> Unit, onEdit: () -> Unit, o
         Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
             Box(modifier = Modifier.width(6.dp).fillMaxHeight().background(unitColor))
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+
+                Box(
+                    modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(Color.Gray.copy(alpha = 0.2f))
+                        .clickable { if (product.imageUri != null) onImageClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (product.imageUri != null) {
+                        val bitmap = remember(product.imageUri) {
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(product.imageUri)))
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(product.imageUri))
+                                }
+                            } catch (e: Exception) { null }
+                        }
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Imagen de ${product.name}",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(Icons.Filled.ImageNotSupported, contentDescription = null, tint = Color.Gray)
+                        }
+                    } else {
+                        Icon(Icons.Filled.Inventory, contentDescription = null, tint = Color.Gray)
+                    }
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Text(text = product.name, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)); if (isExpired) { Spacer(modifier = Modifier.width(8.dp)); Surface(color = Color(0xFFD32F2F), shape = RoundedCornerShape(4.dp)) { Text("⚠️ VENCIDO", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) } }; if (isLowStock) { Spacer(modifier = Modifier.width(8.dp)); Surface(color = Color(0xFFE65100), shape = RoundedCornerShape(4.dp)) { Text("⚠️ POCO STOCK", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) } } }
                     Text(text = "Precio: ${formatCOP(product.price)}", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
@@ -1505,6 +1602,48 @@ fun ProductItem(product: Product, onAddToCart: () -> Unit, onEdit: () -> Unit, o
 // ==========================================
 // 8. DIÁLOGOS Y COMPONENTES REUTILIZABLES
 // ==========================================
+@Composable
+fun ExpandedImageDialog(imageUri: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true)
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).clickable { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            val bitmap = remember(imageUri) {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(imageUri)))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(imageUri))
+                    }
+                } catch (e: Exception) { null }
+            }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Imagen Expandida",
+                    modifier = Modifier.fillMaxWidth(0.9f).clip(RoundedCornerShape(16.dp)),
+                    contentScale = ContentScale.Fit
+                )
+            } else {
+                Text("Error al cargar imagen", color = Color.White)
+            }
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(32.dp).background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            ) {
+                Icon(Icons.Filled.Close, contentDescription = "Cerrar", tint = Color.White)
+            }
+        }
+    }
+}
+
 @Composable
 fun CustomDatePickerDialog(initialDateMillis: Long?, onDismiss: () -> Unit, onDateSelected: (Long) -> Unit) {
     var currentMonth by remember { mutableStateOf(Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1); if (initialDateMillis != null) { timeInMillis = initialDateMillis; set(Calendar.DAY_OF_MONTH, 1) } }) }
@@ -1564,8 +1703,32 @@ fun CustomDatePickerDialog(initialDateMillis: Long?, onDismiss: () -> Unit, onDa
 
 @Composable
 fun AddToCartDialog(product: Product, currentCartQty: Int, onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
-    var qtyRaw by remember { mutableStateOf("1") }; val maxAvailable = product.stock - currentCartQty
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Añadir al Carrito 🛒", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text(product.name, fontWeight = FontWeight.Bold, fontSize = 18.sp); Text("Disponible para añadir: $maxAvailable ${product.unit}", color = Color.Gray); Spacer(modifier = Modifier.height(16.dp)); OutlinedTextField(value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cantidad") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth(0.6f), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp)) } }, confirmButton = { Button(onClick = { val q = qtyRaw.toIntOrNull() ?: 0; if (q > 0 && q <= maxAvailable) { onConfirm(q) } }) { Text("Añadir") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
+    var qtyRaw by remember { mutableStateOf("") }
+    val maxAvailable = product.stock - currentCartQty
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Añadir al Carrito 🛒", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(product.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Disponible para añadir: $maxAvailable ${product.unit}", color = Color.Gray)
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = qtyRaw,
+                    onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d },
+                    label = { Text("Cantidad") },
+                    placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(0.8f).padding(vertical = 8.dp),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                )
+            }
+        },
+        confirmButton = { Button(onClick = { val q = qtyRaw.toIntOrNull() ?: 0; if (q > 0 && q <= maxAvailable) { onConfirm(q) } }) { Text("Añadir") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
+    )
 }
 
 @Composable
@@ -1581,7 +1744,8 @@ fun CheckoutDialog(
     totalStoreCash: Double,
     totalStoreDigital: Double,
     onDismiss: () -> Unit,
-    onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double) -> Unit
+    onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double, Double) -> Unit,
+    onFiarVenta: (String) -> Unit
 ) {
     var step by remember { mutableStateOf(1) }
     var buyerName by remember { mutableStateOf("") }
@@ -1632,7 +1796,7 @@ fun CheckoutDialog(
     }
 
     if (productToSelectQty != null) {
-        var qtyRaw by remember { mutableStateOf("1") }
+        var qtyRaw by remember { mutableStateOf("") }
         val p = productToSelectQty!!
         val currentInCart = cartItems.find { it.first.id == p.id }?.second ?: 0
         val maxAvailable = p.stock - currentInCart
@@ -1648,10 +1812,11 @@ fun CheckoutDialog(
                         value = qtyRaw,
                         onValueChange = { qtyRaw = it.filter { c -> c.isDigit() } },
                         label = { Text("Cantidad") },
+                        placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(0.6f),
-                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp)
+                        modifier = Modifier.fillMaxWidth(0.8f).padding(vertical = 8.dp),
+                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     )
                 }
             },
@@ -1767,7 +1932,7 @@ fun CheckoutDialog(
                             }
 
                             if (pocketChange) {
-                                Text("El vuelto se dará de tu bolsillo personal. La ganancia ingresará completa a la tienda.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+                                Text("El vuelto se dará de tu bolsillo personal. La ganancia ingresará completa a la tienda y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
                             } else {
                                 val hasEnoughFunds = if (simpleMethod == "Efectivo") change <= totalStoreCash else change <= totalStoreDigital
                                 if (!hasEnoughFunds) {
@@ -1776,8 +1941,18 @@ fun CheckoutDialog(
                                     Text("El vuelto saldrá de: $simpleMethod", fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50), fontSize = 12.sp)
                                 }
                             }
-                        } else if (change < 0 && rec > 0) {
-                            Text("Falta: ${formatCOP(abs(change))}", color = Color.Red, fontWeight = FontWeight.Bold)
+                        } else if (change < 0) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                if (rec > 0) {
+                                    Text("Falta: ${formatCOP(abs(change))}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                } else {
+                                    Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp)
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Button(onClick = { onFiarVenta(buyerName) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
+                                    Text("Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
+                                }
+                            }
                         } else if (change == 0.0 && rec > 0) {
                             Text("Pago exacto ✅", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
                         }
@@ -1799,7 +1974,7 @@ fun CheckoutDialog(
                             }
 
                             if (pocketChange) {
-                                Text("El vuelto se dará de tu bolsillo. La ganancia ingresará intacta.", fontSize = 12.sp, color = Color.Gray)
+                                Text("El vuelto se dará de tu bolsillo. La ganancia ingresará intacta y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray)
                             } else {
                                 Text("¿De dónde darás el vuelto?", fontSize = 12.sp, color = Color.Gray)
                                 PaymentInputRow("Vuelto Efectivo", cashChangeRaw, { cashChangeRaw = it })
@@ -1817,8 +1992,18 @@ fun CheckoutDialog(
                                     Text("Vuelto distribuido correctamente ✅", color = Color(0xFF4CAF50), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
-                        } else if (changeCOP < 0 && receivedCOP > 0) {
-                            Text("Falta dinero: ${formatCOP(abs(changeCOP))}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        } else if (changeCOP < 0) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                                if (receivedCOP > 0) {
+                                    Text("Falta dinero: ${formatCOP(abs(changeCOP))}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                } else {
+                                    Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp)
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Button(onClick = { onFiarVenta(buyerName) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
+                                    Text("Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
+                                }
+                            }
                         } else if (changeCOP == 0.0 && receivedCOP > 0) {
                             Text("Pago completo y exacto ✅", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         }
@@ -1866,6 +2051,7 @@ fun CheckoutDialog(
                         var netC = 0.0
                         var netD = 0.0
                         var summary = ""
+                        var pocketDebtAmount = 0.0
 
                         if (!isDivided) {
                             val rec = simpleReceivedRaw.toDoubleOrNull() ?: 0.0
@@ -1877,6 +2063,9 @@ fun CheckoutDialog(
                                 netD = totalCOP
                                 summary = "Pago Digital: ${formatCOP(rec)}" + if(change>0) " | Vuelto: ${formatCOP(change)}" + if(pocketChange) " (De bolsillo)" else "" else ""
                             }
+                            if (pocketChange && change > 0) {
+                                pocketDebtAmount = change
+                            }
                         } else {
                             val cV = cashRaw.toDoubleOrNull() ?: 0.0
                             val dV = digitalRaw.toDoubleOrNull() ?: 0.0
@@ -1886,7 +2075,10 @@ fun CheckoutDialog(
                                 netC = cV
                                 netD = dV
                                 summary = "Efectivo recibido: ${formatCOP(cV)} | Digital recibido: ${formatCOP(dV)}"
-                                if (changeCOP > 0) summary += "\nVuelto: ${formatCOP(changeCOP)} (De bolsillo)"
+                                if (changeCOP > 0) {
+                                    summary += "\nVuelto: ${formatCOP(changeCOP)} (De bolsillo)"
+                                    pocketDebtAmount = changeCOP
+                                }
                             } else {
                                 val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0
                                 val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0
@@ -1898,7 +2090,7 @@ fun CheckoutDialog(
                                 }
                             }
                         }
-                        onConfirmSale(cartItems.toList(), buyerName.trim(), summary, netC, netD)
+                        onConfirmSale(cartItems.toList(), buyerName.trim(), summary, netC, netD, pocketDebtAmount)
                     },
                     enabled = isEnabled
                 ) { Text("Confirmar Venta") }
@@ -2048,15 +2240,110 @@ fun CalendarDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddProductDialog(initialProduct: Product? = null, onDismiss: () -> Unit, onConfirm: (String, Double, Double, Int, String, Long?, Int) -> Unit) {
-    val context = LocalContext.current; var name by remember { mutableStateOf(initialProduct?.name ?: "") }; val initialPurchase = initialProduct?.purchasePrice?.let { if(it > 0) it.toLong().toString() else "" } ?: ""; var purchasePriceRaw by remember { mutableStateOf(initialPurchase) }; val initialPrice = initialProduct?.price?.let { it.toLong().toString() } ?: ""; var priceRaw by remember { mutableStateOf(initialPrice) }; var stockRaw by remember { mutableStateOf(initialProduct?.stock?.toString() ?: "") }; var minStockRaw by remember { mutableStateOf(if ((initialProduct?.minStock ?: 0) > 0) initialProduct!!.minStock.toString() else "") }; var selectedUnit by remember { mutableStateOf(initialProduct?.unit ?: "Uds") }; var hasExpiry by remember { mutableStateOf(initialProduct?.expirationDateInMillis != null) }; var expiryDateMillis by remember { mutableStateOf<Long?>(initialProduct?.expirationDateInMillis) }
+fun AddProductDialog(
+    isEditMode: Boolean,
+    draftState: ProductDraftState,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    val context = LocalContext.current
     var showDatePicker by remember { mutableStateOf(false) }
 
-    if (showDatePicker) {
-        CustomDatePickerDialog(initialDateMillis = expiryDateMillis ?: System.currentTimeMillis(), onDismiss = { showDatePicker = false }, onDateSelected = { selected -> expiryDateMillis = selected; showDatePicker = false })
+    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: Exception) { e.printStackTrace() }
+            draftState.imageUri = uri.toString()
+        }
     }
 
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (initialProduct != null) "Editar Producto ✏️" else "Nuevo Producto 🏷️", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(modifier = Modifier.verticalScroll(rememberScrollState())) { OutlinedTextField(value = name, onValueChange = { input -> name = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nombre del Producto") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences)); Spacer(modifier = Modifier.height(12.dp)); OutlinedTextField(value = purchasePriceRaw, onValueChange = { purchasePriceRaw = cleanAmountInput(it) }, label = { Text("Precio de Compra") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) }); Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = priceRaw, onValueChange = { priceRaw = cleanAmountInput(it) }, label = { Text("Precio de Venta") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) }); Spacer(modifier = Modifier.height(12.dp)); Text("Unidad de Medida", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) { FilterChip(selected = selectedUnit == "Uds", onClick = { selectedUnit = "Uds" }, label = { Text("Unidad") }); FilterChip(selected = selectedUnit == "Kg", onClick = { selectedUnit = "Kg" }, label = { Text("Kilos") }); FilterChip(selected = selectedUnit == "L", onClick = { selectedUnit = "L" }, label = { Text("Litros") }) }; Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = stockRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; stockRaw = d }, label = { Text("Cantidad Inicial en Stock") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth()); Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = minStockRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; minStockRaw = d }, label = { Text("Alerta de cantidad baja") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth()); Spacer(modifier = Modifier.height(8.dp)); Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { hasExpiry = !hasExpiry }) { Checkbox(checked = hasExpiry, onCheckedChange = { hasExpiry = it }); Text("Tiene fecha de vencimiento", fontSize = 14.sp) }; if (hasExpiry) { Spacer(modifier = Modifier.height(4.dp)); OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth()) { Text(if (expiryDateMillis == null) "Seleccionar Fecha 📅" else "Vence: ${formatDateOnly(expiryDateMillis!!)}") } } } }, confirmButton = { Button(onClick = { val parsedPrice = priceRaw.toDoubleOrNull() ?: 0.0; val parsedPurchase = purchasePriceRaw.toDoubleOrNull() ?: 0.0; val s = stockRaw.toIntOrNull(); val minS = minStockRaw.toIntOrNull() ?: 0; if (name.isNotBlank() && parsedPrice > 0 && s != null) { val capName = name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }; onConfirm(capName, parsedPurchase, parsedPrice, s, selectedUnit, if (hasExpiry) expiryDateMillis else null, minS) } else { Toast.makeText(context, "Llena los campos correctamente", Toast.LENGTH_SHORT).show() } }) { Text("Guardar ✔️") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar ❌") } })
+    if (showDatePicker) {
+        CustomDatePickerDialog(
+            initialDateMillis = draftState.expiryDateMillis ?: System.currentTimeMillis(),
+            onDismiss = { showDatePicker = false },
+            onDateSelected = { selected -> draftState.expiryDateMillis = selected; showDatePicker = false }
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (isEditMode) "Editar Producto ✏️" else "Nuevo Producto 🏷️", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(150.dp)
+                        .background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                        .clickable { imagePickerLauncher.launch(arrayOf("image/*")) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (draftState.imageUri != null) {
+                        val bitmap = remember(draftState.imageUri) {
+                            try {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(draftState.imageUri!!)))
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(draftState.imageUri!!))
+                                }
+                            } catch (e: Exception) { null }
+                        }
+                        if (bitmap != null) {
+                            Image(
+                                bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "Imagen del producto",
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Text("Error al cargar imagen", color = Color.Red)
+                        }
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Filled.Image, contentDescription = "Añadir foto", modifier = Modifier.size(48.dp), tint = Color.Gray)
+                            Text("Añadir foto del producto", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(value = draftState.name, onValueChange = { input -> draftState.name = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nombre del Producto") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedTextField(value = draftState.purchasePriceRaw, onValueChange = { draftState.purchasePriceRaw = cleanAmountInput(it) }, label = { Text("Precio de Compra") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) })
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(value = draftState.priceRaw, onValueChange = { draftState.priceRaw = cleanAmountInput(it) }, label = { Text("Precio de Venta") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) })
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Unidad de Medida", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                    FilterChip(selected = draftState.selectedUnit == "Uds", onClick = { draftState.selectedUnit = "Uds" }, label = { Text("Unidad") })
+                    FilterChip(selected = draftState.selectedUnit == "Kg", onClick = { draftState.selectedUnit = "Kg" }, label = { Text("Kilos") })
+                    FilterChip(selected = draftState.selectedUnit == "L", onClick = { draftState.selectedUnit = "L" }, label = { Text("Litros") })
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(value = draftState.stockRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; draftState.stockRaw = d }, label = { Text("Cantidad Inicial en Stock") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(value = draftState.minStockRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; draftState.minStockRaw = d }, label = { Text("Alerta de cantidad baja") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { draftState.hasExpiry = !draftState.hasExpiry }) {
+                    Checkbox(checked = draftState.hasExpiry, onCheckedChange = { draftState.hasExpiry = it })
+                    Text("Tiene fecha de vencimiento", fontSize = 14.sp)
+                }
+                if (draftState.hasExpiry) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (draftState.expiryDateMillis == null) "Seleccionar Fecha 📅" else "Vence: ${formatDateOnly(draftState.expiryDateMillis!!)}")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm) { Text("Guardar ✔️") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar ❌") } }
+    )
 }
 
 @Composable
@@ -2118,6 +2405,8 @@ fun ReminderDialog(initialReminder: Reminder? = null, preselectedDate: Long? = n
 @Composable
 fun FiadorDialog(
     initialFiador: Fiador? = null,
+    initialName: String = "",
+    initialCart: List<Pair<Product, Int>> = emptyList(),
     products: List<Product>,
     preselectedDate: Long? = null,
     onDismiss: () -> Unit,
@@ -2126,12 +2415,14 @@ fun FiadorDialog(
     onConfirmAbono: (Fiador, Double, String) -> Unit
 ) {
     val context = LocalContext.current
-    var name by remember { mutableStateOf(initialFiador?.name ?: "") }
+    var name by remember { mutableStateOf(initialFiador?.name ?: initialName) }
     var phone by remember { mutableStateOf(initialFiador?.phone ?: "") }
     var tempDateMillis by remember { mutableStateOf<Long?>(initialFiador?.targetDateInMillis ?: preselectedDate) }
     var activeScreen by remember { mutableStateOf(if (initialFiador == null && preselectedDate == null) "NEW_INFO" else if (initialFiador == null && preselectedDate != null) "NEW_TIME" else "EDIT_OPTIONS") }
     var isEditDateOnly by remember { mutableStateOf(false) }
-    val cartItems = remember { mutableStateListOf<Pair<Product, Int>>() }
+
+    val cartItems = remember { mutableStateListOf<Pair<Product, Int>>().apply { if (initialFiador == null) addAll(initialCart) } }
+
     var expandedProduct by remember { mutableStateOf(false) }
     var selectedProduct by remember { mutableStateOf<Product?>(null) }
     var qtyRaw by remember { mutableStateOf("1") }
@@ -2375,6 +2666,156 @@ fun FiadorDialog(
     }
 }
 
+// === COMPONENTES DE CHAT Y PLANES ===
+@Composable
+fun AdminChatListDialog(onDismiss: () -> Unit, onSelectClient: (String) -> Unit) {
+    var chats by remember { mutableStateOf<Map<String, List<ChatMessage>>>(emptyMap()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        try { chats = RetrofitInstance.api.getAllChats() } catch (_: Exception) {}
+        isLoading = false
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss, title = { Text("Mensajes de Clientes 💬", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface,
+        text = {
+            if (isLoading) { CircularProgressIndicator() }
+            else if (chats.isEmpty()) { Text("No hay mensajes de clientes por ahora.", color = Color.Gray) }
+            else {
+                LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                    items(chats.keys.toList()) { clientEmail ->
+                        val lastMsg = chats[clientEmail]?.lastOrNull()
+                        Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { onSelectClient(clientEmail) }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(clientEmail, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                if (lastMsg != null) {
+                                    Text("${if(lastMsg.sender=="zonacami77777@gmail.com") "Tú:" else "Cliente:"} ${lastMsg.text}", maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color.Gray, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } }, properties = DialogProperties(usePlatformDefaultWidth = false)
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatDialog(currentUserEmail: String, targetClientEmail: String, isAdmin: Boolean, onDismiss: () -> Unit) {
+    var messages by remember { mutableStateOf<List<ChatMessage>>(emptyList()) }
+    var inputText by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val focusManager = LocalFocusManager.current
+    var showClearConfirm by remember { mutableStateOf(false) }
+
+    LaunchedEffect(targetClientEmail) {
+        while (true) {
+            try {
+                val newMsgs = RetrofitInstance.api.getChat(targetClientEmail)
+                if (newMsgs != messages) {
+                    messages = newMsgs
+                    if (messages.isNotEmpty()) { listState.animateScrollToItem(messages.size - 1) }
+                }
+            } catch (_: Exception) {}
+            delay(3000L)
+        }
+    }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false }, title = { Text("Borrar Chat 🗑️", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface,
+            text = { Text("¿Estás seguro de que deseas borrar este historial de chat? Esta acción es irreversible para ambas partes.") },
+            confirmButton = { Button(onClick = { coroutineScope.launch(Dispatchers.IO) { try { RetrofitInstance.api.clearChat(targetClientEmail); launch(Dispatchers.Main) { messages = emptyList(); showClearConfirm = false } } catch(_: Exception){} } }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("Borrar") } },
+            dismissButton = { TextButton(onClick = { showClearConfirm = false }) { Text("Cancelar") } }
+        )
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Surface(modifier = Modifier.fillMaxSize().systemBarsPadding().imePadding(), color = MaterialTheme.colorScheme.background) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primary).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onDismiss) { Icon(Icons.Filled.ArrowBack, null, tint = Color.White) }
+                    Text(if (isAdmin) "Chat: ${targetClientEmail.substringBefore("@")}" else "Soporte Técnico 💬", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { showClearConfirm = true }) { Icon(Icons.Filled.Delete, "Borrar Chat", tint = Color.White) }
+                }
+
+                LazyColumn(modifier = Modifier.weight(1f).padding(horizontal = 16.dp), state = listState) {
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
+                    if (messages.isEmpty()) { item { Text("No hay mensajes todavía. ¡Escribe algo para empezar!", color = Color.Gray, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) } }
+                    items(messages) { msg ->
+                        val isMe = msg.sender == currentUserEmail
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start) {
+                            Box(modifier = Modifier.background(if (isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = if (isMe) 16.dp else 4.dp, bottomEnd = if (isMe) 4.dp else 16.dp)).padding(12.dp).widthIn(max = 250.dp)) {
+                                Column {
+                                    Text(msg.text, color = if (isMe) Color.White else MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
+                                    Text(SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(msg.timestamp)), fontSize = 10.sp, color = (if (isMe) Color.White else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.6f), modifier = Modifier.align(Alignment.End).padding(top = 4.dp))
+                                }
+                            }
+                        }
+                    }
+                    item { Spacer(modifier = Modifier.height(8.dp)) }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
+                        placeholder = { Text("Escribe un mensaje...") }, shape = RoundedCornerShape(24.dp), maxLines = 4
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    FloatingActionButton(onClick = {
+                        if (inputText.isNotBlank()) {
+                            focusManager.clearFocus()
+                            val textToSend = inputText; inputText = ""
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    val receiver = if (isAdmin) targetClientEmail else "zonacami77777@gmail.com"
+                                    RetrofitInstance.api.sendMessage(ChatSendRequest(currentUserEmail, receiver, textToSend))
+                                    val updated = RetrofitInstance.api.getChat(targetClientEmail)
+                                    launch(Dispatchers.Main) { messages = updated; if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) }
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    }, containerColor = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Send, null, tint = Color.White) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PlanCardInfo(title: String, subtitle: String, features: List<String>, restrictions: List<String>) {
+    Card(modifier = Modifier.width(280.dp).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.6f))) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+            Text(subtitle, fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 12.dp))
+            features.forEach { feature ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                    Icon(Icons.Filled.Check, contentDescription = "Permitido", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(feature, fontSize = 13.sp)
+                }
+            }
+            if (restrictions.isNotEmpty()) { Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha=0.2f)) }
+            restrictions.forEach { restriction ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp).alpha(0.5f)) {
+                    Icon(Icons.Filled.Close, contentDescription = "No Permitido", tint = Color.Red, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(restriction, fontSize = 13.sp, textDecoration = TextDecoration.LineThrough)
+                }
+            }
+        }
+    }
+}
+
 // ==========================================
 // 9. FUNCIONES DE FORMATO Y UTILIDADES
 // ==========================================
@@ -2389,10 +2830,9 @@ fun getSmartEmoji(description: String, isIncome: Boolean): String { val descLowe
 // ==========================================
 // 10. MOTOR DE NOTIFICACIONES (RECEIVER)
 // ==========================================
-@SuppressLint("ObsoleteSdkInt") // Suprime alertas falsas del SDK si el Gradle pierde el estado.
+@SuppressLint("ObsoleteSdkInt")
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
-        // En Kotlin, los BroadcastReceivers DEBEN soportar Intent y Context nulos para evitar NullPointerExceptions del sistema
         if (context == null || intent == null) return
 
         if (intent.action == "com.xxcamixx.contabilidad.CHAT_SYNC") {
@@ -2452,7 +2892,6 @@ class ReminderReceiver : BroadcastReceiver() {
         val notifText = intent.getStringExtra("NOTIFICATION_TEXT") ?: "Tienes una alerta pendiente"
         val id = intent.getIntExtra("ID", 0)
 
-        // Uso seguro de variables del sistema (evitando punteros nulos)
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MiBilletera::AlarmaWakeLock")
         wakeLock?.acquire(5000)
@@ -2487,7 +2926,6 @@ class ReminderReceiver : BroadcastReceiver() {
         } catch (e: Exception) {
             e.printStackTrace()
         } finally {
-            // Protección contra la excepción de "WakeLock under-locked"
             try {
                 if (wakeLock?.isHeld == true) {
                     wakeLock.release()
