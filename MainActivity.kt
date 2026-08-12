@@ -184,11 +184,33 @@ class CloudSyncWorker(appContext: Context, workerParams: WorkerParameters) : Cor
 // 1. MOTOR DE SONIDOS Y NOTIFICACIONES
 // ==========================================
 object AppSounds {
-    private var toneGen: ToneGenerator? = null
-    fun init() { if(toneGen == null) toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100) }
-    fun play(soundType: Int) {
-        if (soundType == 0) return
-        try { when(soundType) { 1 -> toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 150); 2 -> toneGen?.startTone(ToneGenerator.TONE_PROP_BEEP2, 150); 3 -> toneGen?.startTone(ToneGenerator.TONE_SUP_RADIO_ACK, 150); 4 -> toneGen?.startTone(ToneGenerator.TONE_CDMA_ABBR_ALERT, 150); 5 -> toneGen?.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 150); 6 -> toneGen?.startTone(ToneGenerator.TONE_PROP_PROMPT, 150); 7 -> toneGen?.startTone(ToneGenerator.TONE_PROP_ACK, 150); 8 -> toneGen?.startTone(ToneGenerator.TONE_PROP_NACK, 150); 9 -> toneGen?.startTone(ToneGenerator.TONE_SUP_RINGTONE, 150); 10 -> toneGen?.startTone(ToneGenerator.TONE_SUP_BUSY, 150) } } catch(_: Exception){}
+    private var mediaPlayer: android.media.MediaPlayer? = null
+    private var defaultToneGen: ToneGenerator? = null
+
+    fun init() { if (defaultToneGen == null) defaultToneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100) }
+
+    fun play(context: Context, soundUri: String?) {
+        try {
+            if (soundUri.isNullOrEmpty()) {
+                defaultToneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+                return
+            }
+            mediaPlayer?.release()
+            mediaPlayer = android.media.MediaPlayer().apply {
+                setDataSource(context, Uri.parse(soundUri))
+                setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                prepare()
+                start()
+                setOnCompletionListener { it.release() }
+            }
+        } catch (e: Exception) {
+            defaultToneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+        }
     }
 }
 
@@ -203,7 +225,7 @@ fun showChatNotification(context: Context, title: String, text: String) {
     val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val notification = NotificationCompat.Builder(context, channelId).setSmallIcon(android.R.drawable.ic_dialog_email).setContentTitle(title).setContentText(text).setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true).setContentIntent(pendingIntent).build()
     notificationManager.notify(System.currentTimeMillis().toInt(), notification)
-    AppSounds.play(6)
+    AppSounds.play(context, "")
 }
 
 @SuppressLint("ScheduleExactAlarm")
@@ -308,7 +330,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     val products: Flow<List<Product>> = dao.getAllProducts()
 
     var minBalanceThreshold by mutableStateOf(userPrefs.getFloat("minBalance", 0f).toDouble()); private set
-    var selectedSound by mutableStateOf(userPrefs.getInt("selectedSound", 1)); private set
+    var customSoundUri by mutableStateOf(userPrefs.getString("customSoundUri", "")); private set
     var isSyncing by mutableStateOf(false); private set
     var lastSyncDate by mutableStateOf(userPrefs.getLong("lastSync", 0L)); private set
     var autoSyncFrequency by mutableStateOf(userPrefs.getInt("syncFrequency", 0)); private set
@@ -321,7 +343,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     init { scheduleAutoSync(application, autoSyncFrequency, autoSyncHour, autoSyncMinute) }
 
     fun updateMinBalance(amount: Double) { minBalanceThreshold = amount; userPrefs.edit().putFloat("minBalance", amount.toFloat()).apply() }
-    fun updateSoundPreference(soundIndex: Int) { selectedSound = soundIndex; userPrefs.edit().putInt("selectedSound", soundIndex).apply(); AppSounds.play(soundIndex) }
+    fun updateSoundPreference(uri: String, context: Context) { customSoundUri = uri; userPrefs.edit().putString("customSoundUri", uri).apply(); AppSounds.play(context, uri) }
 
     fun addPocketDebt(amount: Double) {
         val newDebt = pocketDebt + amount
@@ -335,22 +357,12 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             if (newDebt >= 0) {
                 pocketDebt = newDebt
                 userPrefs.edit().putFloat("pocketDebt", newDebt.toFloat()).apply()
-
-                // Transacción para retirar el efectivo de la caja sin afectar las ganancias
                 dao.insertTransaction(
-                    Transaction(
-                        description = "Venta: Reembolso a Bolsillo",
-                        amount = 0.0,
-                        isIncome = true,
-                        note = "Vuelto devuelto de la caja al bolsillo personal",
-                        profit = 0.0,
-                        cashAmount = -amount,
-                        digitalAmount = 0.0
-                    )
+                    Transaction(description = "Venta: Reembolso a Bolsillo", amount = 0.0, isIncome = true, note = "Vuelto devuelto de la caja al bolsillo personal", profit = 0.0, cashAmount = -amount, digitalAmount = 0.0)
                 )
             }
         }
-        AppSounds.play(selectedSound)
+        AppSounds.play(getApplication<Application>(), customSoundUri)
     }
 
     fun updateAutoSyncSchedule(application: Application, frequencyDays: Int, hour: Int, minute: Int) {
@@ -434,33 +446,68 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
-    fun addTransaction(description: String, amount: Double, isIncome: Boolean, note: String) { viewModelScope.launch { dao.insertTransaction(Transaction(description = description, amount = amount, isIncome = isIncome, note = note)) }; AppSounds.play(selectedSound) }
+    fun addTransaction(description: String, amount: Double, isIncome: Boolean, note: String) { viewModelScope.launch { dao.insertTransaction(Transaction(description = description, amount = amount, isIncome = isIncome, note = note)) }; AppSounds.play(getApplication<Application>(), customSoundUri) }
     fun insertRawTransaction(transaction: Transaction) { viewModelScope.launch { dao.insertTransaction(transaction.copy(id = 0)) } }
-    fun deleteTransaction(transaction: Transaction) { viewModelScope.launch { dao.deleteTransaction(transaction) }; AppSounds.play(selectedSound) }
-    fun deleteTransactionsList(list: List<Transaction>) { viewModelScope.launch { list.forEach { dao.deleteTransaction(it) } }; AppSounds.play(selectedSound) }
+    fun deleteTransaction(transaction: Transaction) { viewModelScope.launch { dao.deleteTransaction(transaction) }; AppSounds.play(getApplication<Application>(), customSoundUri) }
+    fun deleteTransactionsList(list: List<Transaction>) { viewModelScope.launch { list.forEach { dao.deleteTransaction(it) } }; AppSounds.play(getApplication<Application>(), customSoundUri) }
     fun deletePersonalTransactions() { viewModelScope.launch { dao.deletePersonalTransactions() } }
-    fun resetAllProfits() { viewModelScope.launch { dao.resetAllProfits() }; AppSounds.play(selectedSound) }
+    fun resetAllProfits() { viewModelScope.launch { dao.resetAllProfits() }; AppSounds.play(getApplication<Application>(), customSoundUri) }
 
-    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(selectedSound) }
-    fun editProduct(product: Product, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateProduct(product); cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER"); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto actualizado") }; AppSounds.play(selectedSound) }
-    fun deleteProductEntirely(product: Product, context: Context) { viewModelScope.launch { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") }; AppSounds.play(selectedSound) }
+    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(context, customSoundUri) }
+    fun editProduct(product: Product, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateProduct(product); cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER"); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto actualizado") }; AppSounds.play(context, customSoundUri) }
+    fun deleteProductEntirely(product: Product, context: Context) { viewModelScope.launch { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") }; AppSounds.play(context, customSoundUri) }
 
     fun processCartSale(cartItems: List<Pair<Product, Int>>, buyerName: String, paymentSummary: String, netCash: Double, netDigital: Double, context: Context, onSold: (String) -> Unit) {
         viewModelScope.launch {
             var totalSaleCOP = 0.0; var totalProfitCOP = 0.0; val itemNames = mutableListOf<String>()
             cartItems.forEach { (product, qty) -> val newStock = product.stock - qty; dao.updateProduct(product.copy(stock = newStock)); totalSaleCOP += (product.price * qty); totalProfitCOP += ((product.price - product.purchasePrice) * qty); itemNames.add("${qty}${product.unit} ${product.name}"); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") }
             val finalNote = buildString { if (buyerName.isNotBlank()) append("Cliente: $buyerName\n"); append("$paymentSummary\n"); append("Items: ${itemNames.joinToString(", ")}") }; val desc = if (cartItems.size == 1) "Venta: ${cartItems.first().first.name}" else "Venta: Varios Productos"
-            dao.insertTransaction(Transaction(description = desc, amount = totalSaleCOP, isIncome = true, note = finalNote, profit = totalProfitCOP, cashAmount = netCash, digitalAmount = netDigital)); onSold("Venta registrada exitosamente"); AppSounds.play(selectedSound)
+            dao.insertTransaction(Transaction(description = desc, amount = totalSaleCOP, isIncome = true, note = finalNote, profit = totalProfitCOP, cashAmount = netCash, digitalAmount = netDigital)); onSold("Venta registrada exitosamente"); AppSounds.play(context, customSoundUri)
         }
     }
 
-    fun reduceProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val newStock = product.stock - qty; if (newStock <= 0) { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") } else { dao.updateProduct(product.copy(stock = newStock)); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") } }; AppSounds.play(selectedSound) }
+    fun reduceProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val newStock = product.stock - qty; if (newStock <= 0) { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") } else { dao.updateProduct(product.copy(stock = newStock)); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") } }; AppSounds.play(context, customSoundUri) }
     fun restoreProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val currentInDb = dao.getAllProducts().firstOrNull()?.find { it.id == product.id }; if (currentInDb != null) dao.updateProduct(currentInDb.copy(stock = currentInDb.stock + qty)) else { dao.insertProduct(product); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER") } } }
-    fun addReminder(title: String, dateInMillis: Long, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val reminderId = dao.insertReminder(Reminder(title = title, targetDateInMillis = dateInMillis)).toInt(); val success = scheduleNotification(context, dateInMillis, "¡Hora de Pagar! ⏰", title, reminderId, "ALARM_TRIGGER"); if (success) onConfigured("Alarma programada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}") }; AppSounds.play(selectedSound) }
-    fun updateExistingReminder(reminder: Reminder, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateReminder(reminder); val success = scheduleNotification(context, reminder.targetDateInMillis, "¡Hora de Pagar! ⏰", reminder.title, reminder.id, "ALARM_TRIGGER"); if (success) onConfigured("Alarma actualizada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(reminder.targetDateInMillis))}") }; AppSounds.play(selectedSound) }
+    fun addReminder(title: String, dateInMillis: Long, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val reminderId = dao.insertReminder(Reminder(title = title, targetDateInMillis = dateInMillis)).toInt(); val success = scheduleNotification(context, dateInMillis, "¡Hora de Pagar! ⏰", title, reminderId, "ALARM_TRIGGER"); if (success) onConfigured("Alarma programada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}") }; AppSounds.play(context, customSoundUri) }
+    fun updateExistingReminder(reminder: Reminder, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateReminder(reminder); val success = scheduleNotification(context, reminder.targetDateInMillis, "¡Hora de Pagar! ⏰", reminder.title, reminder.id, "ALARM_TRIGGER"); if (success) onConfigured("Alarma actualizada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(reminder.targetDateInMillis))}") }; AppSounds.play(context, customSoundUri) }
     fun deleteReminder(reminder: Reminder, context: Context) { viewModelScope.launch { dao.deleteReminder(reminder); cancelAlarm(context, reminder.id, "ALARM_TRIGGER") } }
-    fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, dateInMillis: Long, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val totalAmount = cartItems.sumOf { it.first.price * it.second }; val reason = cartItems.joinToString(", ") { "${it.second}${it.first.unit} ${it.first.name}" }; val fiadorId = dao.insertFiador(Fiador(name = name, phone = phone, amount = totalAmount, reason = reason, targetDateInMillis = dateInMillis)).toInt(); cartItems.forEach { (product, qty) -> val newStock = product.stock - qty; if(newStock >= 0) { dao.updateProduct(product.copy(stock = newStock)); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") } }; val success = scheduleNotification(context, dateInMillis, "¡Cobrar a $name! 💰", "Monto: ${formatCOP(totalAmount)} - $reason", fiadorId + 100000, "FIADOR_TRIGGER"); if (success) onConfigured("Recordatorio de fiador para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}") }; AppSounds.play(selectedSound) }
-    fun updateExistingFiador(fiador: Fiador, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateFiador(fiador); val success = scheduleNotification(context, fiador.targetDateInMillis, "¡Cobrar a ${fiador.name}! 💰", "Monto: ${formatCOP(fiador.amount - fiador.paidAmount)} - ${fiador.reason}", fiador.id + 100000, "FIADOR_TRIGGER"); if (success) onConfigured("Recordatorio actualizado para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(fiador.targetDateInMillis))}") }; AppSounds.play(selectedSound) }
+
+    fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, dateInMillis: Long, initialPaidAmount: Double = 0.0, paymentMethod: String = "Efectivo", context: Context, onConfigured: (String) -> Unit) {
+        viewModelScope.launch {
+            val totalAmount = cartItems.sumOf { it.first.price * it.second }
+            val reason = cartItems.joinToString(", ") { "${it.second}${it.first.unit} ${it.first.name}" }
+
+            val history = if (initialPaidAmount > 0) {
+                val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
+                "$dateStr: +${formatCOP(initialPaidAmount)} ($paymentMethod)"
+            } else ""
+
+            val fiadorId = dao.insertFiador(Fiador(name = name, phone = phone, amount = totalAmount, reason = reason, targetDateInMillis = dateInMillis, paidAmount = initialPaidAmount, paymentHistory = history)).toInt()
+
+            if (initialPaidAmount > 0) {
+                val cash = if(paymentMethod == "Efectivo") initialPaidAmount else 0.0
+                val digital = if(paymentMethod == "Digital") initialPaidAmount else 0.0
+                dao.insertTransaction(Transaction(description = "Venta: Abono inicial ($name)", amount = initialPaidAmount, isIncome = true, note = "Abono inicial de venta fiada", cashAmount = cash, digitalAmount = digital))
+            }
+
+            cartItems.forEach { (product, qty) ->
+                val newStock = product.stock - qty
+                if(newStock >= 0) {
+                    dao.updateProduct(product.copy(stock = newStock))
+                    if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) {
+                        scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER")
+                    }
+                }
+            }
+
+            val remaining = totalAmount - initialPaidAmount
+            val success = scheduleNotification(context, dateInMillis, "¡Cobrar a $name! 💰", "Monto: ${formatCOP(remaining)} - $reason", fiadorId + 100000, "FIADOR_TRIGGER")
+            if (success) onConfigured("Recordatorio de fiador para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}")
+        }
+        AppSounds.play(context, customSoundUri)
+    }
+
+    fun updateExistingFiador(fiador: Fiador, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateFiador(fiador); val success = scheduleNotification(context, fiador.targetDateInMillis, "¡Cobrar a ${fiador.name}! 💰", "Monto: ${formatCOP(fiador.amount - fiador.paidAmount)} - ${fiador.reason}", fiador.id + 100000, "FIADOR_TRIGGER"); if (success) onConfigured("Recordatorio actualizado para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(fiador.targetDateInMillis))}") }; AppSounds.play(context, customSoundUri) }
     fun deleteFiador(fiador: Fiador, context: Context) { viewModelScope.launch { dao.deleteFiador(fiador); cancelAlarm(context, fiador.id + 100000, "FIADOR_TRIGGER") } }
 
     fun registerAbonoFiador(fiador: Fiador, abono: Double, method: String, context: Context, onResult: (String) -> Unit) {
@@ -473,7 +520,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
             val cash = if(method == "Efectivo") abono else 0.0
             val digital = if(method == "Digital") abono else 0.0
-            dao.insertTransaction(Transaction(description = "Abono: ${fiador.name}", amount = abono, isIncome = true, note = "Abono de deuda parcial", cashAmount = cash, digitalAmount = digital))
+            dao.insertTransaction(Transaction(description = "Venta: Abono de ${fiador.name}", amount = abono, isIncome = true, note = "Abono de deuda parcial", cashAmount = cash, digitalAmount = digital))
 
             if (newPaidAmount >= fiador.amount) {
                 dao.deleteFiador(fiador)
@@ -483,7 +530,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 dao.updateFiador(fiador.copy(paidAmount = newPaidAmount, paymentHistory = newHistory))
                 launch(Dispatchers.Main) { onResult("Abono de ${formatCOP(abono)} registrado. Resta: ${formatCOP(remaining)}") }
             }
-            AppSounds.play(selectedSound)
+            AppSounds.play(context, customSoundUri)
         }
     }
 
@@ -826,6 +873,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showSummaryDialog by remember { mutableStateOf(false) }
     var showDeleteHistoryConfirmDialog by remember { mutableStateOf(false) }
     var showResetProfitsDialog by remember { mutableStateOf(false) }
+    var showAddBaseDialog by remember { mutableStateOf(false) }
     var showSoundDialog by remember { mutableStateOf(false) }
     var showRemindersListDialog by remember { mutableStateOf(false) }
     var showReminderDialog by remember { mutableStateOf(false) }
@@ -836,6 +884,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     var checkoutToFiadorName by remember { mutableStateOf("") }
     var checkoutToFiadorCart by remember { mutableStateOf<List<Pair<Product, Int>>>(emptyList()) }
+    var checkoutToFiadorPaidAmount by remember { mutableStateOf(0.0) }
+    var checkoutToFiadorMethod by remember { mutableStateOf("Efectivo") }
 
     var customToastMessage by remember { mutableStateOf<String?>(null) }
     var backPressedOnce by remember { mutableStateOf(false) }
@@ -903,10 +953,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             else { DropdownMenuItem(text = { Text("👑 Sincronización Nube", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }, onClick = { showPremiumToastMsg(context); showMenu = false }) }
                             Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
 
-                            if (isResumenAllowed) { DropdownMenuItem(text = { Text("📊 Resumen de Totales") }, onClick = { showSummaryDialog = true; showMenu = false }) } else { DropdownMenuItem(text = { Text("👑 📊 Resumen de Totales", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }, onClick = { showPremiumToastMsg(context); showMenu = false }) }
+                            if (currentTab == 0) {
+                                if (isResumenAllowed) { DropdownMenuItem(text = { Text("📊 Resumen de Totales") }, onClick = { showSummaryDialog = true; showMenu = false }) } else { DropdownMenuItem(text = { Text("👑 📊 Resumen de Totales", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }, onClick = { showPremiumToastMsg(context); showMenu = false }) }
+                            }
+
                             DropdownMenuItem(text = { Text("🔔 Saldo Crítico") }, onClick = { showLimitDialog = true; showMenu = false })
 
-                            DropdownMenuItem(text = { Text("🎵 Sonidos") }, onClick = { showSoundDialog = true; showMenu = false })
+                            DropdownMenuItem(text = { Text("🎵 Sonidos de Notificación") }, onClick = { showSoundDialog = true; showMenu = false })
 
                             if (currentTab == 0 && isBorrarHistorialAllowed) { DropdownMenuItem(text = { Text("⚠️ Borrar Historial", color = Color(0xFFE53935)) }, onClick = { showDeleteHistoryConfirmDialog = true; showMenu = false }) }
 
@@ -954,14 +1007,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             DashboardCard(balance, totalIncome, totalExpense)
                             AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) { Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) { Text("⚠️ ¡Alerta! Tu saldo está por debajo del límite crítico (${formatCOP(viewModel.minBalanceThreshold)}).", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) } }
                             activeReminders.forEach { reminder -> AnimatedVisibility(visible = true) { Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFF1976D2), RoundedCornerShape(8.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("📅 Es hora de pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f)); IconButton(onClick = { viewModel.deleteReminder(reminder, context) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White) } } } }
-                            activeFiadores.forEach { fiador ->
-                                val remaining = fiador.amount - fiador.paidAmount
-                                AnimatedVisibility(visible = true) { Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFFBC02D), RoundedCornerShape(8.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Column(modifier = Modifier.weight(1f)) { val phoneStr = if(fiador.phone.isNotBlank()) " 📞 ${fiador.phone}" else ""; Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("Resta: ${formatCOP(remaining)} de ${formatCOP(fiador.amount)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp) }; IconButton(onClick = { viewModel.deleteFiador(fiador, context) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Check, contentDescription = "Saldado", tint = Color.Black) } } } }
                             Spacer(modifier = Modifier.height(16.dp)); Text("Movimientos Recientes 📋", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(horizontal = 16.dp)); Spacer(modifier = Modifier.height(8.dp))
                             LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) { items(personalTransactions, key = { it.id }) { transaction -> Box(modifier = Modifier.animateItem(placementSpec = tween(400))) { TransactionItem(transaction = transaction, onDelete = { viewModel.deleteTransaction(transaction); coroutineScope.launch { val result = snackbarHostState.showSnackbar(message = "Registro eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short); if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(transaction) } }) } } }
                         }
                     } else {
-                        StoreScreen(products = products, transactions = transactions, shoppingCart = shoppingCart, isLockedStore = isLockedStore, totalStoreCash = totalStoreCash, totalStoreDigital = totalStoreDigital, onOpenInventory = { showInventoryScreen = true }, onOpenCheckout = { showCheckoutDialog = true }, onResetProfitsClick = { showResetProfitsDialog = true }, onDeleteVentas = { list -> viewModel.deleteTransactionsList(list) }, showPremiumToast = { showPremiumToastMsg(context) }, totalProfit = totalProfit)
+                        StoreScreen(products = products, transactions = transactions, shoppingCart = shoppingCart, isLockedStore = isLockedStore, totalStoreCash = totalStoreCash, totalStoreDigital = totalStoreDigital, onOpenInventory = { showInventoryScreen = true }, onOpenCheckout = { showCheckoutDialog = true }, onResetProfitsClick = { showResetProfitsDialog = true }, onDeleteVentas = { list -> viewModel.deleteTransactionsList(list) }, showPremiumToast = { showPremiumToastMsg(context) }, totalProfit = totalProfit, activeFiadores = activeFiadores, onSettleFiador = { viewModel.deleteFiador(it, context) })
                     }
                 }
             }
@@ -1261,13 +1311,14 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         showPremiumToastMsg(context)
                     }
                 },
-                onViewReminders = { showRemindersListDialog = true },
-                onViewFiadores = { showFiadoresListDialog = true }
+                onViewReminders = { showRemindersListDialog = true; showCalendarDialog = false },
+                onViewFiadores = { showFiadoresListDialog = true; showCalendarDialog = false }
             )
         }
 
         if (showSummaryDialog) SummaryDialog(totalIncome = totalIncome, totalExpense = totalExpense, balance = balance, transactionCount = personalTransactions.size, onDismiss = { showSummaryDialog = false })
-        if (showSoundDialog) SoundSettingsDialog(currentSound = viewModel.selectedSound, onDismiss = { showSoundDialog = false }, onSelect = { viewModel.updateSoundPreference(it); showSoundDialog = false })
+
+        if (showSoundDialog) SoundSettingsDialog(currentSoundUri = viewModel.customSoundUri, onDismiss = { showSoundDialog = false }, onSelect = { viewModel.updateSoundPreference(it, context); showSoundDialog = false })
 
         if (showDeleteHistoryConfirmDialog) {
             AlertDialog(
@@ -1316,11 +1367,70 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 Text("⚠️ Aún no hay suficiente efectivo en caja para recuperar el vuelto.", color = Color.Red, fontSize = 12.sp)
                             }
                         }
+
+                        Divider(modifier = Modifier.padding(vertical = 12.dp))
+                        Button(
+                            onClick = { showAddBaseDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("➕ Ingresar Base a Caja (Menudo)")
+                        }
                     }
                 },
                 confirmButton = { Button(onClick = { showResetProfitsDialog = false }) { Text("Cerrar") } },
                 dismissButton = { TextButton(onClick = { viewModel.resetAllProfits(); showResetProfitsDialog = false; customToastMessage = "Caja y Banco reiniciados a $0" }) { Text("Reiniciar a $0", color = Color.Red) } },
                 containerColor = MaterialTheme.colorScheme.surface
+            )
+        }
+
+        if (showAddBaseDialog) {
+            var baseAmount by remember { mutableStateOf("") }
+            val focusRequester = remember { FocusRequester() }
+            LaunchedEffect(Unit) { delay(100); focusRequester.requestFocus() }
+            AlertDialog(
+                onDismissRequest = { showAddBaseDialog = false },
+                title = { Text("Ingresar Base de Caja 💵", fontWeight = FontWeight.Bold) },
+                containerColor = MaterialTheme.colorScheme.surface,
+                text = {
+                    Column {
+                        Text("Ingresa el monto de menudo para dar vueltos.", fontSize = 13.sp, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = baseAmount,
+                            onValueChange = { baseAmount = cleanAmountInput(it) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            visualTransformation = AmountVisualTransformation(),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                            leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) },
+                            placeholder = { Text("0") },
+                            textStyle = LocalTextStyle.current.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        val amount = baseAmount.toDoubleOrNull() ?: 0.0
+                        if (amount > 0) {
+                            viewModel.insertRawTransaction(
+                                Transaction(
+                                    description = "Venta: Base de Caja",
+                                    amount = 0.0,
+                                    isIncome = true,
+                                    note = "Dinero ingresado para dar vueltos",
+                                    profit = 0.0,
+                                    cashAmount = amount,
+                                    digitalAmount = 0.0
+                                )
+                            )
+                            customToastMessage = "Base de caja ingresada: ${formatCOP(amount)}"
+                            showAddBaseDialog = false
+                            showResetProfitsDialog = false
+                        }
+                    }) { Text("Añadir") }
+                },
+                dismissButton = { TextButton(onClick = { showAddBaseDialog = false }) { Text("Cancelar") } }
             )
         }
 
@@ -1401,9 +1511,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     showCheckoutDialog = false
                     showInventoryScreen = false
                 },
-                onFiarVenta = { buyer ->
+                onFiarVenta = { buyer, paidAmount, method ->
                     checkoutToFiadorName = buyer
                     checkoutToFiadorCart = shoppingCart.toList()
+                    checkoutToFiadorPaidAmount = paidAmount
+                    checkoutToFiadorMethod = method
                     showCheckoutDialog = false
                     fiadorToEdit = null
                     preselectedDateForEvent = null // Para que luego abra el selector de fecha
@@ -1417,7 +1529,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
         if (showRemindersListDialog) { ScheduledRemindersDialog(reminders = reminders, onDismiss = { showRemindersListDialog = false }, onDelete = { viewModel.deleteReminder(it, context) }, onEdit = { reminderToEdit = it; showRemindersListDialog = false; showReminderDialog = true }, onCreateNew = { reminderToEdit = null; showRemindersListDialog = false; showReminderDialog = true }) }
 
-        if (showReminderDialog) { ReminderDialog(initialReminder = reminderToEdit, preselectedDate = preselectedDateForEvent, onDismiss = { showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null; showRemindersListDialog = true }, onConfirm = { t, d -> if (reminderToEdit != null) { viewModel.updateExistingReminder(reminderToEdit!!.copy(title = t, targetDateInMillis = d), context) { customToastMessage = it } } else { viewModel.addReminder(t, d, context) { customToastMessage = it } }; showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null; showRemindersListDialog = true }) }
+        if (showReminderDialog) { ReminderDialog(initialReminder = reminderToEdit, preselectedDate = preselectedDateForEvent, onDismiss = { showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }, onConfirm = { t, d -> if (reminderToEdit != null) { viewModel.updateExistingReminder(reminderToEdit!!.copy(title = t, targetDateInMillis = d), context) { customToastMessage = it } } else { viewModel.addReminder(t, d, context) { customToastMessage = it } }; showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }) }
 
         if (showFiadoresListDialog) { ScheduledFiadoresDialog(fiadores = fiadores, onDismiss = { showFiadoresListDialog = false }, onDelete = { viewModel.deleteFiador(it, context) }, onEdit = { fiadorToEdit = it; showFiadoresListDialog = false; showFiadorDialog = true }, onCreateNew = { fiadorToEdit = null; showFiadoresListDialog = false; showFiadorDialog = true }) }
 
@@ -1426,34 +1538,33 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 initialFiador = fiadorToEdit,
                 initialName = checkoutToFiadorName,
                 initialCart = checkoutToFiadorCart,
+                initialPaidAmount = checkoutToFiadorPaidAmount,
+                initialMethod = checkoutToFiadorMethod,
                 products = products,
                 preselectedDate = preselectedDateForEvent,
                 onDismiss = {
-                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null;
-                    if (checkoutToFiadorCart.isEmpty()) showFiadoresListDialog = true
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList() // limpiar variables puente
+                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
                 },
-                onConfirmNew = { n, p, cartItemsFiado, d ->
-                    viewModel.addFiador(n, p, cartItemsFiado, d, context) { customToastMessage = it }
-                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null;
+                onConfirmNew = { n, p, cartItemsFiado, d, initialPaid, method ->
+                    viewModel.addFiador(n, p, cartItemsFiado, d, initialPaid, method, context) { customToastMessage = it }
+                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
 
                     if (checkoutToFiadorCart.isNotEmpty()) {
                         shoppingCart.clear() // Vacía el carrito global porque la venta se fió
                         showInventoryScreen = false
-                    } else {
-                        showFiadoresListDialog = true
                     }
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList() // limpiar variables puente
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
                 },
                 onConfirmEdit = { f, d ->
                     viewModel.updateExistingFiador(f.copy(targetDateInMillis = d), context) { customToastMessage = it }
-                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadoresListDialog = true
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList() // limpiar variables puente
+                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
                 },
                 onConfirmAbono = { f, abono, method ->
                     viewModel.registerAbonoFiador(f, abono, method, context) { customToastMessage = it }
-                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadoresListDialog = true
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList() // limpiar variables puente
+                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
                 }
             )
         }
@@ -1464,12 +1575,17 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 // 7. COMPONENTES DE LA TIENDA E INVENTARIO
 // ==========================================
 @Composable
-fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppingCart: List<Pair<Product, Int>>, isLockedStore: Boolean, totalStoreCash: Double, totalStoreDigital: Double, onOpenInventory: () -> Unit, onOpenCheckout: () -> Unit, onResetProfitsClick: () -> Unit, onDeleteVentas: (List<Transaction>) -> Unit, showPremiumToast: () -> Unit, totalProfit: Double) {
+fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppingCart: List<Pair<Product, Int>>, isLockedStore: Boolean, totalStoreCash: Double, totalStoreDigital: Double, onOpenInventory: () -> Unit, onOpenCheckout: () -> Unit, onResetProfitsClick: () -> Unit, onDeleteVentas: (List<Transaction>) -> Unit, showPremiumToast: () -> Unit, totalProfit: Double, activeFiadores: List<Fiador>, onSettleFiador: (Fiador) -> Unit) {
     val totalInventoryValue = remember(products) { products.sumOf { it.price * it.stock } }
     var showVendidosDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Card(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        activeFiadores.forEach { fiador ->
+            val remaining = fiador.amount - fiador.paidAmount
+            AnimatedVisibility(visible = true) { Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).padding(top = if(fiador == activeFiadores.first()) 16.dp else 0.dp).background(Color(0xFFFBC02D), RoundedCornerShape(8.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Column(modifier = Modifier.weight(1f)) { val phoneStr = if(fiador.phone.isNotBlank()) " \uD83D\uDCDE ${fiador.phone}" else ""; Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("Resta: ${formatCOP(remaining)} de ${formatCOP(fiador.amount)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp) }; IconButton(onClick = { onSettleFiador(fiador) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Check, contentDescription = "Saldado", tint = Color.Black) } } }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth().padding(16.dp).padding(top = if(activeFiadores.isNotEmpty()) 0.dp else 0.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
@@ -1705,12 +1821,21 @@ fun CustomDatePickerDialog(initialDateMillis: Long?, onDismiss: () -> Unit, onDa
 fun AddToCartDialog(product: Product, currentCartQty: Int, onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
     var qtyRaw by remember { mutableStateOf("") }
     val maxAvailable = product.stock - currentCartQty
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        delay(200)
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Añadir al Carrito 🛒", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 Text(product.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 Text("Disponible para añadir: $maxAvailable ${product.unit}", color = Color.Gray)
                 Spacer(modifier = Modifier.height(16.dp))
@@ -1721,8 +1846,8 @@ fun AddToCartDialog(product: Product, currentCartQty: Int, onDismiss: () -> Unit
                     placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(0.8f).padding(vertical = 8.dp),
-                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                    modifier = Modifier.widthIn(min = 80.dp).padding(vertical = 8.dp).focusRequester(focusRequester),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 )
             }
         },
@@ -1745,7 +1870,7 @@ fun CheckoutDialog(
     totalStoreDigital: Double,
     onDismiss: () -> Unit,
     onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double, Double) -> Unit,
-    onFiarVenta: (String) -> Unit
+    onFiarVenta: (String, Double, String) -> Unit
 ) {
     var step by remember { mutableStateOf(1) }
     var buyerName by remember { mutableStateOf("") }
@@ -1800,12 +1925,20 @@ fun CheckoutDialog(
         val p = productToSelectQty!!
         val currentInCart = cartItems.find { it.first.id == p.id }?.second ?: 0
         val maxAvailable = p.stock - currentInCart
+        val focusRequester = remember { FocusRequester() }
+        val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+        LaunchedEffect(Unit) {
+            delay(200)
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
 
         AlertDialog(
             onDismissRequest = { productToSelectQty = null },
             title = { Text("Añadir ${p.name}", fontWeight = FontWeight.Bold) },
             text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                     Text("Disponible: $maxAvailable ${p.unit}", color = Color.Gray)
                     Spacer(modifier = Modifier.height(16.dp))
                     OutlinedTextField(
@@ -1815,8 +1948,8 @@ fun CheckoutDialog(
                         placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(0.8f).padding(vertical = 8.dp),
-                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                        modifier = Modifier.widthIn(min = 80.dp).padding(vertical = 8.dp).focusRequester(focusRequester),
+                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                     )
                 }
             },
@@ -1949,8 +2082,8 @@ fun CheckoutDialog(
                                     Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp)
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Button(onClick = { onFiarVenta(buyerName) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
-                                    Text("Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
+                                Button(onClick = { onFiarVenta(buyerName, rec, simpleMethod) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
+                                    Text(if (rec > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
                                 }
                             }
                         } else if (change == 0.0 && rec > 0) {
@@ -2000,8 +2133,8 @@ fun CheckoutDialog(
                                     Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp)
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Button(onClick = { onFiarVenta(buyerName) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
-                                    Text("Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
+                                Button(onClick = { onFiarVenta(buyerName, receivedCOP, "Múltiple") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
+                                    Text(if (receivedCOP > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
                                 }
                             }
                         } else if (changeCOP == 0.0 && receivedCOP > 0) {
@@ -2140,9 +2273,74 @@ fun SummaryDialog(totalIncome: Double, totalExpense: Double, balance: Double, tr
 }
 
 @Composable
-fun SoundSettingsDialog(currentSound: Int, onDismiss: () -> Unit, onSelect: (Int) -> Unit) {
-    val options = listOf("Silencio 🔕", "Bip Simple 🎵", "Doble Bip 🎶", "Interferencia 📻", "Alerta Corta ⚠️", "Timbre 🛎️", "Notificación 🔔", "Éxito ✅", "Error ❌", "Llamada 📞", "Ocupado 📵")
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Sonidos de la App") }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(modifier = Modifier.verticalScroll(rememberScrollState())) { options.forEachIndexed { index, name -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) { RadioButton(selected = currentSound == index, onClick = { onSelect(index) }); Text(text = name, modifier = Modifier.padding(start = 8.dp)) } } } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } })
+fun SoundSettingsDialog(currentSoundUri: String?, onDismiss: () -> Unit, onSelect: (String) -> Unit) {
+    val context = LocalContext.current
+
+    val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: Exception) { e.printStackTrace() }
+            onSelect(uri.toString())
+        }
+    }
+
+    val ringtonePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val uri: Uri? = result.data?.getParcelableExtra(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            if (uri != null) {
+                onSelect(uri.toString())
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sonido de Notificaciones 🔔", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Selecciona el archivo o tono que deseas que suene cuando llegue el momento de cobrar una deuda.", color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_NOTIFICATION)
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
+                        }
+                        ringtonePicker.launch(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("🎵 Seleccionar Tono de Android")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Button(
+                    onClick = { audioPicker.launch("audio/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                ) {
+                    Text("📁 Seleccionar Archivo de Audio")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedButton(
+                    onClick = { onSelect("") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
+                ) {
+                    Text("🔕 Restaurar Sonido por Defecto")
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } }
+    )
 }
 
 @Composable
@@ -2226,14 +2424,25 @@ fun CalendarDialog(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = Color.Gray.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = onViewFiadores,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)
+                ) { Text("📋 Información de Deudores", fontWeight = FontWeight.Bold) }
+
+                Button(
+                    onClick = onViewReminders,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2), contentColor = Color.White)
+                ) { Text("💸 Mis Deudas Pendientes", fontWeight = FontWeight.Bold) }
             }
         },
-        confirmButton = {
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                TextButton(onClick = onViewReminders, colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF1976D2))) { Text("Ver Deudas", fontWeight = FontWeight.Bold) }
-                TextButton(onClick = onViewFiadores, colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFBC02D))) { Text("Ver Cobros", fontWeight = FontWeight.Bold) }
-            }
-        },
+        confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } }
     )
 }
@@ -2366,12 +2575,12 @@ fun ProductosVendidosDialog(transactions: List<Transaction>, onDismiss: () -> Un
 
 @Composable
 fun ScheduledRemindersDialog(reminders: List<Reminder>, onDismiss: () -> Unit, onDelete: (Reminder) -> Unit, onEdit: (Reminder) -> Unit, onCreateNew: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("A quien le debo 📋", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { if (reminders.isEmpty()) { Text("No tienes deudas activas registradas.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp)) } else { LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) { itemsIndexed(reminders) { index, reminder -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(text = "${index + 1}.", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.width(28.dp)); Column(modifier = Modifier.weight(1f)) { Text(reminder.title, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(formatDate(reminder.targetDateInMillis), fontSize = 12.sp, color = Color.Gray) }; IconButton(onClick = { onEdit(reminder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = Color.Blue.copy(alpha = 0.7f)) }; IconButton(onClick = { onDelete(reminder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(alpha = 0.7f)) } }; if (index < reminders.size - 1) { Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp) } } } } }, confirmButton = { Button(onClick = onCreateNew) { Text("Crear") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("A quien le debo 📋", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { if (reminders.isEmpty()) { Text("No tienes deudas activas registradas.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp)) } else { LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) { itemsIndexed(reminders) { index, reminder -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(text = "${index + 1}.", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.width(28.dp)); Column(modifier = Modifier.weight(1f)) { Text(reminder.title, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text(formatDate(reminder.targetDateInMillis), fontSize = 12.sp, color = Color.Gray) }; IconButton(onClick = { onEdit(reminder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = Color.Blue.copy(alpha = 0.7f)) }; IconButton(onClick = { onDelete(reminder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(alpha = 0.7f)) } }; if (index < reminders.size - 1) { Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp) } } } } }, confirmButton = { Button(onClick = onCreateNew) { Text("Crear") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } })
 }
 
 @Composable
 fun ScheduledFiadoresDialog(fiadores: List<Fiador>, onDismiss: () -> Unit, onDelete: (Fiador) -> Unit, onEdit: (Fiador) -> Unit, onCreateNew: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Quien me debe 🤝", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { if (fiadores.isEmpty()) { Text("No tienes personas que te deban dinero.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp)) } else { LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) { itemsIndexed(fiadores) { index, fiador -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(text = "${index + 1}.", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.width(28.dp)); Column(modifier = Modifier.weight(1f)) { val phoneStr = if(fiador.phone.isNotBlank()) " 📞 ${fiador.phone}" else ""; val remaining = fiador.amount - fiador.paidAmount; Text(fiador.name + phoneStr, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("Resta: ${formatCOP(remaining)} (Total: ${formatCOP(fiador.amount)}) - ${fiador.reason}", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(formatDate(fiador.targetDateInMillis), fontSize = 12.sp, color = Color.Gray) }; IconButton(onClick = { onEdit(fiador) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = Color.Blue.copy(alpha = 0.7f)) }; IconButton(onClick = { onDelete(fiador) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(alpha = 0.7f)) } }; if (index < fiadores.size - 1) { Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp) } } } } }, confirmButton = { Button(onClick = onCreateNew) { Text("Agregar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Quien me debe 🤝", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { if (fiadores.isEmpty()) { Text("No tienes personas que te deban dinero.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp)) } else { LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) { itemsIndexed(fiadores) { index, fiador -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(text = "${index + 1}.", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.width(28.dp)); Column(modifier = Modifier.weight(1f)) { val phoneStr = if(fiador.phone.isNotBlank()) " 📞 ${fiador.phone}" else ""; val remaining = fiador.amount - fiador.paidAmount; Text(fiador.name + phoneStr, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text("Resta: ${formatCOP(remaining)} (Total: ${formatCOP(fiador.amount)}) - ${fiador.reason}", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary); Text(formatDate(fiador.targetDateInMillis), fontSize = 12.sp, color = Color.Gray) }; IconButton(onClick = { onEdit(fiador) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = Color.Blue.copy(alpha = 0.7f)) }; IconButton(onClick = { onDelete(fiador) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(alpha = 0.7f)) } }; if (index < fiadores.size - 1) { Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp) } } } } }, confirmButton = { Button(onClick = onCreateNew) { Text("Agregar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -2407,10 +2616,12 @@ fun FiadorDialog(
     initialFiador: Fiador? = null,
     initialName: String = "",
     initialCart: List<Pair<Product, Int>> = emptyList(),
+    initialPaidAmount: Double = 0.0,
+    initialMethod: String = "Efectivo",
     products: List<Product>,
     preselectedDate: Long? = null,
     onDismiss: () -> Unit,
-    onConfirmNew: (String, String, List<Pair<Product, Int>>, Long) -> Unit,
+    onConfirmNew: (String, String, List<Pair<Product, Int>>, Long, Double, String) -> Unit,
     onConfirmEdit: (Fiador, Long) -> Unit,
     onConfirmAbono: (Fiador, Double, String) -> Unit
 ) {
@@ -2541,49 +2752,61 @@ fun FiadorDialog(
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(value = phone, onValueChange = { phone = it }, label = { Text("Teléfono (Opcional)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone), singleLine = true, modifier = Modifier.fillMaxWidth())
                     Spacer(modifier = Modifier.height(16.dp))
+
                     if (initialFiador == null) {
-                        Text("Productos a fiar:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Box {
-                            Button(onClick = { expandedProduct = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors()) { Text(selectedProduct?.name ?: "🔽 Seleccionar Producto", color = MaterialTheme.colorScheme.onSurface) }
-                            DropdownMenu(expanded = expandedProduct, onDismissRequest = { expandedProduct = false }) {
-                                products.filter { it.stock > 0 }.forEach { p ->
-                                    DropdownMenuItem(text = { Text("${p.name} (Disp: ${p.stock} ${p.unit}) - ${formatCOP(p.price)}") }, onClick = { selectedProduct = p; expandedProduct = false })
-                                }
-                                if(products.none { it.stock > 0 }) {
-                                    DropdownMenuItem(text = { Text("No hay productos en stock") }, onClick = { expandedProduct = false })
+                        if (initialCart.isEmpty()) {
+                            Text("Productos a fiar:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box {
+                                Button(onClick = { expandedProduct = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors()) { Text(selectedProduct?.name ?: "🔽 Seleccionar Producto", color = MaterialTheme.colorScheme.onSurface) }
+                                DropdownMenu(expanded = expandedProduct, onDismissRequest = { expandedProduct = false }) {
+                                    products.filter { it.stock > 0 }.forEach { p ->
+                                        DropdownMenuItem(text = { Text("${p.name} (Disp: ${p.stock} ${p.unit}) - ${formatCOP(p.price)}") }, onClick = { selectedProduct = p; expandedProduct = false })
+                                    }
+                                    if(products.none { it.stock > 0 }) {
+                                        DropdownMenuItem(text = { Text("No hay productos en stock") }, onClick = { expandedProduct = false })
+                                    }
                                 }
                             }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                            OutlinedTextField(value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cant.") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(onClick = {
-                                val q = qtyRaw.toIntOrNull() ?: 0
-                                if (selectedProduct != null && q > 0 && q <= selectedProduct!!.stock) {
-                                    val existing = cartItems.find { it.first.id == selectedProduct!!.id }
-                                    if (existing != null) {
-                                        val newQ = existing.second + q; if (newQ <= selectedProduct!!.stock) { val idx = cartItems.indexOf(existing); cartItems[idx] = existing.copy(second = newQ) } else { Toast.makeText(context, "Supera el stock disponible", Toast.LENGTH_SHORT).show() }
-                                    } else {
-                                        cartItems.add(Pair(selectedProduct!!, q))
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                                OutlinedTextField(value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cant.") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(onClick = {
+                                    val q = qtyRaw.toIntOrNull() ?: 0
+                                    if (selectedProduct != null && q > 0 && q <= selectedProduct!!.stock) {
+                                        val existing = cartItems.find { it.first.id == selectedProduct!!.id }
+                                        if (existing != null) {
+                                            val newQ = existing.second + q; if (newQ <= selectedProduct!!.stock) { val idx = cartItems.indexOf(existing); cartItems[idx] = existing.copy(second = newQ) } else { Toast.makeText(context, "Supera el stock disponible", Toast.LENGTH_SHORT).show() }
+                                        } else {
+                                            cartItems.add(Pair(selectedProduct!!, q))
+                                        }
+                                        qtyRaw = "1"; selectedProduct = null
                                     }
-                                    qtyRaw = "1"; selectedProduct = null
-                                }
-                            }) { Text("Añadir") }
+                                }) { Text("Añadir") }
+                            }
                         }
+
                         if (cartItems.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text("Lista de deuda:", fontSize = 12.sp, color = Color.Gray)
+                            Spacer(modifier = Modifier.height(if (initialCart.isEmpty()) 16.dp else 0.dp))
+                            Text(if (initialCart.isEmpty()) "Lista de deuda:" else "Resumen de la deuda:", fontSize = 12.sp, color = Color.Gray)
                             cartItems.forEachIndexed { index, item ->
                                 Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                     Text("• ${item.second}${item.first.unit} ${item.first.name}", fontSize = 13.sp, modifier = Modifier.weight(1f))
                                     Text(formatCOP(item.first.price * item.second), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                    IconButton(onClick = { cartItems.removeAt(index) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, null, tint = Color.Red, modifier = Modifier.size(16.dp)) }
+                                    if (initialCart.isEmpty()) {
+                                        IconButton(onClick = { cartItems.removeAt(index) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, null, tint = Color.Red, modifier = Modifier.size(16.dp)) }
+                                    }
                                 }
                             }
                             Divider(modifier = Modifier.padding(vertical = 8.dp))
                             val total = cartItems.sumOf { it.first.price * it.second }
                             Text("Total Deuda: ${formatCOP(total)}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+
+                            if (initialPaidAmount > 0) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Abono inicial: ${formatCOP(initialPaidAmount)} ($initialMethod)", fontSize = 14.sp, color = Color(0xFF4CAF50))
+                                Text("Resta por pagar: ${formatCOP(total - initialPaidAmount)}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Red)
+                            }
                         }
                     } else {
                         Text("Detalle original:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -2633,11 +2856,7 @@ fun FiadorDialog(
                     val phoneTime = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date())
                     Text("Hora actual del teléfono: $phoneTime", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 16.dp).alpha(0.7f))
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(value = customHour, onValueChange = { input -> if (input.isEmpty()) { customHour = input } else if (input.length <= 2 && input.all { char -> char.isDigit() }) { val h = input.toIntOrNull(); if (h != null) { if (input.length == 1 && h == 0) { customHour = input } else if (h in 1..12) { customHour = input; if (input.length == 2) minuteFocusRequester.requestFocus() } } } }, placeholder = { Text(currentHourStr, color = Color.Gray.copy(alpha=0.4f), fontSize = 28.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, modifier = Modifier.width(80.dp), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                        Text(" : ", fontSize = 32.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp))
-                        OutlinedTextField(value = customMinute, onValueChange = { input -> if (input.isEmpty()) { customMinute = input } else if (input.length <= 2 && input.all { it.isDigit() }) { val m = input.toIntOrNull(); if (m != null && m in 0..59) { customMinute = input } } }, placeholder = { Text(currentMinStr, color = Color.Gray.copy(alpha=0.4f), fontSize = 28.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, modifier = Modifier.width(80.dp).focusRequester(minuteFocusRequester), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column { FilterChip(selected = !isPm, onClick = { isPm = false }, label = { Text("AM") }); FilterChip(selected = isPm, onClick = { isPm = true }, label = { Text("PM") }) }
+                        OutlinedTextField(value = customHour, onValueChange = { input -> if (input.isEmpty()) { customHour = input } else if (input.length <= 2 && input.all { char -> char.isDigit() }) { val h = input.toIntOrNull(); if (h != null) { if (input.length == 1 && h == 0) { customHour = input } else if (h in 1..12) { customHour = input; if (input.length == 2) minuteFocusRequester.requestFocus() } } } }, placeholder = { Text(currentHourStr, color = Color.Gray.copy(alpha=0.4f), fontSize = 28.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, modifier = Modifier.width(80.dp), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true); Text(" : ", fontSize = 32.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp)); OutlinedTextField(value = customMinute, onValueChange = { input -> if (input.isEmpty()) { customMinute = input } else if (input.length <= 2 && input.all { it.isDigit() }) { val m = input.toIntOrNull(); if (m != null && m in 0..59) { customMinute = input } } }, placeholder = { Text(currentMinStr, color = Color.Gray.copy(alpha=0.4f), fontSize = 28.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, modifier = Modifier.width(80.dp).focusRequester(minuteFocusRequester), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true); Spacer(modifier = Modifier.width(8.dp)); Column { FilterChip(selected = !isPm, onClick = { isPm = false }, label = { Text("AM") }); FilterChip(selected = isPm, onClick = { isPm = true }, label = { Text("PM") }) }
                     }
                 }
             },
@@ -2656,7 +2875,7 @@ fun FiadorDialog(
                         if (initialFiador != null) {
                             onConfirmEdit(initialFiador.copy(name = name, phone = phone), localCal.timeInMillis)
                         } else {
-                            onConfirmNew(name, phone, cartItems.toList(), localCal.timeInMillis)
+                            onConfirmNew(name, phone, cartItems.toList(), localCal.timeInMillis, initialPaidAmount, initialMethod)
                         }
                     }
                 }) { Text(if (activeScreen == "EDIT_TIME") "Guardar" else "Aceptar") }
@@ -2892,6 +3111,17 @@ class ReminderReceiver : BroadcastReceiver() {
         val notifText = intent.getStringExtra("NOTIFICATION_TEXT") ?: "Tienes una alerta pendiente"
         val id = intent.getIntExtra("ID", 0)
 
+        // Reproducir el sonido personalizado que eligió el usuario
+        val authPrefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
+        val userId = authPrefs.getString("lastKnownUserId", null)
+        if (userId != null) {
+            val userPrefs = context.getSharedPreferences("FinancePrefs_$userId", Context.MODE_PRIVATE)
+            val customSound = userPrefs.getString("customSoundUri", "")
+            AppSounds.play(context, customSound)
+        } else {
+            AppSounds.play(context, "")
+        }
+
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MiBilletera::AlarmaWakeLock")
         wakeLock?.acquire(5000)
@@ -2899,12 +3129,13 @@ class ReminderReceiver : BroadcastReceiver() {
         try {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             if (notificationManager != null) {
-                val channelId = "finance_alarms_v4"
+                val channelId = "finance_alarms_v5"
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     val channel = NotificationChannel(channelId, "Recordatorios", NotificationManager.IMPORTANCE_HIGH).apply {
                         description = "Notificaciones para recordar pagos, cobros de fiadores y vencimientos"
                         enableVibration(true)
+                        setSound(null, null)
                     }
                     notificationManager.createNotificationChannel(channel)
                 }
