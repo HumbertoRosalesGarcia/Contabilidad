@@ -1,6 +1,7 @@
 package com.xxcamixx.contabilidad
 
 // --- Importaciones Base ---
+import android.speech.tts.TextToSpeech
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlarmManager
@@ -211,13 +212,34 @@ object AppSounds {
                         .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
-                // SOLUCIÓN ANR: Usar eventos asíncronos para no congelar la pantalla al cargar el audio
                 setOnPreparedListener { it.start() }
                 setOnCompletionListener { it.release() }
                 prepareAsync()
             }
         } catch (e: Exception) {
             defaultToneGen?.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+        }
+    }
+}
+
+object AppVoice {
+    private var tts: TextToSpeech? = null
+    private var isInitialized = false
+    private var pendingText: String? = null
+
+    fun speak(context: Context, text: String) {
+        if (tts == null) {
+            tts = TextToSpeech(context.applicationContext) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    tts?.language = Locale("es", "ES") // Español
+                    isInitialized = true
+                    tts?.speak(pendingText ?: text, TextToSpeech.QUEUE_FLUSH, null, "NotifID")
+                    pendingText = null
+                }
+            }
+            pendingText = text
+        } else if (isInitialized) {
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NotifID")
         }
     }
 }
@@ -233,7 +255,20 @@ fun showChatNotification(context: Context, title: String, text: String) {
     val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     val notification = NotificationCompat.Builder(context, channelId).setSmallIcon(android.R.drawable.ic_dialog_email).setContentTitle(title).setContentText(text).setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true).setContentIntent(pendingIntent).build()
     notificationManager.notify(System.currentTimeMillis().toInt(), notification)
-    AppSounds.play(context, "")
+
+    val authPrefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
+    val userId = authPrefs.getString("lastKnownUserId", null)
+    var useVoice = false
+    if (userId != null) {
+        val userPrefs = context.getSharedPreferences("FinancePrefs_$userId", Context.MODE_PRIVATE)
+        useVoice = userPrefs.getBoolean("voiceEnabled", false)
+    }
+
+    if (useVoice) {
+        AppVoice.speak(context, "$title... $text")
+    } else {
+        AppSounds.play(context, "")
+    }
 }
 
 @SuppressLint("ScheduleExactAlarm")
@@ -252,6 +287,7 @@ fun scheduleNextChatSync(context: Context) {
 }
 
 // ==========================================
+// ==========================================
 // 2. BASE DE DATOS (ROOM)
 // ==========================================
 @Entity(tableName = "transactions")
@@ -267,8 +303,26 @@ data class Transaction(
     val digitalAmount: Double = 0.0
 )
 
-@Entity(tableName = "reminders") data class Reminder(@PrimaryKey(autoGenerate = true) val id: Int = 0, val title: String, val targetDateInMillis: Long)
-@Entity(tableName = "fiadores") data class Fiador(@PrimaryKey(autoGenerate = true) val id: Int = 0, val name: String, val phone: String = "", val amount: Double, val reason: String, val targetDateInMillis: Long, val paidAmount: Double = 0.0, val paymentHistory: String = "")
+@Entity(tableName = "reminders")
+data class Reminder(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val title: String,
+    val targetDateInMillis: Long,
+    val isStore: Boolean = false // Identificador para independizar sesiones
+)
+
+@Entity(tableName = "fiadores")
+data class Fiador(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val name: String,
+    val phone: String = "",
+    val amount: Double,
+    val reason: String,
+    val targetDateInMillis: Long,
+    val paidAmount: Double = 0.0,
+    val paymentHistory: String = "",
+    val isStore: Boolean = true // Identificador para independizar sesiones
+)
 
 @Entity(tableName = "products") data class Product(@PrimaryKey(autoGenerate = true) val id: Int = 0, val name: String, val purchasePrice: Double = 0.0, val price: Double, val stock: Int, val unit: String = "Uds", val expirationDateInMillis: Long? = null, val entryDateInMillis: Long = System.currentTimeMillis(), val minStock: Int = 0, val imageUri: String? = null)
 
@@ -309,8 +363,9 @@ val MIGRATION_9_10 = object : Migration(9, 10) { override fun migrate(db: Suppor
 val MIGRATION_10_11 = object : Migration(10, 11) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `transactions` ADD COLUMN `cashAmount` REAL NOT NULL DEFAULT 0.0"); db.execSQL("ALTER TABLE `transactions` ADD COLUMN `digitalAmount` REAL NOT NULL DEFAULT 0.0") } }
 val MIGRATION_11_12 = object : Migration(11, 12) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `paidAmount` REAL NOT NULL DEFAULT 0.0"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `paymentHistory` TEXT NOT NULL DEFAULT ''") } }
 val MIGRATION_12_13 = object : Migration(12, 13) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `products` ADD COLUMN `imageUri` TEXT DEFAULT NULL") } }
+val MIGRATION_13_14 = object : Migration(13, 14) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `reminders` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 0"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 1") } }
 
-@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 13, exportSchema = false)
+@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 14, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun financeDao(): FinanceDao
     companion object {
@@ -319,7 +374,7 @@ abstract class AppDatabase : RoomDatabase() {
             return INSTANCES[userId] ?: synchronized(this) {
                 val dbName = "finance_database_$userId"
                 val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, dbName)
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                     .build()
                 INSTANCES[userId] = instance
                 instance
@@ -344,13 +399,14 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     var personalSoundUri by mutableStateOf(userPrefs.getString("personalSoundUri", "")); private set
     var storeSoundUri by mutableStateOf(userPrefs.getString("storeSoundUri", "")); private set
     var touchSoundUri by mutableStateOf(userPrefs.getString("touchSoundUri", "")); private set
+    var isVoiceAssistantEnabled by mutableStateOf(userPrefs.getBoolean("voiceEnabled", false)); private set
+
     var isSyncing by mutableStateOf(false); private set
     var lastSyncDate by mutableStateOf(userPrefs.getLong("lastSync", 0L)); private set
     var autoSyncFrequency by mutableStateOf(userPrefs.getInt("syncFrequency", 0)); private set
     var autoSyncHour by mutableStateOf(userPrefs.getInt("syncHour", 2)); private set
     var autoSyncMinute by mutableStateOf(userPrefs.getInt("syncMinute", 0)); private set
 
-    // --- Control de Deuda al Bolsillo (Vueltos) ---
     var pocketDebt by mutableStateOf(userPrefs.getFloat("pocketDebt", 0f).toDouble()); private set
 
     init { scheduleAutoSync(application, autoSyncFrequency, autoSyncHour, autoSyncMinute) }
@@ -360,6 +416,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     fun updatePersonalSoundPreference(uri: String, context: Context) { personalSoundUri = uri; userPrefs.edit().putString("personalSoundUri", uri).apply(); AppSounds.play(context, uri) }
     fun updateStoreSoundPreference(uri: String, context: Context) { storeSoundUri = uri; userPrefs.edit().putString("storeSoundUri", uri).apply(); AppSounds.play(context, uri) }
     fun updateTouchSoundPreference(uri: String, context: Context) { touchSoundUri = uri; userPrefs.edit().putString("touchSoundUri", uri).apply(); AppSounds.play(context, uri) }
+    fun updateVoicePreference(enabled: Boolean) { isVoiceAssistantEnabled = enabled; userPrefs.edit().putBoolean("voiceEnabled", enabled).apply() }
 
     fun addPocketDebt(amount: Double) {
         val newDebt = pocketDebt + amount
@@ -484,11 +541,12 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
     fun reduceProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val newStock = product.stock - qty; if (newStock <= 0) { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") } else { dao.updateProduct(product.copy(stock = newStock)); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") } }; AppSounds.play(context, touchSoundUri) }
     fun restoreProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val currentInDb = dao.getAllProducts().firstOrNull()?.find { it.id == product.id }; if (currentInDb != null) dao.updateProduct(currentInDb.copy(stock = currentInDb.stock + qty)) else { dao.insertProduct(product); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER") } } }
-    fun addReminder(title: String, dateInMillis: Long, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val reminderId = dao.insertReminder(Reminder(title = title, targetDateInMillis = dateInMillis)).toInt(); val success = scheduleNotification(context, dateInMillis, "¡Hora de Pagar! ⏰", title, reminderId, "ALARM_TRIGGER"); if (success) onConfigured("Alarma programada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}") }; AppSounds.play(context, touchSoundUri) }
+
+    fun addReminder(title: String, dateInMillis: Long, isStore: Boolean, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val reminderId = dao.insertReminder(Reminder(title = title, targetDateInMillis = dateInMillis, isStore = isStore)).toInt(); val success = scheduleNotification(context, dateInMillis, "¡Hora de Pagar! ⏰", title, reminderId, "ALARM_TRIGGER"); if (success) onConfigured("Alarma programada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}") }; AppSounds.play(context, touchSoundUri) }
     fun updateExistingReminder(reminder: Reminder, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateReminder(reminder); val success = scheduleNotification(context, reminder.targetDateInMillis, "¡Hora de Pagar! ⏰", reminder.title, reminder.id, "ALARM_TRIGGER"); if (success) onConfigured("Alarma actualizada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(reminder.targetDateInMillis))}") }; AppSounds.play(context, touchSoundUri) }
     fun deleteReminder(reminder: Reminder, context: Context) { viewModelScope.launch { dao.deleteReminder(reminder); cancelAlarm(context, reminder.id, "ALARM_TRIGGER") } }
 
-    fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, dateInMillis: Long, initialPaidAmount: Double = 0.0, paymentMethod: String = "Efectivo", context: Context, onConfigured: (String) -> Unit) {
+    fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, dateInMillis: Long, initialPaidAmount: Double = 0.0, paymentMethod: String = "Efectivo", isStore: Boolean, context: Context, onConfigured: (String) -> Unit) {
         viewModelScope.launch {
             val totalAmount = cartItems.sumOf { it.first.price * it.second }
             val reason = cartItems.joinToString(", ") { "${it.second}${it.first.unit} ${it.first.name}" }
@@ -498,7 +556,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 "$dateStr: +${formatCOP(initialPaidAmount)} ($paymentMethod)"
             } else ""
 
-            val fiadorId = dao.insertFiador(Fiador(name = name, phone = phone, amount = totalAmount, reason = reason, targetDateInMillis = dateInMillis, paidAmount = initialPaidAmount, paymentHistory = history)).toInt()
+            val fiadorId = dao.insertFiador(Fiador(name = name, phone = phone, amount = totalAmount, reason = reason, targetDateInMillis = dateInMillis, paidAmount = initialPaidAmount, paymentHistory = history, isStore = isStore)).toInt()
 
             if (initialPaidAmount > 0) {
                 val cash = if(paymentMethod == "Efectivo") initialPaidAmount else 0.0
@@ -696,30 +754,93 @@ fun TechSplashScreen(onTimeout: () -> Unit) {
 
 @Composable
 fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
-    val context = LocalContext.current; val coroutineScope = rememberCoroutineScope(); val credentialManager = remember { CredentialManager.create(context) }; var isLoading by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val credentialManager = remember { CredentialManager.create(context) }
+    var isLoading by remember { mutableStateOf(false) }
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Filled.AccountCircle, contentDescription = "Login", modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary); Spacer(modifier = Modifier.height(24.dp)); Text("Acceso a Billetera", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground); Spacer(modifier = Modifier.height(8.dp)); Text("Sincronización segura en la nube", fontSize = 14.sp, color = Color.Gray); Spacer(modifier = Modifier.height(32.dp))
-            if (isLoading) { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary) } else {
-                Button(onClick = { isLoading = true; coroutineScope.launch { try { val webClientId = context.getString(context.resources.getIdentifier("default_web_client_id", "string", context.packageName)); val googleIdOption = GetGoogleIdOption.Builder().setFilterByAuthorizedAccounts(false).setServerClientId(webClientId).setAutoSelectEnabled(true).build(); val request = GetCredentialRequest.Builder().addCredentialOption(googleIdOption).build(); val result = credentialManager.getCredential(request = request, context = context); val credential = result.credential
-                    if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) { val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data); val displayName = googleIdTokenCredential.displayName ?: "Usuario"; val userId = googleIdTokenCredential.id
-                        val isSuperAdmin = userId.lowercase(Locale.getDefault()) == "zonacami77777@gmail.com"
-                        try { val response = RetrofitInstance.api.syncUser(UserSyncRequest(email = userId, name = displayName))
-                            val finalRole = if (isSuperAdmin) "ADMIN" else (response.role ?: "INVITADO")
-                            if (response.isBanned && !isSuperAdmin) { isLoading = false; Toast.makeText(context, "🚫 Tu cuenta está bloqueada o vencida.", Toast.LENGTH_LONG).show() }
-                            else {
-                                Toast.makeText(context, "Usted se encuentra bajo el PLAN $finalRole, Bienvenido", Toast.LENGTH_LONG).show()
-                                onLoginSuccess(displayName, userId, finalRole, response.consumedSeconds, response.planDuration)
+            Icon(Icons.Filled.AccountCircle, contentDescription = "Login", modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.height(24.dp))
+            Text("Acceso a Billetera", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onBackground)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Sincronización segura en la nube", fontSize = 14.sp, color = Color.Gray)
+            Spacer(modifier = Modifier.height(32.dp))
+
+            if (isLoading) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            } else {
+                Button(
+                    onClick = {
+                        isLoading = true
+                        coroutineScope.launch {
+                            try {
+                                // Solución al error de LocalContext: Extraemos el String dentro de la corrutina
+                                val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+                                val webClientId = if (resId != 0) context.getString(resId) else ""
+
+                                val googleIdOption = GetGoogleIdOption.Builder()
+                                    .setFilterByAuthorizedAccounts(false)
+                                    .setServerClientId(webClientId)
+                                    .setAutoSelectEnabled(true)
+                                    .build()
+                                val request = GetCredentialRequest.Builder().addCredentialOption(googleIdOption).build()
+                                val result = credentialManager.getCredential(request = request, context = context)
+                                val credential = result.credential
+
+                                if (credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                                    val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                                    val displayName = googleIdTokenCredential.displayName ?: "Usuario"
+                                    val userId = googleIdTokenCredential.id
+                                    val isSuperAdmin = userId.lowercase(Locale.getDefault()) == "zonacami77777@gmail.com"
+
+                                    try {
+                                        val response = RetrofitInstance.api.syncUser(UserSyncRequest(email = userId, name = displayName))
+                                        val finalRole = if (isSuperAdmin) "ADMIN" else (response.role ?: "INVITADO")
+                                        if (response.isBanned && !isSuperAdmin) {
+                                            isLoading = false
+                                            Toast.makeText(context, "🚫 Tu cuenta está bloqueada o vencida.", Toast.LENGTH_LONG).show()
+                                        } else {
+                                            Toast.makeText(context, "Usted se encuentra bajo el PLAN $finalRole, Bienvenido", Toast.LENGTH_LONG).show()
+                                            onLoginSuccess(displayName, userId, finalRole, response.consumedSeconds, response.planDuration)
+                                        }
+                                    } catch (_: Exception) {
+                                        val fallbackRole = if (isSuperAdmin) "ADMIN" else "BÁSICO"
+                                        Toast.makeText(context, "Modo sin conexión activado. Usted se encuentra bajo el PLAN $fallbackRole, Bienvenido", Toast.LENGTH_LONG).show()
+                                        onLoginSuccess(displayName, userId, fallbackRole, 0L, 2592000L)
+                                    }
+                                } else {
+                                    isLoading = false
+                                    Toast.makeText(context, "Error al procesar la credencial", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                                isLoading = false
+                                Toast.makeText(context, "Inicio de sesión cancelado o fallido", Toast.LENGTH_SHORT).show()
                             }
-                        } catch (_: Exception) {
-                            val fallbackRole = if (isSuperAdmin) "ADMIN" else "BÁSICO"
-                            Toast.makeText(context, "Modo sin conexión activado. Usted se encuentra bajo el PLAN $fallbackRole, Bienvenido", Toast.LENGTH_LONG).show()
-                            onLoginSuccess(displayName, userId, fallbackRole, 0L, 2592000L)
                         }
-                    } else { isLoading = false; Toast.makeText(context, "Error al procesar la credencial", Toast.LENGTH_SHORT).show() }
-                } catch (e: Exception) { e.printStackTrace(); isLoading = false; Toast.makeText(context, "Inicio de sesión cancelado o fallido", Toast.LENGTH_SHORT).show() } } }, modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)) { Text("Iniciar sesión con Google", fontWeight = FontWeight.Bold, fontSize = 16.sp) }
+                    },
+                    modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)
+                ) {
+                    Text("Iniciar sesión con Google", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedButton(onClick = { try { val addAccountIntent = Intent(Settings.ACTION_ADD_ACCOUNT).apply { putExtra(Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google")) }; context.startActivity(addAccountIntent) } catch (_: Exception) { Toast.makeText(context, "No se pudo abrir la configuración", Toast.LENGTH_LONG).show() } }, modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)) { Icon(Icons.Filled.Add, contentDescription = "Añadir cuenta", modifier = Modifier.size(18.dp)); Spacer(modifier = Modifier.width(8.dp)); Text("Añadir cuenta nueva", fontWeight = FontWeight.Bold) }
+                OutlinedButton(
+                    onClick = {
+                        try {
+                            val addAccountIntent = Intent(Settings.ACTION_ADD_ACCOUNT).apply { putExtra(Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google")) }
+                            context.startActivity(addAccountIntent)
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "No se pudo abrir la configuración", Toast.LENGTH_LONG).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = "Añadir cuenta", modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Añadir cuenta nueva", fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -868,13 +989,17 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     val fiadores by viewModel.fiadores.collectAsState(initial = emptyList())
     val products by viewModel.products.collectAsState(initial = emptyList())
 
+    var currentTab by remember { mutableStateOf(0) }
+
+    val currentTabReminders = remember(reminders, currentTab) { reminders.filter { it.isStore == (currentTab == 1) } }
+    val currentTabFiadores = remember(fiadores, currentTab) { fiadores.filter { it.isStore == (currentTab == 1) } }
+
     val personalTransactions = remember(transactions) { transactions.filter { !it.description.startsWith("Venta: ") } }
     val storeTransactions = remember(transactions) { transactions.filter { it.isIncome && it.description.startsWith("Venta:") } }
     val totalStoreCash = remember(storeTransactions) { storeTransactions.sumOf { it.cashAmount } }
     val totalStoreDigital = remember(storeTransactions) { storeTransactions.sumOf { it.digitalAmount } }
     val totalProfit = remember(storeTransactions) { storeTransactions.sumOf { it.profit } }
 
-    var currentTab by remember { mutableStateOf(0) }
     var showInventoryScreen by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -936,7 +1061,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(60000L); currentUiTime = System.currentTimeMillis() } }
 
-    val activeReminders = remember(reminders, currentUiTime) { reminders.filter { it.targetDateInMillis <= currentUiTime } }; val activeFiadores = remember(fiadores, currentUiTime) { fiadores.filter { it.targetDateInMillis <= currentUiTime } }
+    val activeReminders = remember(currentTabReminders, currentUiTime) { currentTabReminders.filter { it.targetDateInMillis <= currentUiTime } };
+    val activeFiadores = remember(currentTabFiadores, currentUiTime) { currentTabFiadores.filter { it.targetDateInMillis <= currentUiTime } }
 
     LaunchedEffect(customToastMessage ?: "") { if (customToastMessage != null) { delay(3000L); customToastMessage = null } }
     LaunchedEffect(undoMessage ?: "") { if (undoMessage != null) { delay(5000L); undoMessage = null; undoAction = null } }
@@ -1031,7 +1157,53 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         Column(modifier = Modifier.fillMaxSize()) {
                             DashboardCard(balance, totalIncome, totalExpense)
                             AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) { Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) { Text("⚠️ ¡Alerta! Tu saldo está por debajo del límite crítico (${formatCOP(viewModel.minBalanceThreshold)}).", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) } }
-                            activeReminders.forEach { reminder -> AnimatedVisibility(visible = true) { Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFF1976D2), RoundedCornerShape(8.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("📅 Es hora de pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f)); IconButton(onClick = { viewModel.deleteReminder(reminder, context) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White) } } } }
+
+                            // Mostrar Deudores Personales
+                            activeFiadores.forEachIndexed { index, fiador ->
+                                val remaining = fiador.amount - fiador.paidAmount
+                                AnimatedVisibility(visible = true) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                                            .background(Color(0xFFFBC02D), RoundedCornerShape(8.dp))
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { fiadorToEdit = fiador; showFiadorDialog = true }
+                                            .padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            val phoneStr = if(fiador.phone.isNotBlank()) " \uD83D\uDCDE ${fiador.phone}" else ""
+                                            Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                            Text("Resta: ${formatCOP(remaining)} de ${formatCOP(fiador.amount)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp)
+                                        }
+                                        IconButton(onClick = { viewModel.deleteFiador(fiador, context) }, modifier = Modifier.size(24.dp)) {
+                                            Icon(Icons.Filled.Check, contentDescription = "Saldado", tint = Color.Black)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Mostrar Deudas Personales
+                            activeReminders.forEachIndexed { index, reminder ->
+                                AnimatedVisibility(visible = true) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                                            .background(Color(0xFF1976D2), RoundedCornerShape(8.dp))
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { reminderToEdit = reminder; showReminderDialog = true }
+                                            .padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("📅 Es hora de pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f));
+                                        IconButton(onClick = { viewModel.deleteReminder(reminder, context) }, modifier = Modifier.size(24.dp)) {
+                                            Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White)
+                                        }
+                                    }
+                                }
+                            }
                             Spacer(modifier = Modifier.height(16.dp)); Text("Movimientos Recientes 📋", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(horizontal = 16.dp)); Spacer(modifier = Modifier.height(8.dp))
                             LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) { items(personalTransactions, key = { it.id }) { transaction -> Box(modifier = Modifier.animateItem(placementSpec = tween(400))) { TransactionItem(transaction = transaction, onDelete = { viewModel.deleteTransaction(transaction); coroutineScope.launch { val result = snackbarHostState.showSnackbar(message = "Registro eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short); if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(transaction) } }) } } }
                         }
@@ -1050,11 +1222,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             showPremiumToast = { showPremiumToastMsg(context) },
                             totalProfit = totalProfit,
                             activeFiadores = activeFiadores,
+                            activeReminders = activeReminders,
                             onSettleFiador = { viewModel.deleteFiador(it, context) },
-                            onEditFiador = {
-                                fiadorToEdit = it
-                                showFiadorDialog = true
-                            }
+                            onEditFiador = { fiadorToEdit = it; showFiadorDialog = true },
+                            onSettleReminder = { viewModel.deleteReminder(it, context) },
+                            onEditReminder = { reminderToEdit = it; showReminderDialog = true }
                         )
                     }
                 }
@@ -1251,8 +1423,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         if (showLimitDialog) LimitDialog(currentLimit = viewModel.minBalanceThreshold, onDismiss = { showLimitDialog = false }, onConfirm = { viewModel.updateMinBalance(it); showLimitDialog = false })
 
         if (showDayEventsDialog && preselectedDateForEvent != null) {
-            val dayReminders = if(currentTab == 0) reminders.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) } else emptyList()
-            val dayFiadores = if(currentTab == 1) fiadores.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) } else emptyList()
+            val dayReminders = currentTabReminders.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) }
+            val dayFiadores = currentTabFiadores.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) }
             val dayProducts = if(currentTab == 1) products.filter { it.expirationDateInMillis != null && isSameDay(it.expirationDateInMillis, preselectedDateForEvent!!) } else emptyList()
 
             AlertDialog(
@@ -1315,44 +1487,37 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     }
                 },
                 confirmButton = {
-                    Button(onClick = {
-                        showDayEventsDialog = false
-                        if (currentTab == 0) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            showDayEventsDialog = false
                             reminderToEdit = null
                             showReminderDialog = true
-                        } else {
+                        }) { Text("Añadir Deuda") }
+                        Button(onClick = {
+                            showDayEventsDialog = false
                             fiadorToEdit = null
                             showFiadorDialog = true
-                        }
-                    }) { Text(if (currentTab == 0) "Añadir Deuda" else "Añadir Fiador") }
+                        }) { Text("Añadir Deudor") }
+                    }
                 },
                 dismissButton = {
                     TextButton(onClick = { showDayEventsDialog = false; preselectedDateForEvent = null }) { Text("Cerrar") }
-                }
+                },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
             )
         }
 
         if (showCalendarDialog) {
             CalendarDialog(
                 currentTab = currentTab,
-                reminders = reminders,
-                fiadores = fiadores,
+                reminders = currentTabReminders,
+                fiadores = currentTabFiadores,
                 products = products,
                 onDismiss = { showCalendarDialog = false },
                 onDayClick = { dateMillis, hasEvents ->
                     if (isDeudasAllowed) {
                         preselectedDateForEvent = dateMillis
-                        if (hasEvents) {
-                            showDayEventsDialog = true
-                        } else {
-                            if (currentTab == 0) {
-                                reminderToEdit = null
-                                showReminderDialog = true
-                            } else {
-                                fiadorToEdit = null
-                                showFiadorDialog = true
-                            }
-                        }
+                        showDayEventsDialog = true
                     } else {
                         showPremiumToastMsg(context)
                     }
@@ -1369,10 +1534,12 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 personalSoundUri = viewModel.personalSoundUri,
                 storeSoundUri = viewModel.storeSoundUri,
                 touchSoundUri = viewModel.touchSoundUri,
+                isVoiceEnabled = viewModel.isVoiceAssistantEnabled,
                 onDismiss = { showSoundDialog = false },
                 onSelectPersonal = { viewModel.updatePersonalSoundPreference(it, context) },
                 onSelectStore = { viewModel.updateStoreSoundPreference(it, context) },
-                onSelectTouch = { viewModel.updateTouchSoundPreference(it, context) }
+                onSelectTouch = { viewModel.updateTouchSoundPreference(it, context) },
+                onVoiceToggle = { viewModel.updateVoicePreference(it) }
             )
         }
 
@@ -1401,7 +1568,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         Text("Disponible en Digital (Banco):", fontSize = 14.sp, color = Color.Gray)
                         Text(formatCOP(totalStoreDigital), fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
-                        // --- Lógica del Vuelto de Bolsillo ---
                         if (viewModel.pocketDebt > 0) {
                             Divider(modifier = Modifier.padding(vertical = 12.dp))
                             Text("Deuda al Bolsillo (Vueltos):", fontSize = 14.sp, color = Color(0xFFE65100))
@@ -1583,11 +1749,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         if (showDeleteQtyDialog && productToDelete != null) { DeleteQuantityDialog(product = productToDelete!!, initialQty = qtyToDelete, onDismiss = { showDeleteQtyDialog = false; productToDelete = null }, onConfirm = { qty -> qtyToDelete = qty.toString(); showDeleteQtyDialog = false; showRedWarningDialog = true }) }
         if (showRedWarningDialog && productToDelete != null) { RedWarningDialog(productName = productToDelete!!.name, qty = qtyToDelete.toIntOrNull() ?: 1, onDismiss = { showRedWarningDialog = false; productToDelete = null }, onConfirm = { val p = productToDelete!!; val q = qtyToDelete.toIntOrNull() ?: 1; viewModel.reduceProductStock(p, q, context); undoMessage = "Eliminados $q uds. de '${p.name}'"; undoAction = { viewModel.restoreProductStock(p, q, context) }; showRedWarningDialog = false; productToDelete = null }) }
 
-        if (showRemindersListDialog) { ScheduledRemindersDialog(reminders = reminders, onDismiss = { showRemindersListDialog = false }, onDelete = { viewModel.deleteReminder(it, context) }, onEdit = { reminderToEdit = it; showRemindersListDialog = false; showReminderDialog = true }, onCreateNew = { reminderToEdit = null; showRemindersListDialog = false; showReminderDialog = true }) }
+        if (showRemindersListDialog) { ScheduledRemindersDialog(reminders = currentTabReminders, onDismiss = { showRemindersListDialog = false }, onDelete = { viewModel.deleteReminder(it, context) }, onEdit = { reminderToEdit = it; showRemindersListDialog = false; showReminderDialog = true }, onCreateNew = { reminderToEdit = null; showRemindersListDialog = false; showReminderDialog = true }) }
 
-        if (showReminderDialog) { ReminderDialog(initialReminder = reminderToEdit, preselectedDate = preselectedDateForEvent, onDismiss = { showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }, onConfirm = { t, d -> if (reminderToEdit != null) { viewModel.updateExistingReminder(reminderToEdit!!.copy(title = t, targetDateInMillis = d), context) { customToastMessage = it } } else { viewModel.addReminder(t, d, context) { customToastMessage = it } }; showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }) }
+        if (showReminderDialog) { ReminderDialog(initialReminder = reminderToEdit, preselectedDate = preselectedDateForEvent, onDismiss = { showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }, onConfirm = { t, d -> if (reminderToEdit != null) { viewModel.updateExistingReminder(reminderToEdit!!.copy(title = t, targetDateInMillis = d), context) { customToastMessage = it } } else { viewModel.addReminder(t, d, currentTab == 1, context) { customToastMessage = it } }; showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }) }
 
-        if (showFiadoresListDialog) { ScheduledFiadoresDialog(fiadores = fiadores, onDismiss = { showFiadoresListDialog = false }, onDelete = { viewModel.deleteFiador(it, context) }, onEdit = { fiadorToEdit = it; showFiadoresListDialog = false; showFiadorDialog = true }, onCreateNew = { fiadorToEdit = null; showFiadoresListDialog = false; showFiadorDialog = true }) }
+        if (showFiadoresListDialog) { ScheduledFiadoresDialog(fiadores = currentTabFiadores, onDismiss = { showFiadoresListDialog = false }, onDelete = { viewModel.deleteFiador(it, context) }, onEdit = { fiadorToEdit = it; showFiadoresListDialog = false; showFiadorDialog = true }, onCreateNew = { fiadorToEdit = null; showFiadoresListDialog = false; showFiadorDialog = true }) }
 
         if (showFiadorDialog) {
             FiadorDialog(
@@ -1603,7 +1769,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
                 },
                 onConfirmNew = { n, p, cartItemsFiado, d, initialPaid, method ->
-                    viewModel.addFiador(n, p, cartItemsFiado, d, initialPaid, method, context) { customToastMessage = it }
+                    viewModel.addFiador(n, p, cartItemsFiado, d, initialPaid, method, currentTab == 1, context) { customToastMessage = it }
                     showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
 
                     if (checkoutToFiadorCart.isNotEmpty()) {
@@ -1631,19 +1797,40 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 // 7. COMPONENTES DE LA TIENDA E INVENTARIO
 // ==========================================
 @Composable
-fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppingCart: List<Pair<Product, Int>>, isLockedStore: Boolean, totalStoreCash: Double, totalStoreDigital: Double, onOpenInventory: () -> Unit, onOpenCheckout: () -> Unit, onResetProfitsClick: () -> Unit, onDeleteVentas: (List<Transaction>) -> Unit, showPremiumToast: () -> Unit, totalProfit: Double, activeFiadores: List<Fiador>, onSettleFiador: (Fiador) -> Unit, onEditFiador: (Fiador) -> Unit) {
+fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppingCart: List<Pair<Product, Int>>, isLockedStore: Boolean, totalStoreCash: Double, totalStoreDigital: Double, onOpenInventory: () -> Unit, onOpenCheckout: () -> Unit, onResetProfitsClick: () -> Unit, onDeleteVentas: (List<Transaction>) -> Unit, showPremiumToast: () -> Unit, totalProfit: Double, activeFiadores: List<Fiador>, activeReminders: List<Reminder>, onSettleFiador: (Fiador) -> Unit, onEditFiador: (Fiador) -> Unit, onSettleReminder: (Reminder) -> Unit, onEditReminder: (Reminder) -> Unit) {
     val totalInventoryValue = remember(products) { products.sumOf { it.price * it.stock } }
     var showVendidosDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        activeFiadores.forEach { fiador ->
+        activeReminders.forEachIndexed { index, reminder ->
+            AnimatedVisibility(visible = true) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .padding(top = if(index == 0) 16.dp else 0.dp)
+                        .background(Color(0xFF1976D2), RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onEditReminder(reminder) }
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("📅 Es hora de pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { onSettleReminder(reminder) }, modifier = Modifier.size(24.dp)) {
+                        Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White)
+                    }
+                }
+            }
+        }
+
+        activeFiadores.forEachIndexed { index, fiador ->
             val remaining = fiador.amount - fiador.paidAmount
             AnimatedVisibility(visible = true) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .padding(top = if(fiador == activeFiadores.first()) 16.dp else 0.dp)
+                        .padding(top = if(index == 0 && activeReminders.isEmpty()) 16.dp else 0.dp)
                         .background(Color(0xFFFBC02D), RoundedCornerShape(8.dp))
                         .clip(RoundedCornerShape(8.dp))
                         .clickable { onEditFiador(fiador) } // Permite abrir el dialogo de abono/info
@@ -1662,7 +1849,7 @@ fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppi
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth().padding(16.dp).padding(top = if(activeFiadores.isNotEmpty()) 0.dp else 0.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Card(modifier = Modifier.fillMaxWidth().padding(16.dp).padding(top = if(activeFiadores.isNotEmpty() || activeReminders.isNotEmpty()) 0.dp else 0.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
@@ -2363,10 +2550,12 @@ fun SoundSettingsDialog(
     personalSoundUri: String?,
     storeSoundUri: String?,
     touchSoundUri: String?,
+    isVoiceEnabled: Boolean,
     onDismiss: () -> Unit,
     onSelectPersonal: (String) -> Unit,
     onSelectStore: (String) -> Unit,
-    onSelectTouch: (String) -> Unit
+    onSelectTouch: (String) -> Unit,
+    onVoiceToggle: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -2374,6 +2563,8 @@ fun SoundSettingsDialog(
     var currentVolume by remember { mutableStateOf(audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION).toFloat()) }
 
     var targetForPicker by remember { mutableStateOf("") }
+    var selectedSoundTab by remember { mutableStateOf(0) }
+    val tabs = listOf("General ⚙️", "Personal 👤", "Tienda 🏪")
 
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -2419,63 +2610,97 @@ fun SoundSettingsDialog(
         title = { Text("Configuración de Sonido 🎵", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text("Ajusta el volumen (escucharás el tono por defecto al soltar) y selecciona los tonos.", color = Color.Gray, fontSize = 13.sp, textAlign = TextAlign.Center)
-                Spacer(modifier = Modifier.height(16.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
 
-                Text("Volumen del Sistema", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Text("🔉", fontSize = 20.sp)
-                    Slider(
-                        value = currentVolume,
-                        onValueChange = {
-                            currentVolume = it
-                            audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, it.toInt(), 0)
-                        },
-                        onValueChangeFinished = {
-                            AppSounds.play(context, "")
-                        },
-                        valueRange = 0f..maxVolume,
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
-                    )
-                    Text("🔊", fontSize = 20.sp)
-                }
-                Text("${(currentVolume / maxVolume * 100).toInt()}%", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-
-                Spacer(modifier = Modifier.height(16.dp))
-                Divider(color = Color.Gray.copy(alpha = 0.2f))
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text("🔵 Notificaciones Personal (Deudas)", fontWeight = FontWeight.Bold, fontSize = 13.sp, textAlign = TextAlign.Center)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    OutlinedButton(onClick = { onSelectPersonal("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }
-                    Button(onClick = { openRingtonePicker("PERSONAL") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }
-                    Button(onClick = { openAudioPicker("PERSONAL") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) }
+                TabRow(selectedTabIndex = selectedSoundTab, containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.primary) {
+                    tabs.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedSoundTab == index,
+                            onClick = { selectedSoundTab = index },
+                            text = { Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                Divider(color = Color.Gray.copy(alpha = 0.2f))
-                Spacer(modifier = Modifier.height(16.dp))
 
-                Text("🏪 Notificaciones Tienda (Fiadores/Stock)", fontWeight = FontWeight.Bold, fontSize = 13.sp, textAlign = TextAlign.Center)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    OutlinedButton(onClick = { onSelectStore("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }
-                    Button(onClick = { openRingtonePicker("STORE") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }
-                    Button(onClick = { openAudioPicker("STORE") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) }
-                }
+                Crossfade(targetState = selectedSoundTab, label = "SoundTabs") { tab ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        when (tab) {
+                            0 -> { // General
+                                Text("Ajusta el volumen (escucharás un tono al soltar).", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
+                                Spacer(modifier = Modifier.height(16.dp))
 
-                Spacer(modifier = Modifier.height(16.dp))
-                Divider(color = Color.Gray.copy(alpha = 0.2f))
-                Spacer(modifier = Modifier.height(16.dp))
+                                Text("Volumen del Sistema", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                    Text("🔉", fontSize = 20.sp)
+                                    Slider(
+                                        value = currentVolume,
+                                        onValueChange = {
+                                            currentVolume = it
+                                            audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, it.toInt(), 0)
+                                        },
+                                        onValueChangeFinished = { AppSounds.play(context, "") },
+                                        valueRange = 0f..maxVolume,
+                                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
+                                    )
+                                    Text("🔊", fontSize = 20.sp)
+                                }
+                                Text("${(currentVolume / maxVolume * 100).toInt()}%", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
 
-                Text("👆 Sonido de Toques (Acciones en App)", fontWeight = FontWeight.Bold, fontSize = 13.sp, textAlign = TextAlign.Center)
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    OutlinedButton(onClick = { onSelectTouch("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }
-                    Button(onClick = { openRingtonePicker("TOUCH") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }
-                    Button(onClick = { openAudioPicker("TOUCH") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) }
+                                Spacer(modifier = Modifier.height(24.dp))
+                                Divider(color = Color.Gray.copy(alpha = 0.2f))
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onVoiceToggle(!isVoiceEnabled) }.padding(vertical = 8.dp)) {
+                                    Switch(checked = isVoiceEnabled, onCheckedChange = onVoiceToggle)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text("Asistente de Voz 🎙️", fontWeight = FontWeight.Bold)
+                                        Text("Leer notificaciones en voz alta", fontSize = 12.sp, color = Color.Gray)
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Divider(color = Color.Gray.copy(alpha = 0.2f))
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Text("👆 Sonido de Toques (Acciones en App)", fontWeight = FontWeight.Bold, fontSize = 13.sp, textAlign = TextAlign.Center)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                    OutlinedButton(onClick = { onSelectTouch("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }
+                                    Button(onClick = { openRingtonePicker("TOUCH") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }
+                                    Button(onClick = { openAudioPicker("TOUCH") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) }
+                                }
+                            }
+                            1 -> { // Personal
+                                Text("Notificaciones de Agenda Personal", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("🔵 Recordatorios de Deudas", fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = TextAlign.Center)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                    OutlinedButton(onClick = { onSelectPersonal("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }
+                                    Button(onClick = { openRingtonePicker("PERSONAL") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }
+                                    Button(onClick = { openAudioPicker("PERSONAL") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) }
+                                }
+                            }
+                            2 -> { // Tienda
+                                Text("Notificaciones de la Tienda", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("🏪 Cobros, Fiadores y Stock", fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = TextAlign.Center)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                    OutlinedButton(onClick = { onSelectStore("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }
+                                    Button(onClick = { openRingtonePicker("STORE") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }
+                                    Button(onClick = { openAudioPicker("STORE") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -2496,7 +2721,7 @@ fun CalendarDialog(
 ) {
     var currentMonth by remember { mutableStateOf(Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }) }
     val formatMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-    val titleText = if (currentTab == 0) "Mis Deudas 🗓️" else "Fiadores y Productos 🗓️"
+    val titleText = if (currentTab == 0) "Agenda Personal \uD83D\uDDD3\uFE0F" else "Agenda de Tienda \uD83D\uDDD3\uFE0F"
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2537,8 +2762,8 @@ fun CalendarDialog(
                                     val dayCal = currentMonth.clone() as Calendar
                                     dayCal.set(Calendar.DAY_OF_MONTH, dayNumber)
 
-                                    val hasReminder = if (currentTab == 0) reminders.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) } else false
-                                    val hasFiador = if (currentTab == 1) fiadores.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) } else false
+                                    val hasReminder = reminders.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }
+                                    val hasFiador = fiadores.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }
                                     val hasProduct = if (currentTab == 1) products.any { it.expirationDateInMillis != null && isSameDay(it.expirationDateInMillis, dayCal.timeInMillis) } else false
                                     val hasEvents = hasReminder || hasFiador || hasProduct
 
@@ -2569,20 +2794,21 @@ fun CalendarDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
                 Divider(color = Color.Gray.copy(alpha = 0.2f))
-                Spacer(modifier = Modifier.height(16.dp))
 
-                if (currentTab == 1) {
-                    Button(
-                        onClick = onViewFiadores,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)
-                    ) { Text("📋 Información de Deudores", fontWeight = FontWeight.Bold) }
-                } else {
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = onViewReminders,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2), contentColor = Color.White)
-                    ) { Text("💸 Mis Deudas Pendientes", fontWeight = FontWeight.Bold) }
+                    ) { Text("💸 Mis Deudas", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
+
+                    Button(
+                        onClick = onViewFiadores,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        contentPadding = PaddingValues(horizontal = 4.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)
+                    ) { Text("📋 Mis Deudores", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
                 }
             }
         },
@@ -3038,7 +3264,6 @@ fun FiadorDialog(
     }
 }
 
-// === COMPONENTES DE CHAT Y PLANES ===
 @Composable
 fun AdminChatListDialog(onDismiss: () -> Unit, onSelectClient: (String) -> Unit) {
     var chats by remember { mutableStateOf<Map<String, List<ChatMessage>>>(emptyMap()) }
@@ -3207,12 +3432,12 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         if (context == null || intent == null) return
 
-        // Bloque WakeLock Seguro para evitar crasheos si falta el permiso WAKE_LOCK
+        // Bloque WakeLock Seguro (Ahora dura 8 segundos para darle tiempo a la voz de terminar)
         var wakeLock: PowerManager.WakeLock? = null
         try {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
             wakeLock = powerManager?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MiBilletera::AlarmaWakeLock")
-            wakeLock?.acquire(5000)
+            wakeLock?.acquire(8000)
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -3256,7 +3481,15 @@ class ReminderReceiver : BroadcastReceiver() {
                             }
 
                             if (hasNewMsg && notificationMsg != null) {
-                                AppSounds.init() // Asegurar inicialización de sonido en 2do plano
+                                val userPrefs = context.getSharedPreferences("FinancePrefs_$userId", Context.MODE_PRIVATE)
+                                val useVoice = userPrefs.getBoolean("voiceEnabled", false)
+
+                                if (useVoice) {
+                                    AppVoice.speak(context, "Nuevo mensaje de $notificationSender. $notificationMsg")
+                                } else {
+                                    AppSounds.init()
+                                }
+
                                 showChatNotification(context, "Nuevo mensaje de $notificationSender", notificationMsg!!)
                                 authPrefs.edit().putLong("lastNotified_$userId", newestTime).apply()
                             }
@@ -3276,28 +3509,33 @@ class ReminderReceiver : BroadcastReceiver() {
             val notifText = intent.getStringExtra("NOTIFICATION_TEXT") ?: "Tienes una alerta pendiente"
             val id = intent.getIntExtra("ID", 0)
 
-            // Asegurar que el motor de sonido se inicialice si la app estaba muerta
-            AppSounds.init()
             val authPrefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
             val userId = authPrefs.getString("lastKnownUserId", null)
+            var useVoice = false
+            var customSound = ""
+
             if (userId != null) {
                 val userPrefs = context.getSharedPreferences("FinancePrefs_$userId", Context.MODE_PRIVATE)
-                val customSound = userPrefs.getString("customSoundUri", "")
-                AppSounds.play(context, customSound)
+                useVoice = userPrefs.getBoolean("voiceEnabled", false)
+                customSound = userPrefs.getString("customSoundUri", "") ?: ""
+            }
+
+            if (useVoice) {
+                AppVoice.speak(context, "$notifTitle. $notifText")
             } else {
-                AppSounds.play(context, "")
+                AppSounds.init()
+                AppSounds.play(context, customSound)
             }
 
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             if (notificationManager != null) {
-                // CAMBIO: Canal V6 para forzar al OS a aceptar las nuevas configuraciones
                 val channelId = "finance_alarms_v6"
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     val channel = NotificationChannel(channelId, "Recordatorios de App", NotificationManager.IMPORTANCE_HIGH).apply {
                         description = "Notificaciones para recordar pagos y cobros"
                         enableVibration(true)
-                        setSound(null, null) // Sonido manejado manualmente por AppSounds
+                        setSound(null, null)
                     }
                     notificationManager.createNotificationChannel(channel)
                 }
