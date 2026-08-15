@@ -519,7 +519,16 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
-    fun addTransaction(description: String, amount: Double, isIncome: Boolean, note: String) { viewModelScope.launch { dao.insertTransaction(Transaction(description = description, amount = amount, isIncome = isIncome, note = note)) }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
+    // MODIFICADO: Agregado el parámetro 'method' para soportar Efectivo/Digital en Modo Personal
+    fun addTransaction(description: String, amount: Double, isIncome: Boolean, note: String, method: String) {
+        viewModelScope.launch {
+            val cash = if (method == "Efectivo") amount else 0.0
+            val digital = if (method == "Digital") amount else 0.0
+            dao.insertTransaction(Transaction(description = description, amount = amount, isIncome = isIncome, note = note, cashAmount = cash, digitalAmount = digital))
+        }
+        AppSounds.play(getApplication<Application>(), touchSoundUri)
+    }
+
     fun insertRawTransaction(transaction: Transaction) { viewModelScope.launch { dao.insertTransaction(transaction.copy(id = 0)) } }
     fun deleteTransaction(transaction: Transaction) { viewModelScope.launch { dao.deleteTransaction(transaction) }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
     fun deleteTransactionsList(list: List<Transaction>) { viewModelScope.launch { list.forEach { dao.deleteTransaction(it) } }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
@@ -1057,6 +1066,14 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     val snackbarHostState = remember { SnackbarHostState() }; val coroutineScope = rememberCoroutineScope()
     val totalIncome = remember(personalTransactions) { personalTransactions.filter { it.isIncome }.sumOf { it.amount } }; val totalExpense = remember(personalTransactions) { personalTransactions.filter { !it.isIncome }.sumOf { it.amount } }; val balance = totalIncome - totalExpense
+
+    val personalCashIncome = remember(personalTransactions) { personalTransactions.filter { it.isIncome }.sumOf { it.cashAmount } }
+    val personalCashExpense = remember(personalTransactions) { personalTransactions.filter { !it.isIncome }.sumOf { it.cashAmount } }
+    val personalDigitalIncome = remember(personalTransactions) { personalTransactions.filter { it.isIncome }.sumOf { it.digitalAmount } }
+    val personalDigitalExpense = remember(personalTransactions) { personalTransactions.filter { !it.isIncome }.sumOf { it.digitalAmount } }
+    val personalCashBalance = personalCashIncome - personalCashExpense
+    val personalDigitalBalance = personalDigitalIncome - personalDigitalExpense
+
     var currentUiTime by remember { mutableStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(60000L); currentUiTime = System.currentTimeMillis() } }
@@ -1155,10 +1172,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 Crossfade(targetState = currentTab, label = "TabSwitch") { tab ->
                     if (tab == 0) {
                         Column(modifier = Modifier.fillMaxSize()) {
-                            DashboardCard(balance, totalIncome, totalExpense)
+                            DashboardCard(balance, totalIncome, totalExpense, personalCashBalance, personalDigitalBalance)
                             AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) { Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) { Text("⚠️ ¡Alerta! Tu saldo está por debajo del límite crítico (${formatCOP(viewModel.minBalanceThreshold)}).", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) } }
 
-                            // Mostrar Deudores Personales
                             activeFiadores.forEachIndexed { index, fiador ->
                                 val remaining = fiador.amount - fiador.paidAmount
                                 AnimatedVisibility(visible = true) {
@@ -1184,7 +1200,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 }
                             }
 
-                            // Mostrar Deudas Personales
                             activeReminders.forEachIndexed { index, reminder ->
                                 AnimatedVisibility(visible = true) {
                                     Row(
@@ -1419,7 +1434,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        if (showAddDialog) AddTransactionDialog(onDismiss = { showAddDialog = false }, onConfirm = { d, a, i, n -> viewModel.addTransaction(d, a, i, n); showAddDialog = false })
+        if (showAddDialog) AddTransactionDialog(onDismiss = { showAddDialog = false }, onConfirm = { d, a, i, n, m -> viewModel.addTransaction(d, a, i, n, m); showAddDialog = false })
         if (showLimitDialog) LimitDialog(currentLimit = viewModel.minBalanceThreshold, onDismiss = { showLimitDialog = false }, onConfirm = { viewModel.updateMinBalance(it); showLimitDialog = false })
 
         if (showDayEventsDialog && preselectedDateForEvent != null) {
@@ -2115,7 +2130,7 @@ fun AddToCartDialog(product: Product, currentCartQty: Int, onDismiss: () -> Unit
                     placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
-                    modifier = Modifier.widthIn(min = 80.dp).padding(vertical = 8.dp).focusRequester(focusRequester),
+                    modifier = Modifier.width(150.dp).padding(vertical = 8.dp).focusRequester(focusRequester),
                     textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 )
             }
@@ -2164,14 +2179,21 @@ fun CheckoutDialog(
         var editQtyRaw by remember { mutableStateOf(itemToEdit!!.second.second.toString()) }
         AlertDialog(
             onDismissRequest = { itemToEdit = null },
-            title = { Text("Editar cantidad de ${itemToEdit!!.second.first.name}") },
+            title = { Text("Editar cantidad", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
             text = {
-                OutlinedTextField(
-                    value = editQtyRaw,
-                    onValueChange = { editQtyRaw = it.filter { c -> c.isDigit() } },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    label = { Text("Nueva Cantidad") }
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    Text(itemToEdit!!.second.first.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = editQtyRaw,
+                        onValueChange = { editQtyRaw = it.filter { c -> c.isDigit() } },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = { Text("Nueva Cantidad") },
+                        singleLine = true,
+                        modifier = Modifier.width(150.dp),
+                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    )
+                }
             },
             confirmButton = {
                 Button(onClick = {
@@ -2217,7 +2239,7 @@ fun CheckoutDialog(
                         placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         singleLine = true,
-                        modifier = Modifier.widthIn(min = 80.dp).padding(vertical = 8.dp).focusRequester(focusRequester),
+                        modifier = Modifier.width(150.dp).padding(vertical = 8.dp).focusRequester(focusRequester),
                         textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                     )
                 }
@@ -2518,20 +2540,137 @@ fun ProductInfoDialog(product: Product, onDismiss: () -> Unit, onDeleteCompletel
 }
 
 @Composable
-fun DashboardCard(balance: Double, income: Double, expense: Double) {
-    Card(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) { Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) { Text("Saldo Actual", color = Color.Gray, fontSize = 16.sp); Text(text = formatCOP(balance), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = if (balance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935)); Spacer(modifier = Modifier.height(24.dp)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFE8F5E9).copy(alpha = 0.2f)).padding(4.dp)) { Text("🟢", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Ingresos", color = Color.Gray) }; Text(formatCOP(income), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }; Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFFFEBEE).copy(alpha = 0.2f)).padding(4.dp)) { Text("🔴", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Gastos", color = Color.Gray) }; Text(formatCOP(expense), fontWeight = FontWeight.Bold, color = Color(0xFFF44336)) } } } }
+fun DashboardCard(balance: Double, income: Double, expense: Double, cashBalance: Double, digitalBalance: Double) {
+    Card(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Saldo Total", color = Color.Gray, fontSize = 16.sp)
+            Text(text = formatCOP(balance), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = if (balance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.1f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Efectivo", fontSize=12.sp, color=Color.Gray)
+                    Text(formatCOP(cashBalance), fontSize=14.sp, fontWeight=FontWeight.Bold, color = if (cashBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Digital", fontSize=12.sp, color=Color.Gray)
+                    Text(formatCOP(digitalBalance), fontSize=14.sp, fontWeight=FontWeight.Bold, color = if (digitalBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFE8F5E9).copy(alpha = 0.2f)).padding(4.dp)) { Text("🟢", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Ingresos", color = Color.Gray) }; Text(formatCOP(income), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFFFEBEE).copy(alpha = 0.2f)).padding(4.dp)) { Text("🔴", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Gastos", color = Color.Gray) }; Text(formatCOP(expense), fontWeight = FontWeight.Bold, color = Color(0xFFF44336)) }
+            }
+        }
+    }
 }
 
 @Composable
 fun TransactionItem(transaction: Transaction, onDelete: () -> Unit) {
-    val isIncome = transaction.isIncome; val color = if (isIncome) Color(0xFF4CAF50) else Color(0xFFF44336); val emoji = getSmartEmoji(transaction.description, isIncome)
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) { Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(color.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Text(text = emoji, fontSize = 24.sp) }; Spacer(modifier = Modifier.width(16.dp)); Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) { Text(text = transaction.description, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis); if (transaction.note.isNotBlank()) Text(text = transaction.note, color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 2.dp), maxLines = 1, overflow = TextOverflow.Ellipsis); Text(text = formatDate(transaction.timestamp), color = Color.Gray.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1) }; Column(horizontalAlignment = Alignment.End) { Text(text = "${if (isIncome) "+" else "-"}${formatCOP(transaction.amount)}", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = color, maxLines = 1) }; IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Gray, modifier = Modifier.size(20.dp)) } } }
+    val isIncome = transaction.isIncome
+    val color = if (isIncome) Color(0xFF4CAF50) else Color(0xFFF44336)
+    val emoji = getSmartEmoji(transaction.description, isIncome)
+
+    val methodText = when {
+        transaction.cashAmount > 0 && transaction.digitalAmount == 0.0 -> "Efectivo"
+        transaction.digitalAmount > 0 && transaction.cashAmount == 0.0 -> "Digital"
+        transaction.cashAmount > 0 && transaction.digitalAmount > 0 -> "Mixto"
+        else -> ""
+    }
+
+    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(color.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Text(text = emoji, fontSize = 24.sp) }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(text = transaction.description, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+                val noteAndMethod = buildString {
+                    if (transaction.note.isNotBlank()) append(transaction.note)
+                    if (methodText.isNotEmpty()) {
+                        if (isNotEmpty()) append(" | ")
+                        append(methodText)
+                    }
+                }
+                if (noteAndMethod.isNotEmpty()) {
+                    Text(text = noteAndMethod, color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 2.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+
+                Text(text = formatDate(transaction.timestamp), color = Color.Gray.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1)
+            }
+            Column(horizontalAlignment = Alignment.End) { Text(text = "${if (isIncome) "+" else "-"}${formatCOP(transaction.amount)}", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = color, maxLines = 1) }
+            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Gray, modifier = Modifier.size(20.dp)) }
+        }
+    }
 }
 
 @Composable
-fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Boolean, String) -> Unit) {
-    var isIncome by remember { mutableStateOf(true) }; var descIncome by remember { mutableStateOf("") }; var amountIncome by remember { mutableStateOf("") }; var descExpense by remember { mutableStateOf("") }; var amountExpense by remember { mutableStateOf("") }; var noteExpense by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Nuevo Movimiento ✍️", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { Column { Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(4.dp)) { Button(onClick = { isIncome = true }, colors = ButtonDefaults.buttonColors(containerColor = if (isIncome) Color(0xFF4CAF50) else Color.Transparent, contentColor = if (isIncome) Color.White else MaterialTheme.colorScheme.onSurface), shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f), elevation = null) { Text("Ingresos 👝", fontWeight = FontWeight.Bold) }; Button(onClick = { isIncome = false }, colors = ButtonDefaults.buttonColors(containerColor = if (!isIncome) Color(0xFFF44336) else Color.Transparent, contentColor = if (!isIncome) Color.White else MaterialTheme.colorScheme.onSurface), shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f), elevation = null) { Text("Gastos 👛", fontWeight = FontWeight.Bold) } }; Spacer(modifier = Modifier.height(16.dp)); Crossfade(targetState = isIncome, label = "") { showIncome -> Column { if (showIncome) { OutlinedTextField(value = descIncome, onValueChange = { input -> descIncome = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Título") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences)); Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = amountIncome, onValueChange = { amountIncome = cleanAmountInput(it) }, label = { Text("Monto") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth()) } else { OutlinedTextField(value = descExpense, onValueChange = { input -> descExpense = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Título") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences)); Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = amountExpense, onValueChange = { amountExpense = cleanAmountInput(it) }, label = { Text("Monto") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth()); Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = noteExpense, onValueChange = { input -> noteExpense = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nota (Opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences)) } } } } }, confirmButton = { Button(onClick = { if (isIncome) { val a = amountIncome.toDoubleOrNull(); if (descIncome.isNotBlank() && a != null) { val capTitle = descIncome.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }; onConfirm(capTitle, a, true, "") } } else { val a = amountExpense.toDoubleOrNull(); if (descExpense.isNotBlank() && a != null) { val capTitle = descExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }; onConfirm(capTitle, a, false, noteExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }) } } }) { Text("Guardar ✔️") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar ❌") } })
+fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Boolean, String, String) -> Unit) {
+    var isIncome by remember { mutableStateOf(true) }
+    var descIncome by remember { mutableStateOf("") }
+    var amountIncome by remember { mutableStateOf("") }
+    var descExpense by remember { mutableStateOf("") }
+    var amountExpense by remember { mutableStateOf("") }
+    var noteExpense by remember { mutableStateOf("") }
+    var method by remember { mutableStateOf("Efectivo") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Nuevo Movimiento ✍️", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = {
+            Column {
+                Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(4.dp)) {
+                    Button(onClick = { isIncome = true }, colors = ButtonDefaults.buttonColors(containerColor = if (isIncome) Color(0xFF4CAF50) else Color.Transparent, contentColor = if (isIncome) Color.White else MaterialTheme.colorScheme.onSurface), shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f), elevation = null) { Text("Ingresos 👝", fontWeight = FontWeight.Bold) }
+                    Button(onClick = { isIncome = false }, colors = ButtonDefaults.buttonColors(containerColor = if (!isIncome) Color(0xFFF44336) else Color.Transparent, contentColor = if (!isIncome) Color.White else MaterialTheme.colorScheme.onSurface), shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f), elevation = null) { Text("Gastos 👛", fontWeight = FontWeight.Bold) }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("Método de Pago", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                    FilterChip(selected = method == "Efectivo", onClick = { method = "Efectivo" }, label = { Text("Efectivo") })
+                    FilterChip(selected = method == "Digital", onClick = { method = "Digital" }, label = { Text("Digital") })
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Crossfade(targetState = isIncome, label = "") { showIncome ->
+                    Column {
+                        if (showIncome) {
+                            OutlinedTextField(value = descIncome, onValueChange = { input -> descIncome = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Título") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(value = amountIncome, onValueChange = { amountIncome = cleanAmountInput(it) }, label = { Text("Monto") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+                        } else {
+                            OutlinedTextField(value = descExpense, onValueChange = { input -> descExpense = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Título") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(value = amountExpense, onValueChange = { amountExpense = cleanAmountInput(it) }, label = { Text("Monto") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(value = noteExpense, onValueChange = { input -> noteExpense = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nota (Opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                if (isIncome) {
+                    val a = amountIncome.toDoubleOrNull()
+                    if (descIncome.isNotBlank() && a != null) {
+                        val capTitle = descIncome.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                        onConfirm(capTitle, a, true, "", method)
+                    }
+                } else {
+                    val a = amountExpense.toDoubleOrNull()
+                    if (descExpense.isNotBlank() && a != null) {
+                        val capTitle = descExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                        onConfirm(capTitle, a, false, noteExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, method)
+                    }
+                }
+            }) { Text("Guardar ✔️") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar ❌") } }
+    )
 }
 
 @Composable
@@ -2937,7 +3076,7 @@ fun AddProductDialog(
 @Composable
 fun DeleteQuantityDialog(product: Product, initialQty: String, onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
     var qtyRaw by remember { mutableStateOf(initialQty) }; val context = LocalContext.current
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Eliminar Stock 🗑️", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("¿Cuántas unidades de '${product.name}' deseas eliminar?", textAlign = TextAlign.Center, fontSize = 14.sp); Spacer(modifier = Modifier.height(16.dp)); OutlinedTextField(value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cantidad") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth(0.6f), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp)); Text("Stock actual: ${product.stock} ${product.unit}", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) } }, confirmButton = { Button(onClick = { val q = qtyRaw.toIntOrNull() ?: -1; if (q > product.stock) { Toast.makeText(context, "Supera el stock actual.", Toast.LENGTH_SHORT).show() } else if (q <= 0) { Toast.makeText(context, "No se puede eliminar 0.", Toast.LENGTH_SHORT).show() } else { onConfirm(q) } }) { Text("Siguiente") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Eliminar Stock 🗑️", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { Text("¿Cuántas unidades de '${product.name}' deseas eliminar?", textAlign = TextAlign.Center, fontSize = 14.sp); Spacer(modifier = Modifier.height(16.dp)); OutlinedTextField(value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cantidad") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.width(150.dp), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)); Text("Stock actual: ${product.stock} ${product.unit}", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) } }, confirmButton = { Button(onClick = { val q = qtyRaw.toIntOrNull() ?: -1; if (q > product.stock) { Toast.makeText(context, "Supera el stock actual.", Toast.LENGTH_SHORT).show() } else if (q <= 0) { Toast.makeText(context, "No se puede eliminar 0.", Toast.LENGTH_SHORT).show() } else { onConfirm(q) } }) { Text("Siguiente") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
 }
 
 @Composable
