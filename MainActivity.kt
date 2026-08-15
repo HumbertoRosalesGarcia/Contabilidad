@@ -227,19 +227,31 @@ object AppVoice {
     private var isInitialized = false
     private var pendingText: String? = null
 
+    // Función limpiadora para que la voz no diga "Punto" o "Guión"
+    private fun cleanSpeechText(input: String): String {
+        return input
+            .replace("...", ",")
+            .replace(Regex("\\.(?=\\s|$)"), ",")
+            .replace("/", " ")
+            .replace("-", " ")
+            .replace("_", " ")
+    }
+
     fun speak(context: Context, text: String) {
+        val sanitizedText = cleanSpeechText(text)
+
         if (tts == null) {
             tts = TextToSpeech(context.applicationContext) { status ->
                 if (status == TextToSpeech.SUCCESS) {
-                    tts?.language = Locale("es", "ES") // Español
+                    tts?.language = Locale("es", "ES")
                     isInitialized = true
-                    tts?.speak(pendingText ?: text, TextToSpeech.QUEUE_FLUSH, null, "NotifID")
+                    tts?.speak(pendingText ?: sanitizedText, TextToSpeech.QUEUE_FLUSH, null, "NotifID")
                     pendingText = null
                 }
             }
-            pendingText = text
+            pendingText = sanitizedText
         } else if (isInitialized) {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "NotifID")
+            tts?.speak(sanitizedText, TextToSpeech.QUEUE_FLUSH, null, "NotifID")
         }
     }
 }
@@ -286,7 +298,7 @@ fun scheduleNextChatSync(context: Context) {
     } catch (_: Exception) {}
 }
 
-// ==========================================
+
 // ==========================================
 // 2. BASE DE DATOS (ROOM)
 // ==========================================
@@ -307,8 +319,9 @@ data class Transaction(
 data class Reminder(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val title: String,
+    val amount: Double = 0.0, // <-- NUEVO: Monto de la deuda personal
     val targetDateInMillis: Long,
-    val isStore: Boolean = false // Identificador para independizar sesiones
+    val isStore: Boolean = false
 )
 
 @Entity(tableName = "fiadores")
@@ -321,7 +334,7 @@ data class Fiador(
     val targetDateInMillis: Long,
     val paidAmount: Double = 0.0,
     val paymentHistory: String = "",
-    val isStore: Boolean = true // Identificador para independizar sesiones
+    val isStore: Boolean = true
 )
 
 @Entity(tableName = "products") data class Product(@PrimaryKey(autoGenerate = true) val id: Int = 0, val name: String, val purchasePrice: Double = 0.0, val price: Double, val stock: Int, val unit: String = "Uds", val expirationDateInMillis: Long? = null, val entryDateInMillis: Long = System.currentTimeMillis(), val minStock: Int = 0, val imageUri: String? = null)
@@ -364,8 +377,10 @@ val MIGRATION_10_11 = object : Migration(10, 11) { override fun migrate(db: Supp
 val MIGRATION_11_12 = object : Migration(11, 12) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `paidAmount` REAL NOT NULL DEFAULT 0.0"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `paymentHistory` TEXT NOT NULL DEFAULT ''") } }
 val MIGRATION_12_13 = object : Migration(12, 13) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `products` ADD COLUMN `imageUri` TEXT DEFAULT NULL") } }
 val MIGRATION_13_14 = object : Migration(13, 14) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `reminders` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 0"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 1") } }
+// --- NUEVO: Migración para añadir el monto a las deudas existentes ---
+val MIGRATION_14_15 = object : Migration(14, 15) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `reminders` ADD COLUMN `amount` REAL NOT NULL DEFAULT 0.0") } }
 
-@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 14, exportSchema = false)
+@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 15, exportSchema = false) // <-- AHORA ES VERSIÓN 15
 abstract class AppDatabase : RoomDatabase() {
     abstract fun financeDao(): FinanceDao
     companion object {
@@ -374,7 +389,7 @@ abstract class AppDatabase : RoomDatabase() {
             return INSTANCES[userId] ?: synchronized(this) {
                 val dbName = "finance_database_$userId"
                 val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, dbName)
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
                     .build()
                 INSTANCES[userId] = instance
                 instance
@@ -550,11 +565,35 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     fun reduceProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val newStock = product.stock - qty; if (newStock <= 0) { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") } else { dao.updateProduct(product.copy(stock = newStock)); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") } }; AppSounds.play(context, touchSoundUri) }
     fun restoreProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val currentInDb = dao.getAllProducts().firstOrNull()?.find { it.id == product.id }; if (currentInDb != null) dao.updateProduct(currentInDb.copy(stock = currentInDb.stock + qty)) else { dao.insertProduct(product); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER") } } }
 
-    fun addReminder(title: String, dateInMillis: Long, isStore: Boolean, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val reminderId = dao.insertReminder(Reminder(title = title, targetDateInMillis = dateInMillis, isStore = isStore)).toInt(); val success = scheduleNotification(context, dateInMillis, "¡Hora de Pagar! ⏰", title, reminderId, "ALARM_TRIGGER"); if (success) onConfigured("Alarma programada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}") }; AppSounds.play(context, touchSoundUri) }
-    fun updateExistingReminder(reminder: Reminder, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateReminder(reminder); val success = scheduleNotification(context, reminder.targetDateInMillis, "¡Hora de Pagar! ⏰", reminder.title, reminder.id, "ALARM_TRIGGER"); if (success) onConfigured("Alarma actualizada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(reminder.targetDateInMillis))}") }; AppSounds.play(context, touchSoundUri) }
+    // --- MODIFICADO: AddReminder ahora recibe y guarda 'amount', y pasa el texto a la voz ---
+    fun addReminder(title: String, amount: Double, dateInMillis: Long, isStore: Boolean, context: Context, onConfigured: (String) -> Unit) {
+        viewModelScope.launch {
+            val reminderId = dao.insertReminder(Reminder(title = title, amount = amount, targetDateInMillis = dateInMillis, isStore = isStore)).toInt()
+            val amountStr = amount.toLong().toString()
+            val voiceText = if (amount > 0) "Debes pagar $amountStr pesos de $title" else "Debes pagar $title"
+            val textMsg = if (amount > 0) "$title: ${formatCOP(amount)}" else title
+            val success = scheduleNotification(context, dateInMillis, "¡Hora de Pagar! ⏰", textMsg, reminderId, "ALARM_TRIGGER", voiceText)
+            if (success) onConfigured("Alarma programada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}")
+        }
+        AppSounds.play(context, touchSoundUri)
+    }
+
+    // --- MODIFICADO: updateExistingReminder ahora pasa el texto de voz actualizado ---
+    fun updateExistingReminder(reminder: Reminder, context: Context, onConfigured: (String) -> Unit) {
+        viewModelScope.launch {
+            dao.updateReminder(reminder)
+            val amountStr = reminder.amount.toLong().toString()
+            val voiceText = if (reminder.amount > 0) "Debes pagar $amountStr pesos de ${reminder.title}" else "Debes pagar ${reminder.title}"
+            val textMsg = if (reminder.amount > 0) "${reminder.title}: ${formatCOP(reminder.amount)}" else reminder.title
+            val success = scheduleNotification(context, reminder.targetDateInMillis, "¡Hora de Pagar! ⏰", textMsg, reminder.id, "ALARM_TRIGGER", voiceText)
+            if (success) onConfigured("Alarma actualizada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(reminder.targetDateInMillis))}")
+        }
+        AppSounds.play(context, touchSoundUri)
+    }
+
     fun deleteReminder(reminder: Reminder, context: Context) { viewModelScope.launch { dao.deleteReminder(reminder); cancelAlarm(context, reminder.id, "ALARM_TRIGGER") } }
 
-    // --- NUEVO: Controlamos qué texto enviarle a la voz según el Modo ---
+    // --- NUEVO: Construye el texto fantasma para lectura fluida ---
     private fun createFiadorVoiceText(name: String, amount: Double, reason: String, isStore: Boolean): String {
         val amountStr = amount.toLong().toString()
         if (isStore) {
@@ -641,7 +680,6 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             } else {
                 dao.updateFiador(fiador.copy(paidAmount = newPaidAmount, paymentHistory = newHistory))
 
-                // Actualizar la alarma con el nuevo monto faltante
                 val voiceText = createFiadorVoiceText(fiador.name, remaining, fiador.reason, fiador.isStore)
                 scheduleNotification(context, fiador.targetDateInMillis, "¡Cobrar a ${fiador.name}! 💰", "Monto: ${formatCOP(remaining)} - ${fiador.reason}", fiador.id + 100000, "FIADOR_TRIGGER", voiceText)
 
@@ -1248,7 +1286,12 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                             .padding(12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text("📅 Es hora de pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f));
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("📅 Pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            if (reminder.amount > 0) {
+                                                Text("Monto: ${formatCOP(reminder.amount)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                                            }
+                                        }
                                         IconButton(onClick = { viewModel.deleteReminder(reminder, context) }, modifier = Modifier.size(24.dp)) {
                                             Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White)
                                         }
@@ -1498,6 +1541,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text("Pagar Deuda", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
                                         Text(r.title, fontWeight = FontWeight.Bold)
+                                        if (r.amount > 0) {
+                                            Text(formatCOP(r.amount), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                        }
                                     }
                                 }
                             }
@@ -1802,7 +1848,21 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
         if (showRemindersListDialog) { ScheduledRemindersDialog(reminders = currentTabReminders, onDismiss = { showRemindersListDialog = false }, onDelete = { viewModel.deleteReminder(it, context) }, onEdit = { reminderToEdit = it; showRemindersListDialog = false; showReminderDialog = true }, onCreateNew = { reminderToEdit = null; showRemindersListDialog = false; showReminderDialog = true }) }
 
-        if (showReminderDialog) { ReminderDialog(initialReminder = reminderToEdit, preselectedDate = preselectedDateForEvent, onDismiss = { showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }, onConfirm = { t, d -> if (reminderToEdit != null) { viewModel.updateExistingReminder(reminderToEdit!!.copy(title = t, targetDateInMillis = d), context) { customToastMessage = it } } else { viewModel.addReminder(t, d, currentTab == 1, context) { customToastMessage = it } }; showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }) }
+        if (showReminderDialog) {
+            ReminderDialog(
+                initialReminder = reminderToEdit,
+                preselectedDate = preselectedDateForEvent,
+                onDismiss = { showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null },
+                onConfirm = { t, a, d ->
+                    if (reminderToEdit != null) {
+                        viewModel.updateExistingReminder(reminderToEdit!!.copy(title = t, amount = a, targetDateInMillis = d), context) { customToastMessage = it }
+                    } else {
+                        viewModel.addReminder(t, a, d, currentTab == 1, context) { customToastMessage = it }
+                    }
+                    showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null
+                }
+            )
+        }
 
         if (showFiadoresListDialog) { ScheduledFiadoresDialog(fiadores = currentTabFiadores, onDismiss = { showFiadoresListDialog = false }, onDelete = { viewModel.deleteFiador(it, context) }, onEdit = { fiadorToEdit = it; showFiadoresListDialog = false; showFiadorDialog = true }, onCreateNew = { fiadorToEdit = null; showFiadoresListDialog = false; showFiadorDialog = true }) }
 
@@ -1815,12 +1875,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 initialMethod = checkoutToFiadorMethod,
                 products = products,
                 preselectedDate = preselectedDateForEvent,
-                isStore = currentTab == 1, // --- MODIFICADO: Informamos el modo actual
+                isStore = currentTab == 1,
                 onDismiss = {
                     showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
                     checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
                 },
-                // --- MODIFICADO: Recibimos y usamos el nuevo parámetro 'pAmount' para la deuda personal
                 onConfirmNew = { n, p, cartItemsFiado, pAmount, d, initialPaid, method ->
                     viewModel.addFiador(n, p, cartItemsFiado, pAmount, d, initialPaid, method, currentTab == 1, context) { customToastMessage = it }
                     showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
@@ -1868,7 +1927,12 @@ fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppi
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("📅 Es hora de pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("📅 Pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        if (reminder.amount > 0) {
+                            Text("Monto: ${formatCOP(reminder.amount)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                        }
+                    }
                     IconButton(onClick = { onSettleReminder(reminder) }, modifier = Modifier.size(24.dp)) {
                         Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White)
                     }
@@ -3131,7 +3195,7 @@ fun ProductosVendidosDialog(transactions: List<Transaction>, onDismiss: () -> Un
 
 @Composable
 fun ScheduledRemindersDialog(reminders: List<Reminder>, onDismiss: () -> Unit, onDelete: (Reminder) -> Unit, onEdit: (Reminder) -> Unit, onCreateNew: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("A quien le debo 📋", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { if (reminders.isEmpty()) { Text("No tienes deudas activas registradas.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp)) } else { LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) { itemsIndexed(reminders) { index, reminder -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(text = "${index + 1}.", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.width(28.dp)); Column(modifier = Modifier.weight(1f)) { Text(reminder.title, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text(formatDate(reminder.targetDateInMillis), fontSize = 12.sp, color = Color.Gray) }; IconButton(onClick = { onEdit(reminder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = Color.Blue.copy(alpha = 0.7f)) }; IconButton(onClick = { onDelete(reminder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(alpha = 0.7f)) } }; if (index < reminders.size - 1) { Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp) } } } } }, confirmButton = { Button(onClick = onCreateNew) { Text("Crear") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("A quien le debo 📋", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { if (reminders.isEmpty()) { Text("No tienes deudas activas registradas.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp)) } else { LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) { itemsIndexed(reminders) { index, reminder -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(text = "${index + 1}.", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.width(28.dp)); Column(modifier = Modifier.weight(1f)) { Text(reminder.title, fontWeight = FontWeight.Bold, fontSize = 16.sp); if (reminder.amount > 0) { Text("Deuda: ${formatCOP(reminder.amount)}", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary) }; Text(formatDate(reminder.targetDateInMillis), fontSize = 12.sp, color = Color.Gray) }; IconButton(onClick = { onEdit(reminder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = Color.Blue.copy(alpha = 0.7f)) }; IconButton(onClick = { onDelete(reminder) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(alpha = 0.7f)) } }; if (index < reminders.size - 1) { Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp) } } } } }, confirmButton = { Button(onClick = onCreateNew) { Text("Crear") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } })
 }
 
 @Composable
@@ -3141,26 +3205,75 @@ fun ScheduledFiadoresDialog(fiadores: List<Fiador>, onDismiss: () -> Unit, onDel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReminderDialog(initialReminder: Reminder? = null, preselectedDate: Long? = null, onDismiss: () -> Unit, onConfirm: (String, Long) -> Unit) {
+fun ReminderDialog(initialReminder: Reminder? = null, preselectedDate: Long? = null, onDismiss: () -> Unit, onConfirm: (String, Double, Long) -> Unit) {
     var title by remember { mutableStateOf(initialReminder?.title ?: "") }
+    var amountRaw by remember { mutableStateOf(if(initialReminder != null && initialReminder.amount > 0) initialReminder.amount.toLong().toString() else "") }
     var tempDateMillis by remember { mutableStateOf<Long?>(initialReminder?.targetDateInMillis ?: preselectedDate) }
     var activeScreen by remember { mutableStateOf(if (initialReminder == null && preselectedDate == null) "NEW_INFO" else if (initialReminder == null && preselectedDate != null) "NEW_TIME" else "EDIT_OPTIONS") }
     var isEditDateOnly by remember { mutableStateOf(false) }
     val calendar = remember { Calendar.getInstance().apply { timeInMillis = initialReminder?.targetDateInMillis ?: preselectedDate ?: System.currentTimeMillis() } }
     var showDatePicker by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     if (showDatePicker) {
-        CustomDatePickerDialog(initialDateMillis = tempDateMillis ?: System.currentTimeMillis(), onDismiss = { showDatePicker = false }, onDateSelected = { selected -> val cal = Calendar.getInstance().apply { timeInMillis = tempDateMillis ?: System.currentTimeMillis() }; val hour = cal.get(Calendar.HOUR_OF_DAY); val minute = cal.get(Calendar.MINUTE); val newCal = Calendar.getInstance().apply { timeInMillis = selected; set(Calendar.HOUR_OF_DAY, hour); set(Calendar.MINUTE, minute); set(Calendar.SECOND, 0) }; tempDateMillis = newCal.timeInMillis; showDatePicker = false; if (isEditDateOnly) { onConfirm(title, tempDateMillis!!) } else { activeScreen = "NEW_TIME" } })
+        CustomDatePickerDialog(initialDateMillis = tempDateMillis ?: System.currentTimeMillis(), onDismiss = { showDatePicker = false }, onDateSelected = { selected -> val cal = Calendar.getInstance().apply { timeInMillis = tempDateMillis ?: System.currentTimeMillis() }; val hour = cal.get(Calendar.HOUR_OF_DAY); val minute = cal.get(Calendar.MINUTE); val newCal = Calendar.getInstance().apply { timeInMillis = selected; set(Calendar.HOUR_OF_DAY, hour); set(Calendar.MINUTE, minute); set(Calendar.SECOND, 0) }; tempDateMillis = newCal.timeInMillis; showDatePicker = false; if (isEditDateOnly) { onConfirm(title, amountRaw.toDoubleOrNull() ?: 0.0, tempDateMillis!!) } else { activeScreen = "NEW_TIME" } })
     }
 
     if (activeScreen == "EDIT_OPTIONS") { AlertDialog(onDismissRequest = onDismiss, title = { Text("¿Qué deseas editar? ✏️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Button(onClick = { activeScreen = "EDIT_INFO" }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("📝 Información de la Deuda") }; Button(onClick = { isEditDateOnly = true; showDatePicker = true }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("📅 Fecha de Cobro") }; Button(onClick = { activeScreen = "EDIT_TIME" }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("⏰ Hora de Cobro") } } }, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }) }
-    if (activeScreen == "NEW_INFO" || activeScreen == "EDIT_INFO") { AlertDialog(onDismissRequest = onDismiss, title = { Text(if (activeScreen == "EDIT_INFO") "Editar Deuda ✏️" else "Nueva Deuda 📅", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { OutlinedTextField(value = title, onValueChange = { input -> title = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("¿Qué debes pagar? (ej. Luz)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences)) }, confirmButton = { Button(onClick = { if (title.isNotBlank()) { val capTitle = title.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }; if (activeScreen == "EDIT_INFO") { onConfirm(capTitle, tempDateMillis!!) } else { title = capTitle; showDatePicker = true } } }) { Text(if (activeScreen == "EDIT_INFO") "Guardar" else "Siguiente") } }, dismissButton = { TextButton(onClick = { if (activeScreen == "EDIT_INFO") activeScreen = "EDIT_OPTIONS" else onDismiss() }) { Text(if (activeScreen == "EDIT_INFO") "Atrás" else "Cancelar") } }) }
+
+    if (activeScreen == "NEW_INFO" || activeScreen == "EDIT_INFO") {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(if (activeScreen == "EDIT_INFO") "Editar Deuda ✏️" else "Nueva Deuda 📅", fontWeight = FontWeight.Bold) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            text = {
+                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { input -> title = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } },
+                        label = { Text("¿Qué debes pagar? (ej. Luz)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = amountRaw,
+                        onValueChange = { amountRaw = cleanAmountInput(it) },
+                        label = { Text("Monto de la deuda") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        visualTransformation = AmountVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val parsedAmount = amountRaw.toDoubleOrNull() ?: 0.0
+                    if (title.isNotBlank() && parsedAmount > 0) {
+                        val capTitle = title.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                        if (activeScreen == "EDIT_INFO") {
+                            onConfirm(capTitle, parsedAmount, tempDateMillis!!)
+                        } else {
+                            title = capTitle; showDatePicker = true
+                        }
+                    } else {
+                        Toast.makeText(context, "Ingresa un nombre y monto válido", Toast.LENGTH_SHORT).show()
+                    }
+                }) { Text(if (activeScreen == "EDIT_INFO") "Guardar" else "Siguiente") }
+            },
+            dismissButton = { TextButton(onClick = { if (activeScreen == "EDIT_INFO") activeScreen = "EDIT_OPTIONS" else onDismiss() }) { Text(if (activeScreen == "EDIT_INFO") "Atrás" else "Cancelar") } }
+        )
+    }
+
     if (activeScreen == "NEW_TIME" || activeScreen == "EDIT_TIME") {
         val currentHourInt = calendar.get(Calendar.HOUR).let { if (it == 0) 12 else it }; val currentMinInt = calendar.get(Calendar.MINUTE); val currentHourStr = currentHourInt.toString(); val currentMinStr = currentMinInt.toString().padStart(2, '0'); var customHour by remember { mutableStateOf(if(initialReminder != null) currentHourInt.toString() else "") }; var customMinute by remember { mutableStateOf(if(initialReminder != null) currentMinStr else "") }; var isPm by remember { mutableStateOf(calendar.get(Calendar.AM_PM) == Calendar.PM) }; val minuteFocusRequester = remember { FocusRequester() }
         AlertDialog(
             onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface, title = { Text("Ingresar Hora ⏰", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
             text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { val phoneTime = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date()); Text("Hora actual del teléfono: $phoneTime", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 16.dp).alpha(0.7f)); Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) { OutlinedTextField(value = customHour, onValueChange = { input -> if (input.isEmpty()) { customHour = input } else if (input.length <= 2 && input.all { char -> char.isDigit() }) { val h = input.toIntOrNull(); if (h != null) { if (input.length == 1 && h == 0) { customHour = input } else if (h in 1..12) { customHour = input; if (input.length == 2) minuteFocusRequester.requestFocus() } } } }, placeholder = { Text(currentHourStr, color = Color.Gray.copy(alpha=0.4f), fontSize = 28.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, modifier = Modifier.width(80.dp), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true); Text(" : ", fontSize = 32.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp)); OutlinedTextField(value = customMinute, onValueChange = { input -> if (input.isEmpty()) { customMinute = input } else if (input.length <= 2 && input.all { it.isDigit() }) { val m = input.toIntOrNull(); if (m != null && m in 0..59) { customMinute = input } } }, placeholder = { Text(currentMinStr, color = Color.Gray.copy(alpha=0.4f), fontSize = 28.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, modifier = Modifier.width(80.dp).focusRequester(minuteFocusRequester), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true); Spacer(modifier = Modifier.width(8.dp)); Column { FilterChip(selected = !isPm, onClick = { isPm = false }, label = { Text("AM") }); FilterChip(selected = isPm, onClick = { isPm = true }, label = { Text("PM") }) } } } },
-            confirmButton = { TextButton(onClick = { val finalH = customHour.toIntOrNull() ?: currentHourInt; val finalM = customMinute.toIntOrNull() ?: currentMinInt; var hour24 = finalH; if (isPm && hour24 < 12) hour24 += 12; if (!isPm && hour24 == 12) hour24 = 0; if (tempDateMillis != null) { val baseCal = Calendar.getInstance().apply { timeInMillis = tempDateMillis!! }; val localCal = Calendar.getInstance().apply { set(baseCal.get(Calendar.YEAR), baseCal.get(Calendar.MONTH), baseCal.get(Calendar.DAY_OF_MONTH), hour24, finalM, 0) }; onConfirm(title, localCal.timeInMillis) } }) { Text(if (activeScreen == "EDIT_TIME") "Guardar" else "Aceptar") } },
+            confirmButton = { TextButton(onClick = { val finalH = customHour.toIntOrNull() ?: currentHourInt; val finalM = customMinute.toIntOrNull() ?: currentMinInt; var hour24 = finalH; if (isPm && hour24 < 12) hour24 += 12; if (!isPm && hour24 == 12) hour24 = 0; if (tempDateMillis != null) { val baseCal = Calendar.getInstance().apply { timeInMillis = tempDateMillis!! }; val localCal = Calendar.getInstance().apply { set(baseCal.get(Calendar.YEAR), baseCal.get(Calendar.MONTH), baseCal.get(Calendar.DAY_OF_MONTH), hour24, finalM, 0) }; onConfirm(title, amountRaw.toDoubleOrNull() ?: 0.0, localCal.timeInMillis) } }) { Text(if (activeScreen == "EDIT_TIME") "Guardar" else "Aceptar") } },
             dismissButton = { TextButton(onClick = { if (activeScreen == "NEW_TIME") activeScreen = "NEW_INFO" else activeScreen = "EDIT_OPTIONS" }) { Text("Atrás") } }
         )
     }
@@ -3463,7 +3576,7 @@ fun FiadorDialog(
                         if (initialFiador != null) {
                             onConfirmEdit(initialFiador.copy(name = name, phone = phone), localCal.timeInMillis)
                         } else {
-                            val pAmount = personalDebtAmountRaw.toDoubleOrNull() ?: 0.0 // --- MODIFICADO: Extrae el monto
+                            val pAmount = personalDebtAmountRaw.toDoubleOrNull() ?: 0.0
                             onConfirmNew(name, phone, cartItems.toList(), pAmount, localCal.timeInMillis, initialPaidAmount, initialMethod)
                         }
                     }
