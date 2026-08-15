@@ -519,7 +519,6 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
-    // MODIFICADO: Agregado el parámetro 'method' para soportar Efectivo/Digital en Modo Personal
     fun addTransaction(description: String, amount: Double, isIncome: Boolean, note: String, method: String) {
         viewModelScope.launch {
             val cash = if (method == "Efectivo") amount else 0.0
@@ -555,10 +554,25 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     fun updateExistingReminder(reminder: Reminder, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateReminder(reminder); val success = scheduleNotification(context, reminder.targetDateInMillis, "¡Hora de Pagar! ⏰", reminder.title, reminder.id, "ALARM_TRIGGER"); if (success) onConfigured("Alarma actualizada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(reminder.targetDateInMillis))}") }; AppSounds.play(context, touchSoundUri) }
     fun deleteReminder(reminder: Reminder, context: Context) { viewModelScope.launch { dao.deleteReminder(reminder); cancelAlarm(context, reminder.id, "ALARM_TRIGGER") } }
 
-    fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, dateInMillis: Long, initialPaidAmount: Double = 0.0, paymentMethod: String = "Efectivo", isStore: Boolean, context: Context, onConfigured: (String) -> Unit) {
+    // --- NUEVO: Controlamos qué texto enviarle a la voz según el Modo ---
+    private fun createFiadorVoiceText(name: String, amount: Double, reason: String, isStore: Boolean): String {
+        val amountStr = amount.toLong().toString()
+        if (isStore) {
+            val voiceReason = reason
+                .replace("Uds ", " unidades de ")
+                .replace("Kg ", " kilos de ")
+                .replace("L ", " litros de ")
+            return "$name te debe $amountStr pesos, por la deuda de $voiceReason"
+        } else {
+            return "$name te debe $amountStr pesos"
+        }
+    }
+
+    // --- MODIFICADO: Agregado parámetro 'personalDebtAmount' ---
+    fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, personalDebtAmount: Double, dateInMillis: Long, initialPaidAmount: Double = 0.0, paymentMethod: String = "Efectivo", isStore: Boolean, context: Context, onConfigured: (String) -> Unit) {
         viewModelScope.launch {
-            val totalAmount = cartItems.sumOf { it.first.price * it.second }
-            val reason = cartItems.joinToString(", ") { "${it.second}${it.first.unit} ${it.first.name}" }
+            val totalAmount = if (isStore) cartItems.sumOf { it.first.price * it.second } else personalDebtAmount
+            val reason = if (isStore) cartItems.joinToString(", ") { "${it.second}${it.first.unit} ${it.first.name}" } else "Préstamo personal"
 
             val history = if (initialPaidAmount > 0) {
                 val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
@@ -570,27 +584,41 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             if (initialPaidAmount > 0) {
                 val cash = if(paymentMethod == "Efectivo") initialPaidAmount else 0.0
                 val digital = if(paymentMethod == "Digital") initialPaidAmount else 0.0
-                dao.insertTransaction(Transaction(description = "Venta: Abono inicial ($name)", amount = initialPaidAmount, isIncome = true, note = "Abono inicial de venta fiada", cashAmount = cash, digitalAmount = digital))
+                val desc = if (isStore) "Venta: Abono inicial ($name)" else "Ingreso: Abono inicial ($name)"
+                dao.insertTransaction(Transaction(description = desc, amount = initialPaidAmount, isIncome = true, note = "Abono inicial de deuda", cashAmount = cash, digitalAmount = digital))
             }
 
-            cartItems.forEach { (product, qty) ->
-                val newStock = product.stock - qty
-                if(newStock >= 0) {
-                    dao.updateProduct(product.copy(stock = newStock))
-                    if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) {
-                        scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER")
+            if (isStore) {
+                cartItems.forEach { (product, qty) ->
+                    val newStock = product.stock - qty
+                    if(newStock >= 0) {
+                        dao.updateProduct(product.copy(stock = newStock))
+                        if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) {
+                            scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER")
+                        }
                     }
                 }
             }
 
             val remaining = totalAmount - initialPaidAmount
-            val success = scheduleNotification(context, dateInMillis, "¡Cobrar a $name! 💰", "Monto: ${formatCOP(remaining)} - $reason", fiadorId + 100000, "FIADOR_TRIGGER")
+            val voiceText = createFiadorVoiceText(name, remaining, reason, isStore)
+            val success = scheduleNotification(context, dateInMillis, "¡Cobrar a $name! 💰", "Monto: ${formatCOP(remaining)} - $reason", fiadorId + 100000, "FIADOR_TRIGGER", voiceText)
             if (success) onConfigured("Recordatorio de fiador para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}")
         }
         AppSounds.play(context, touchSoundUri)
     }
 
-    fun updateExistingFiador(fiador: Fiador, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateFiador(fiador); val success = scheduleNotification(context, fiador.targetDateInMillis, "¡Cobrar a ${fiador.name}! 💰", "Monto: ${formatCOP(fiador.amount - fiador.paidAmount)} - ${fiador.reason}", fiador.id + 100000, "FIADOR_TRIGGER"); if (success) onConfigured("Recordatorio actualizado para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(fiador.targetDateInMillis))}") }; AppSounds.play(context, touchSoundUri) }
+    fun updateExistingFiador(fiador: Fiador, context: Context, onConfigured: (String) -> Unit) {
+        viewModelScope.launch {
+            dao.updateFiador(fiador)
+            val remaining = fiador.amount - fiador.paidAmount
+            val voiceText = createFiadorVoiceText(fiador.name, remaining, fiador.reason, fiador.isStore)
+            val success = scheduleNotification(context, fiador.targetDateInMillis, "¡Cobrar a ${fiador.name}! 💰", "Monto: ${formatCOP(remaining)} - ${fiador.reason}", fiador.id + 100000, "FIADOR_TRIGGER", voiceText)
+            if (success) onConfigured("Recordatorio actualizado para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(fiador.targetDateInMillis))}")
+        }
+        AppSounds.play(context, touchSoundUri)
+    }
+
     fun deleteFiador(fiador: Fiador, context: Context) { viewModelScope.launch { dao.deleteFiador(fiador); cancelAlarm(context, fiador.id + 100000, "FIADOR_TRIGGER") } }
 
     fun registerAbonoFiador(fiador: Fiador, abono: Double, method: String, context: Context, onResult: (String) -> Unit) {
@@ -603,7 +631,8 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
             val cash = if(method == "Efectivo") abono else 0.0
             val digital = if(method == "Digital") abono else 0.0
-            dao.insertTransaction(Transaction(description = "Venta: Abono de ${fiador.name}", amount = abono, isIncome = true, note = "Abono de deuda parcial", cashAmount = cash, digitalAmount = digital))
+            val desc = if (fiador.isStore) "Venta: Abono de ${fiador.name}" else "Ingreso: Abono de ${fiador.name}"
+            dao.insertTransaction(Transaction(description = desc, amount = abono, isIncome = true, note = "Abono de deuda parcial", cashAmount = cash, digitalAmount = digital))
 
             if (newPaidAmount >= fiador.amount) {
                 dao.deleteFiador(fiador)
@@ -611,6 +640,11 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 launch(Dispatchers.Main) { onResult("¡Deuda de ${fiador.name} saldada por completo! 🎉") }
             } else {
                 dao.updateFiador(fiador.copy(paidAmount = newPaidAmount, paymentHistory = newHistory))
+
+                // Actualizar la alarma con el nuevo monto faltante
+                val voiceText = createFiadorVoiceText(fiador.name, remaining, fiador.reason, fiador.isStore)
+                scheduleNotification(context, fiador.targetDateInMillis, "¡Cobrar a ${fiador.name}! 💰", "Monto: ${formatCOP(remaining)} - ${fiador.reason}", fiador.id + 100000, "FIADOR_TRIGGER", voiceText)
+
                 launch(Dispatchers.Main) { onResult("Abono de ${formatCOP(abono)} registrado. Resta: ${formatCOP(remaining)}") }
             }
             AppSounds.play(context, touchSoundUri)
@@ -618,8 +652,9 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     }
 
     private fun cancelAlarm(context: Context, id: Int, actionPrefix: String) { val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager; val intent = Intent(context, ReminderReceiver::class.java).apply { action = "com.xxcamixx.contabilidad.${actionPrefix}_${id}" }; val pendingIntent = PendingIntent.getBroadcast(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE); alarmManager.cancel(pendingIntent) }
+
     @SuppressLint("ScheduleExactAlarm")
-    private fun scheduleNotification(context: Context, timeInMillis: Long, notifTitle: String, notifText: String, id: Int, actionPrefix: String): Boolean {
+    private fun scheduleNotification(context: Context, timeInMillis: Long, notifTitle: String, notifText: String, id: Int, actionPrefix: String, voiceText: String? = null): Boolean {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (!alarmManager.canScheduleExactAlarms()) {
@@ -634,6 +669,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             putExtra("NOTIFICATION_TEXT", notifText)
             putExtra("ID", id)
             putExtra("NOTIF_TYPE", if (isPersonal) "PERSONAL" else "STORE")
+            if (voiceText != null) putExtra("VOICE_TEXT", voiceText)
             addFlags(Intent.FLAG_RECEIVER_FOREGROUND)
             addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
         }
@@ -1779,12 +1815,14 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 initialMethod = checkoutToFiadorMethod,
                 products = products,
                 preselectedDate = preselectedDateForEvent,
+                isStore = currentTab == 1, // --- MODIFICADO: Informamos el modo actual
                 onDismiss = {
                     showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
                     checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
                 },
-                onConfirmNew = { n, p, cartItemsFiado, d, initialPaid, method ->
-                    viewModel.addFiador(n, p, cartItemsFiado, d, initialPaid, method, currentTab == 1, context) { customToastMessage = it }
+                // --- MODIFICADO: Recibimos y usamos el nuevo parámetro 'pAmount' para la deuda personal
+                onConfirmNew = { n, p, cartItemsFiado, pAmount, d, initialPaid, method ->
+                    viewModel.addFiador(n, p, cartItemsFiado, pAmount, d, initialPaid, method, currentTab == 1, context) { customToastMessage = it }
                     showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
 
                     if (checkoutToFiadorCart.isNotEmpty()) {
@@ -3138,8 +3176,9 @@ fun FiadorDialog(
     initialMethod: String = "Efectivo",
     products: List<Product>,
     preselectedDate: Long? = null,
+    isStore: Boolean, // --- NUEVO: Sabe en qué pestaña se encuentra
     onDismiss: () -> Unit,
-    onConfirmNew: (String, String, List<Pair<Product, Int>>, Long, Double, String) -> Unit,
+    onConfirmNew: (String, String, List<Pair<Product, Int>>, Double, Long, Double, String) -> Unit, // --- MODIFICADO: Agrega un Double extra para el monto personal
     onConfirmEdit: (Fiador, Long) -> Unit,
     onConfirmAbono: (Fiador, Double, String) -> Unit
 ) {
@@ -3151,6 +3190,9 @@ fun FiadorDialog(
     var isEditDateOnly by remember { mutableStateOf(false) }
 
     val cartItems = remember { mutableStateListOf<Pair<Product, Int>>().apply { if (initialFiador == null) addAll(initialCart) } }
+
+    // --- NUEVO: Estado para el monto del préstamo personal ---
+    var personalDebtAmountRaw by remember { mutableStateOf("") }
 
     var expandedProduct by remember { mutableStateOf(false) }
     var selectedProduct by remember { mutableStateOf<Product?>(null) }
@@ -3262,7 +3304,7 @@ fun FiadorDialog(
     if (activeScreen == "NEW_INFO" || activeScreen == "EDIT_INFO") {
         AlertDialog(
             onDismissRequest = onDismiss,
-            title = { Text(if (activeScreen == "EDIT_INFO") "Editar Fiador ✏️" else "Nuevo Fiador 🤝", fontWeight = FontWeight.Bold) },
+            title = { Text(if (activeScreen == "EDIT_INFO") "Editar Deudor ✏️" else "Nuevo Deudor 🤝", fontWeight = FontWeight.Bold) },
             containerColor = MaterialTheme.colorScheme.surface,
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -3272,58 +3314,82 @@ fun FiadorDialog(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     if (initialFiador == null) {
-                        if (initialCart.isEmpty()) {
-                            Text("Productos a fiar:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Box {
-                                Button(onClick = { expandedProduct = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors()) { Text(selectedProduct?.name ?: "🔽 Seleccionar Producto", color = MaterialTheme.colorScheme.onSurface) }
-                                DropdownMenu(expanded = expandedProduct, onDismissRequest = { expandedProduct = false }) {
-                                    products.filter { it.stock > 0 }.forEach { p ->
-                                        DropdownMenuItem(text = { Text("${p.name} (Disp: ${p.stock} ${p.unit}) - ${formatCOP(p.price)}") }, onClick = { selectedProduct = p; expandedProduct = false })
-                                    }
-                                    if(products.none { it.stock > 0 }) {
-                                        DropdownMenuItem(text = { Text("No hay productos en stock") }, onClick = { expandedProduct = false })
-                                    }
-                                }
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
-                                OutlinedTextField(value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cant.") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(onClick = {
-                                    val q = qtyRaw.toIntOrNull() ?: 0
-                                    if (selectedProduct != null && q > 0 && q <= selectedProduct!!.stock) {
-                                        val existing = cartItems.find { it.first.id == selectedProduct!!.id }
-                                        if (existing != null) {
-                                            val newQ = existing.second + q; if (newQ <= selectedProduct!!.stock) { val idx = cartItems.indexOf(existing); cartItems[idx] = existing.copy(second = newQ) } else { Toast.makeText(context, "Supera el stock disponible", Toast.LENGTH_SHORT).show() }
-                                        } else {
-                                            cartItems.add(Pair(selectedProduct!!, q))
+                        // --- MODIFICADO: Solo muestra productos si es en modo "Tienda" ---
+                        if (isStore) {
+                            if (initialCart.isEmpty()) {
+                                Text("Productos a fiar:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box {
+                                    Button(onClick = { expandedProduct = true }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.outlinedButtonColors()) { Text(selectedProduct?.name ?: "🔽 Seleccionar Producto", color = MaterialTheme.colorScheme.onSurface) }
+                                    DropdownMenu(expanded = expandedProduct, onDismissRequest = { expandedProduct = false }) {
+                                        products.filter { it.stock > 0 }.forEach { p ->
+                                            DropdownMenuItem(text = { Text("${p.name} (Disp: ${p.stock} ${p.unit}) - ${formatCOP(p.price)}") }, onClick = { selectedProduct = p; expandedProduct = false })
                                         }
-                                        qtyRaw = "1"; selectedProduct = null
-                                    }
-                                }) { Text("Añadir") }
-                            }
-                        }
-
-                        if (cartItems.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(if (initialCart.isEmpty()) 16.dp else 0.dp))
-                            Text(if (initialCart.isEmpty()) "Lista de deuda:" else "Resumen de la deuda:", fontSize = 12.sp, color = Color.Gray)
-                            cartItems.forEachIndexed { index, item ->
-                                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                    Text("• ${item.second}${item.first.unit} ${item.first.name}", fontSize = 13.sp, modifier = Modifier.weight(1f))
-                                    Text(formatCOP(item.first.price * item.second), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                    if (initialCart.isEmpty()) {
-                                        IconButton(onClick = { cartItems.removeAt(index) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, null, tint = Color.Red, modifier = Modifier.size(16.dp)) }
+                                        if(products.none { it.stock > 0 }) {
+                                            DropdownMenuItem(text = { Text("No hay productos en stock") }, onClick = { expandedProduct = false })
+                                        }
                                     }
                                 }
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+                                    OutlinedTextField(value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cant.") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.weight(1f))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Button(onClick = {
+                                        val q = qtyRaw.toIntOrNull() ?: 0
+                                        if (selectedProduct != null && q > 0 && q <= selectedProduct!!.stock) {
+                                            val existing = cartItems.find { it.first.id == selectedProduct!!.id }
+                                            if (existing != null) {
+                                                val newQ = existing.second + q; if (newQ <= selectedProduct!!.stock) { val idx = cartItems.indexOf(existing); cartItems[idx] = existing.copy(second = newQ) } else { Toast.makeText(context, "Supera el stock disponible", Toast.LENGTH_SHORT).show() }
+                                            } else {
+                                                cartItems.add(Pair(selectedProduct!!, q))
+                                            }
+                                            qtyRaw = "1"; selectedProduct = null
+                                        }
+                                    }) { Text("Añadir") }
+                                }
                             }
-                            Divider(modifier = Modifier.padding(vertical = 8.dp))
-                            val total = cartItems.sumOf { it.first.price * it.second }
-                            Text("Total Deuda: ${formatCOP(total)}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+
+                            if (cartItems.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(if (initialCart.isEmpty()) 16.dp else 0.dp))
+                                Text(if (initialCart.isEmpty()) "Lista de deuda:" else "Resumen de la deuda:", fontSize = 12.sp, color = Color.Gray)
+                                cartItems.forEachIndexed { index, item ->
+                                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text("• ${item.second}${item.first.unit} ${item.first.name}", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                                        Text(formatCOP(item.first.price * item.second), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        if (initialCart.isEmpty()) {
+                                            IconButton(onClick = { cartItems.removeAt(index) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, null, tint = Color.Red, modifier = Modifier.size(16.dp)) }
+                                        }
+                                    }
+                                }
+                                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                                val total = cartItems.sumOf { it.first.price * it.second }
+                                Text("Total Deuda: ${formatCOP(total)}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
+
+                                if (initialPaidAmount > 0) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Abono inicial: ${formatCOP(initialPaidAmount)} ($initialMethod)", fontSize = 14.sp, color = Color(0xFF4CAF50))
+                                    Text("Resta por pagar: ${formatCOP(total - initialPaidAmount)}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Red)
+                                }
+                            }
+                        } else {
+                            // --- NUEVO: Interfaz para modo "Personal" (Monto crudo sin productos) ---
+                            Text("Monto de la deuda:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = personalDebtAmountRaw,
+                                onValueChange = { personalDebtAmountRaw = cleanAmountInput(it) },
+                                label = { Text("¿Cuánto dinero le prestaste?") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                visualTransformation = AmountVisualTransformation(),
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) }
+                            )
 
                             if (initialPaidAmount > 0) {
-                                Spacer(modifier = Modifier.height(4.dp))
+                                val totalPersonal = personalDebtAmountRaw.toDoubleOrNull() ?: 0.0
+                                Spacer(modifier = Modifier.height(16.dp))
                                 Text("Abono inicial: ${formatCOP(initialPaidAmount)} ($initialMethod)", fontSize = 14.sp, color = Color(0xFF4CAF50))
-                                Text("Resta por pagar: ${formatCOP(total - initialPaidAmount)}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Red)
+                                Text("Resta por pagar: ${formatCOP(totalPersonal - initialPaidAmount)}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color.Red)
                             }
                         }
                     } else {
@@ -3339,8 +3405,12 @@ fun FiadorDialog(
                 Button(onClick = {
                     if (name.isNotBlank()) {
                         val capName = name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-                        if (initialFiador == null && cartItems.isEmpty()) {
+                        val pAmount = personalDebtAmountRaw.toDoubleOrNull() ?: 0.0
+
+                        if (initialFiador == null && isStore && cartItems.isEmpty()) {
                             Toast.makeText(context, "Agrega productos a la deuda", Toast.LENGTH_SHORT).show()
+                        } else if (initialFiador == null && !isStore && pAmount <= 0) {
+                            Toast.makeText(context, "Ingresa un monto válido", Toast.LENGTH_SHORT).show()
                         } else {
                             if (activeScreen == "EDIT_INFO") {
                                 onConfirmEdit(initialFiador!!.copy(name = capName, phone = phone), tempDateMillis!!)
@@ -3349,7 +3419,7 @@ fun FiadorDialog(
                             }
                         }
                     } else {
-                        Toast.makeText(context, "Escribe el nombre del fiador", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Escribe el nombre del deudor", Toast.LENGTH_SHORT).show()
                     }
                 }) { Text(if (activeScreen == "EDIT_INFO") "Guardar" else "Siguiente") }
             },
@@ -3393,7 +3463,8 @@ fun FiadorDialog(
                         if (initialFiador != null) {
                             onConfirmEdit(initialFiador.copy(name = name, phone = phone), localCal.timeInMillis)
                         } else {
-                            onConfirmNew(name, phone, cartItems.toList(), localCal.timeInMillis, initialPaidAmount, initialMethod)
+                            val pAmount = personalDebtAmountRaw.toDoubleOrNull() ?: 0.0 // --- MODIFICADO: Extrae el monto
+                            onConfirmNew(name, phone, cartItems.toList(), pAmount, localCal.timeInMillis, initialPaidAmount, initialMethod)
                         }
                     }
                 }) { Text(if (activeScreen == "EDIT_TIME") "Guardar" else "Aceptar") }
@@ -3646,6 +3717,9 @@ class ReminderReceiver : BroadcastReceiver() {
 
             val notifTitle = intent.getStringExtra("NOTIFICATION_TITLE") ?: "¡Alerta! ⏰"
             val notifText = intent.getStringExtra("NOTIFICATION_TEXT") ?: "Tienes una alerta pendiente"
+
+            // --- NUEVO: Extraemos el texto fantasma si existe ---
+            val voiceText = intent.getStringExtra("VOICE_TEXT")
             val id = intent.getIntExtra("ID", 0)
 
             val authPrefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
@@ -3660,7 +3734,11 @@ class ReminderReceiver : BroadcastReceiver() {
             }
 
             if (useVoice) {
-                AppVoice.speak(context, "$notifTitle. $notifText")
+                // Selecciona el texto fantasma (fluido) o el normal (si es otra notificación)
+                val textToSpeak = voiceText ?: "$notifTitle. $notifText"
+                // Limpieza rápida extra para que no diga "punto" en notificaciones normales
+                val cleanText = textToSpeak.replace(Regex("\\.(?=\\s|$)"), ",")
+                AppVoice.speak(context, cleanText)
             } else {
                 AppSounds.init()
                 AppSounds.play(context, customSound)
@@ -3683,8 +3761,8 @@ class ReminderReceiver : BroadcastReceiver() {
 
                 val notification = NotificationCompat.Builder(context, channelId)
                     .setSmallIcon(android.R.drawable.ic_dialog_info)
-                    .setContentTitle(notifTitle)
-                    .setContentText(notifText)
+                    .setContentTitle(notifTitle) // Muestra el título con emojis
+                    .setContentText(notifText) // Muestra el texto con los signos $
                     .setPriority(NotificationCompat.PRIORITY_MAX)
                     .setCategory(NotificationCompat.CATEGORY_ALARM)
                     .setDefaults(NotificationCompat.DEFAULT_VIBRATE or NotificationCompat.DEFAULT_LIGHTS)
