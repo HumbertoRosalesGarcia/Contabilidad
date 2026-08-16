@@ -145,6 +145,40 @@ data class UserManageRequest(val email: String, val action: String, val role: St
 data class ChatMessage(val sender: String, val text: String, val timestamp: Long)
 data class ChatSendRequest(val sender: String, val receiver: String, val text: String)
 
+// --- NUEVOS MODELOS Y FUNCIONES PARA MONEDA ---
+data class BcvResponse(val code: String, val tasa: Double)
+
+fun formatBs(amount: Double): String {
+    val format = DecimalFormat("#,###.##").apply { decimalFormatSymbols = decimalFormatSymbols.apply { groupingSeparator = '.'; decimalSeparator = ',' } }
+    return "Bs ${format.format(amount)}"
+}
+
+fun formatUSD(amount: Double): String {
+    val format = DecimalFormat("#,###.##").apply { decimalFormatSymbols = decimalFormatSymbols.apply { groupingSeparator = ','; decimalSeparator = '.' } }
+    return "$${format.format(amount)}"
+}
+
+fun formatMoneyMain(amount: Double, country: String): String {
+    return if (country == "Venezuela") formatUSD(amount) else formatCOP(amount)
+}
+
+fun formatMoneySec(amount: Double, country: String, bcvRate: Double): String {
+    return if (country == "Venezuela" && bcvRate > 0) "= ${formatBs(amount * bcvRate)}" else ""
+}
+
+fun cleanDecimalInput(input: String): String {
+    var dotCount = 0
+    return input.replace(',', '.').filter {
+        if (it == '.') {
+            dotCount++
+            dotCount <= 1
+        } else {
+            it.isDigit()
+        }
+    }
+}
+// ----------------------------------------------
+
 interface ServerApi {
     @POST("api/backup/{userId}") suspend fun uploadBackup(@Path("userId") userId: String, @Body data: CloudPayload): SyncResponse
     @GET("api/backup/{userId}") suspend fun getBackup(@Path("userId") userId: String): CloudPayload?
@@ -156,6 +190,9 @@ interface ServerApi {
     @GET("api/admin/chats") suspend fun getAllChats(): Map<String, List<ChatMessage>>
     @POST("api/chat") suspend fun sendMessage(@Body req: ChatSendRequest): SyncResponse
     @DELETE("api/chat/{email}") suspend fun clearChat(@Path("email") email: String): SyncResponse
+
+    // NUEVO ENDPOINT BCV
+    @GET("api/bcv") suspend fun getBcvRate(): BcvResponse
 }
 
 object RetrofitInstance {
@@ -412,6 +449,13 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     val fiadores: Flow<List<Fiador>> = dao.getAllFiadores()
     val products: Flow<List<Product>> = dao.getAllProducts()
 
+    // --- NUEVAS VARIABLES DE MONEDA ---
+    var selectedCountry by mutableStateOf(userPrefs.getString("selectedCountry", "Colombia") ?: "Colombia")
+        private set
+    var bcvRate by mutableStateOf(userPrefs.getFloat("bcvRate", 0f).toDouble())
+        private set
+
+    // ... (Mantén tus otras variables intactas: minBalanceThreshold, personalSoundUri, isSyncing, etc) ...
     var minBalanceThreshold by mutableStateOf(userPrefs.getFloat("minBalance", 0f).toDouble()); private set
     var personalSoundUri by mutableStateOf(userPrefs.getString("personalSoundUri", "")); private set
     var storeSoundUri by mutableStateOf(userPrefs.getString("storeSoundUri", "")); private set
@@ -423,10 +467,35 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     var autoSyncFrequency by mutableStateOf(userPrefs.getInt("syncFrequency", 0)); private set
     var autoSyncHour by mutableStateOf(userPrefs.getInt("syncHour", 2)); private set
     var autoSyncMinute by mutableStateOf(userPrefs.getInt("syncMinute", 0)); private set
-
     var pocketDebt by mutableStateOf(userPrefs.getFloat("pocketDebt", 0f).toDouble()); private set
 
-    init { scheduleAutoSync(application, autoSyncFrequency, autoSyncHour, autoSyncMinute) }
+    init {
+        scheduleAutoSync(application, autoSyncFrequency, autoSyncHour, autoSyncMinute)
+        if (selectedCountry == "Venezuela") fetchBcvRate()
+    }
+
+    // --- NUEVAS FUNCIONES DE MONEDA ---
+    fun updateCountry(country: String) {
+        selectedCountry = country
+        userPrefs.edit().putString("selectedCountry", country).apply()
+        if (country == "Venezuela") fetchBcvRate()
+    }
+
+    private fun fetchBcvRate() {
+        viewModelScope.launch {
+            try {
+                val response = RetrofitInstance.api.getBcvRate()
+                if (response.tasa > 0) {
+                    bcvRate = response.tasa
+                    userPrefs.edit().putFloat("bcvRate", response.tasa.toFloat()).apply()
+                }
+            } catch (e: Exception) {
+                // Falla silenciosa si no hay internet, usará la última guardada
+            }
+        }
+    }
+
+    // ... (Mantén el resto de funciones del ViewModel intactas) ...
 
     fun updateMinBalance(amount: Double) { minBalanceThreshold = amount; userPrefs.edit().putFloat("minBalance", amount.toFloat()).apply() }
 
@@ -892,6 +961,12 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
     val credentialManager = remember { CredentialManager.create(context) }
     var isLoading by remember { mutableStateOf(false) }
 
+    // SOLUCIÓN: Extraemos el ID de Google aquí arriba usando remember, fuera de las corrutinas y botones
+    val webClientId = remember(context) {
+        val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+        if (resId != 0) context.getString(resId) else ""
+    }
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.AccountCircle, contentDescription = "Login", modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary)
@@ -909,13 +984,9 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
                         isLoading = true
                         coroutineScope.launch {
                             try {
-                                // Solución al error de LocalContext: Extraemos el String dentro de la corrutina
-                                val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-                                val webClientId = if (resId != 0) context.getString(resId) else ""
-
                                 val googleIdOption = GetGoogleIdOption.Builder()
                                     .setFilterByAuthorizedAccounts(false)
-                                    .setServerClientId(webClientId)
+                                    .setServerClientId(webClientId) // Usamos la variable cacheada arriba
                                     .setAutoSelectEnabled(true)
                                     .build()
                                 val request = GetCredentialRequest.Builder().addCredentialOption(googleIdOption).build()
@@ -1004,6 +1075,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     var preselectedDateForEvent by remember { mutableStateOf<Long?>(null) }
     var showDayEventsDialog by remember { mutableStateOf(false) }
+
+    // Estado del nuevo menú de opciones
+    var showOptionsDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         while(true) {
@@ -1215,11 +1289,19 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         topBar = {
             if (!showInventoryScreen) {
                 TopAppBar(
-                    title = { val firstName = userName.split(" ").first(); Text(text = if (currentTab == 0) "Hola, $firstName $crownEmoji" else "Tienda de $firstName 🏪", fontWeight = FontWeight.Bold, fontSize = 20.sp) },
+                    title = {
+                        val firstName = userName.split(" ").first()
+                        Column {
+                            Text(text = if (currentTab == 0) "Hola, $firstName $crownEmoji" else "Tienda de $firstName 🏪", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                            // Mostrar Tasa BCV si está en Venezuela
+                            if (viewModel.selectedCountry == "Venezuela" && viewModel.bcvRate > 0) {
+                                Text(text = "Tasa BCV: ${formatBs(viewModel.bcvRate)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f))
+                            }
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primary, titleContentColor = MaterialTheme.colorScheme.onPrimary, actionIconContentColor = MaterialTheme.colorScheme.onPrimary),
                     actions = {
                         IconButton(onClick = { showCalendarDialog = true }) { Icon(Icons.Filled.DateRange, "Calendario") }
-                        IconButton(onClick = onThemeToggle) { Icon(if (isDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode, "Tema") }
 
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Filled.MoreVert, "Menú") }
@@ -1249,7 +1331,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 DropdownMenuItem(text = { Text("🔔 Saldo Crítico") }, onClick = { showLimitDialog = true; showMenu = false })
                             }
 
-                            DropdownMenuItem(text = { Text("🎵 Sonido") }, onClick = { showSoundDialog = true; showMenu = false })
+                            // NUEVA OPCIÓN EN EL MENÚ
+                            DropdownMenuItem(text = { Text("⚙️ Opciones") }, onClick = { showOptionsDialog = true; showMenu = false })
 
                             if (currentTab == 0 && isBorrarHistorialAllowed) { DropdownMenuItem(text = { Text("⚠️ Borrar Historial", color = Color(0xFFE53935)) }, onClick = { showDeleteHistoryConfirmDialog = true; showMenu = false }) }
 
@@ -1274,6 +1357,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 InventoryScreen(
                     products = products,
                     shoppingCart = shoppingCart,
+                    selectedCountry = viewModel.selectedCountry,
+                    bcvRate = viewModel.bcvRate,
                     onBack = { showInventoryScreen = false },
                     onAddProductClick = {
                         productToEdit = null
@@ -1295,7 +1380,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     if (tab == 0) {
                         Column(modifier = Modifier.fillMaxSize()) {
                             DashboardCard(balance, totalIncome, totalExpense, personalCashBalance, personalDigitalBalance)
-                            AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) { Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) { Text("⚠️ ¡Alerta! Tu saldo está por debajo del límite crítico (${formatCOP(viewModel.minBalanceThreshold)}).", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) } }
+                            AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) { Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) { Text("⚠️ ¡Alerta! Tu saldo está por debajo del límite crítico (${formatMoneyMain(viewModel.minBalanceThreshold, viewModel.selectedCountry)}).", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) } }
 
                             activeFiadores.forEachIndexed { index, fiador ->
                                 val remaining = fiador.amount - fiador.paidAmount
@@ -1313,7 +1398,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                         Column(modifier = Modifier.weight(1f)) {
                                             val phoneStr = if(fiador.phone.isNotBlank()) " \uD83D\uDCDE ${fiador.phone}" else ""
                                             Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                            Text("Resta: ${formatCOP(remaining)} de ${formatCOP(fiador.amount)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp)
+                                            Text("Resta: ${formatMoneyMain(remaining, viewModel.selectedCountry)} de ${formatMoneyMain(fiador.amount, viewModel.selectedCountry)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp)
                                         }
                                         IconButton(onClick = { viewModel.deleteFiador(fiador, context) }, modifier = Modifier.size(24.dp)) {
                                             Icon(Icons.Filled.Check, contentDescription = "Saldado", tint = Color.Black)
@@ -1337,7 +1422,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text("📅 Pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                             if (reminder.amount > 0) {
-                                                Text("Monto: ${formatCOP(reminder.amount)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
+                                                Text("Monto: ${formatMoneyMain(reminder.amount, viewModel.selectedCountry)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
                                             }
                                         }
                                         IconButton(onClick = { viewModel.deleteReminder(reminder, context) }, modifier = Modifier.size(24.dp)) {
@@ -1357,6 +1442,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             isLockedStore = isLockedStore,
                             totalStoreCash = totalStoreCash,
                             totalStoreDigital = totalStoreDigital,
+                            selectedCountry = viewModel.selectedCountry,
+                            bcvRate = viewModel.bcvRate,
                             onOpenInventory = { showInventoryScreen = true },
                             onOpenCheckout = { showCheckoutDialog = true },
                             onResetProfitsClick = { showResetProfitsDialog = true },
@@ -1376,6 +1463,43 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
             AnimatedVisibility(visible = undoMessage != null, enter = slideInVertically(initialOffsetY = { 50 }) + fadeIn(tween(300)), exit = fadeOut(tween(500)), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp, start = 16.dp, end = 16.dp)) { Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF323232), RoundedCornerShape(8.dp)).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { Text(text = undoMessage ?: "", color = Color.White, modifier = Modifier.weight(1f), fontSize = 14.sp); TextButton(onClick = { undoAction?.invoke(); undoMessage = null; undoAction = null }) { Text("DESHACER", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) } } }
             AnimatedVisibility(visible = customToastMessage != null, enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { 50 }), exit = fadeOut(tween(1500)), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)) { Box(modifier = Modifier.background(Color.DarkGray.copy(alpha = 0.9f), RoundedCornerShape(24.dp)).padding(horizontal = 24.dp, vertical = 12.dp)) { Text(text = customToastMessage ?: "", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp) } }
+        }
+
+        // DIÁLOGO NUEVO: OPCIONES GENERALES
+        if (showOptionsDialog) {
+            AlertDialog(
+                onDismissRequest = { showOptionsDialog = false }, properties = DialogProperties(dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Opciones ⚙️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showOptionsDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
+                containerColor = MaterialTheme.colorScheme.surface,
+                text = {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 12.dp)) {
+                            Icon(if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Modo Oscuro", modifier = Modifier.weight(1f), fontSize = 16.sp)
+                            Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() })
+                        }
+                        Divider(color = Color.Gray.copy(alpha = 0.2f))
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { showOptionsDialog = false; showSoundDialog = true }.padding(vertical = 16.dp)) {
+                            Icon(Icons.Filled.VolumeUp, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Text("Sonidos y Asistente de Voz", fontSize = 16.sp)
+                        }
+                        Divider(color = Color.Gray.copy(alpha = 0.2f))
+                        Spacer(Modifier.height(16.dp))
+                        Text("Moneda de la Aplicación", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
+                        Spacer(Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            FilterChip(selected = viewModel.selectedCountry == "Colombia", onClick = { viewModel.updateCountry("Colombia") }, label = { Text("🇨🇴 Colombia", fontWeight = FontWeight.Bold) })
+                            FilterChip(selected = viewModel.selectedCountry == "Venezuela", onClick = { viewModel.updateCountry("Venezuela") }, label = { Text("🇻🇪 Venezuela", fontWeight = FontWeight.Bold) })
+                        }
+                        if (viewModel.selectedCountry == "Venezuela") {
+                            Text("Se usará el Dólar ($) como moneda base para proteger de la inflación. El equivalente exacto en Bolívares (Bs) se generará automáticamente.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(top = 12.dp), textAlign = TextAlign.Center)
+                        }
+                    }
+                },
+                confirmButton = {}
+            )
         }
 
         if (showAdminChatList && currentRole == "ADMIN") { AdminChatListDialog(onDismiss = { showAdminChatList = false }, onSelectClient = { email -> chatTargetEmail = email; showAdminChatList = false; showChatDialog = true }) }
@@ -1573,7 +1697,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         if (showAddDialog) AddTransactionDialog(onDismiss = { showAddDialog = false }, onConfirm = { d, a, i, n, m -> viewModel.addTransaction(d, a, i, n, m); showAddDialog = false })
         if (showLimitDialog) LimitDialog(currentLimit = viewModel.minBalanceThreshold, onDismiss = { showLimitDialog = false }, onConfirm = { viewModel.updateMinBalance(it); showLimitDialog = false })
 
-        // ELIMINACIÓN DE LOS BOTONES DE DEUDA EN EL CALENDARIO Y CERRADO CON X
         if (showDayEventsDialog && preselectedDateForEvent != null) {
             val dayReminders = currentTabReminders.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) }
             val dayFiadores = currentTabFiadores.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) }
@@ -1592,12 +1715,12 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                         items(dayReminders) { r ->
                             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { showDayEventsDialog = false; reminderToEdit = r; showReminderDialog = true }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2).copy(alpha = 0.2f))) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🔵", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { Text("Pagar Deuda", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary); Text(r.title, fontWeight = FontWeight.Bold); if (r.amount > 0) { Text(formatCOP(r.amount), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) } } }
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🔵", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { Text("Pagar Deuda", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary); Text(r.title, fontWeight = FontWeight.Bold); if (r.amount > 0) { Text(formatMoneyMain(r.amount, viewModel.selectedCountry), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) } } }
                             }
                         }
                         items(dayFiadores) { f ->
                             Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { showDayEventsDialog = false; fiadorToEdit = f; showFiadorDialog = true }, colors = CardDefaults.cardColors(containerColor = Color(0xFFFBC02D).copy(alpha = 0.2f))) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🟡", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { val remaining = f.amount - f.paidAmount; Text("Cobrar Dinero", fontSize = 12.sp, color = Color(0xFFFBC02D)); Text("${f.name} - Resta: ${formatCOP(remaining)}", fontWeight = FontWeight.Bold) } }
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🟡", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { val remaining = f.amount - f.paidAmount; Text("Cobrar Dinero", fontSize = 12.sp, color = Color(0xFFFBC02D)); Text("${f.name} - Resta: ${formatMoneyMain(remaining, viewModel.selectedCountry)}", fontWeight = FontWeight.Bold) } }
                             }
                         }
                         items(dayProducts) { p ->
@@ -1631,18 +1754,18 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Opciones de Ganancias 💰", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showResetProfitsDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                 text = {
                     Column {
-                        Text("Ganancias Totales: ${formatCOP(totalProfit)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text("Ganancias Totales: ${formatMoneyMain(totalProfit, viewModel.selectedCountry)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         Divider(modifier = Modifier.padding(vertical = 12.dp))
                         Text("Disponible en Efectivo (Caja):", fontSize = 14.sp, color = Color.Gray)
-                        Text(formatCOP(totalStoreCash), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(formatMoneyMain(totalStoreCash, viewModel.selectedCountry), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Disponible en Digital (Banco):", fontSize = 14.sp, color = Color.Gray)
-                        Text(formatCOP(totalStoreDigital), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(formatMoneyMain(totalStoreDigital, viewModel.selectedCountry), fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
                         if (viewModel.pocketDebt > 0) {
                             Divider(modifier = Modifier.padding(vertical = 12.dp))
                             Text("Deuda al Bolsillo (Vueltos):", fontSize = 14.sp, color = Color(0xFFE65100))
-                            Text(formatCOP(viewModel.pocketDebt), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
+                            Text(formatMoneyMain(viewModel.pocketDebt, viewModel.selectedCountry), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
                             Spacer(modifier = Modifier.height(8.dp))
 
                             if (totalStoreCash >= viewModel.pocketDebt) {
@@ -1659,7 +1782,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         Button(onClick = { showAddBaseDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), modifier = Modifier.fillMaxWidth()) { Text("➕ Ingresar Base a Caja (Menudo)") }
                     }
                 },
-                confirmButton = { TextButton(onClick = { viewModel.resetAllProfits(); showResetProfitsDialog = false; customToastMessage = "Caja y Banco reiniciados a $0" }) { Text("Reiniciar a $0", color = Color.Red) } },
+                confirmButton = { TextButton(onClick = { viewModel.resetAllProfits(); showResetProfitsDialog = false; customToastMessage = "Caja y Banco reiniciados a 0" }) { Text("Reiniciar a 0", color = Color.Red) } },
                 dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
             )
         }
@@ -1677,7 +1800,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         Text("Ingresa el monto de menudo para dar vueltos.", fontSize = 13.sp, color = Color.Gray)
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
-                            value = baseAmount, onValueChange = { baseAmount = cleanAmountInput(it) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().focusRequester(focusRequester), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) }, placeholder = { Text("0") }, textStyle = LocalTextStyle.current.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            value = baseAmount, onValueChange = { baseAmount = cleanAmountInput(it) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().focusRequester(focusRequester), leadingIcon = { Text(if (viewModel.selectedCountry == "Venezuela") "$" else "$", color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) }, placeholder = { Text("0") }, textStyle = LocalTextStyle.current.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         )
                     }
                 },
@@ -1686,7 +1809,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         val amount = baseAmount.toDoubleOrNull() ?: 0.0
                         if (amount > 0) {
                             viewModel.insertRawTransaction(Transaction(description = "Venta: Base de Caja", amount = 0.0, isIncome = true, note = "Dinero ingresado para dar vueltos", profit = 0.0, cashAmount = amount, digitalAmount = 0.0))
-                            customToastMessage = "Base de caja ingresada: ${formatCOP(amount)}"
+                            customToastMessage = "Base de caja ingresada: ${formatMoneyMain(amount, viewModel.selectedCountry)}"
                             showAddBaseDialog = false; showResetProfitsDialog = false
                         }
                     }) { Text("Añadir") }
@@ -1707,7 +1830,34 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        if (showAddProductDialog) { AddProductDialog(isEditMode = productToEdit != null, draftState = productDraftState, onDismiss = { showAddProductDialog = false; if (productToEdit != null) { productDraftState.clear(); productToEdit = null } }, onConfirm = { val parsedPrice = productDraftState.priceRaw.toDoubleOrNull() ?: 0.0; val parsedPurchase = productDraftState.purchasePriceRaw.toDoubleOrNull() ?: 0.0; val s = productDraftState.stockRaw.toIntOrNull(); val minS = productDraftState.minStockRaw.toIntOrNull() ?: 0; if (productDraftState.name.isNotBlank() && parsedPrice > 0 && s != null) { val capName = productDraftState.name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }; val expiry = if (productDraftState.hasExpiry) productDraftState.expiryDateMillis else null; if (productToEdit != null) { viewModel.editProduct(productToEdit!!.copy(name = capName, purchasePrice = parsedPurchase, price = parsedPrice, stock = s, unit = productDraftState.selectedUnit, expirationDateInMillis = expiry, minStock = minS, imageUri = productDraftState.imageUri), context) { msg -> customToastMessage = msg } } else { viewModel.addProduct(capName, parsedPurchase, parsedPrice, s, productDraftState.selectedUnit, expiry, minS, productDraftState.imageUri, context) { msg -> customToastMessage = msg } }; productDraftState.clear(); showAddProductDialog = false; productToEdit = null } else { Toast.makeText(context, "Llena los campos correctamente", Toast.LENGTH_SHORT).show() } }) }
+        if (showAddProductDialog) {
+            AddProductDialog(
+                isEditMode = productToEdit != null,
+                draftState = productDraftState,
+                selectedCountry = viewModel.selectedCountry,
+                bcvRate = viewModel.bcvRate,
+                onDismiss = { showAddProductDialog = false; if (productToEdit != null) { productDraftState.clear(); productToEdit = null } },
+                onConfirm = { finalPurchasePrice, finalSellPrice ->
+                    val s = productDraftState.stockRaw.toIntOrNull()
+                    val minS = productDraftState.minStockRaw.toIntOrNull() ?: 0
+                    if (productDraftState.name.isNotBlank() && finalSellPrice > 0 && s != null) {
+                        val capName = productDraftState.name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                        val expiry = if (productDraftState.hasExpiry) productDraftState.expiryDateMillis else null
+                        if (productToEdit != null) {
+                            viewModel.editProduct(productToEdit!!.copy(name = capName, purchasePrice = finalPurchasePrice, price = finalSellPrice, stock = s, unit = productDraftState.selectedUnit, expirationDateInMillis = expiry, minStock = minS, imageUri = productDraftState.imageUri), context) { msg -> customToastMessage = msg }
+                        } else {
+                            viewModel.addProduct(capName, finalPurchasePrice, finalSellPrice, s, productDraftState.selectedUnit, expiry, minS, productDraftState.imageUri, context) { msg -> customToastMessage = msg }
+                        }
+                        productDraftState.clear()
+                        showAddProductDialog = false
+                        productToEdit = null
+                    } else {
+                        Toast.makeText(context, "Llena los campos correctamente", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        }
+
         if (productToAddToCart != null) { AddToCartDialog(product = productToAddToCart!!, currentCartQty = shoppingCart.find { it.first.id == productToAddToCart!!.id }?.second ?: 0, onDismiss = { productToAddToCart = null }, onConfirm = { qty -> val existing = shoppingCart.find { it.first.id == productToAddToCart!!.id }; if (existing != null) { val idx = shoppingCart.indexOf(existing); shoppingCart[idx] = existing.copy(second = existing.second + qty) } else { shoppingCart.add(Pair(productToAddToCart!!, qty)) }; customToastMessage = "Añadido al carrito 🛒"; productToAddToCart = null }) }
 
         if (showCheckoutDialog) {
@@ -1734,6 +1884,8 @@ fun StoreScreen(
     isLockedStore: Boolean,
     totalStoreCash: Double,
     totalStoreDigital: Double,
+    selectedCountry: String, // SOLUCIÓN: Agregado
+    bcvRate: Double,         // SOLUCIÓN: Agregado
     onOpenInventory: () -> Unit,
     onOpenCheckout: () -> Unit,
     onResetProfitsClick: () -> Unit,
@@ -1759,7 +1911,7 @@ fun StoreScreen(
         AlertDialog(
             onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
             title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Inversión 📦", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showInversionDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-            text = { Text("El dinero total que invertiste en los productos actuales (calculado por su precio de compra original) es:\n\n${formatCOP(totalInversion)}", fontSize = 16.sp) },
+            text = { Text("El dinero total que invertiste en los productos actuales (calculado por su precio de compra original) es:\n\n${formatMoneyMain(totalInversion, selectedCountry)}", fontSize = 16.sp) },
             confirmButton = { }, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
         )
     }
@@ -1771,14 +1923,14 @@ fun StoreScreen(
             text = {
                 Column {
                     Text("Ganancia Obtenida (Ventas Realizadas):", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
-                    Text(formatCOP(totalProfit), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                    Text(formatMoneyMain(totalProfit, selectedCountry), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("Desglose Actual:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
-                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("Caja (Efectivo):", fontSize = 13.sp); Text(formatCOP(totalStoreCash), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
-                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("Banco (Digital):", fontSize = 13.sp); Text(formatCOP(totalStoreDigital), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("Caja (Efectivo):", fontSize = 13.sp); Text(formatMoneyMain(totalStoreCash, selectedCountry), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("Banco (Digital):", fontSize = 13.sp); Text(formatMoneyMain(totalStoreDigital, selectedCountry), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
                     Divider(modifier = Modifier.padding(vertical = 12.dp))
                     Text("Ganancia Futura (Inventario Restante):", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
-                    Text(formatCOP(gananciaFutura), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text(formatMoneyMain(gananciaFutura, selectedCountry), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     Text("Esta es la ganancia neta que obtendrás al vender todo tu stock actual.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
                 }
             },
@@ -1790,7 +1942,7 @@ fun StoreScreen(
         activeReminders.forEachIndexed { index, reminder ->
             AnimatedVisibility(visible = true) {
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).padding(top = if(index == 0) 16.dp else 0.dp).background(Color(0xFF1976D2), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { onEditReminder(reminder) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) { Text("📅 Pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp); if (reminder.amount > 0) { Text("Monto: ${formatCOP(reminder.amount)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp) } }
+                    Column(modifier = Modifier.weight(1f)) { Text("📅 Pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp); if (reminder.amount > 0) { Text("Monto: ${formatMoneyMain(reminder.amount, selectedCountry)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp) } }
                     IconButton(onClick = { onSettleReminder(reminder) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White) }
                 }
             }
@@ -1800,7 +1952,7 @@ fun StoreScreen(
             val remaining = fiador.amount - fiador.paidAmount
             AnimatedVisibility(visible = true) {
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).padding(top = if(index == 0 && activeReminders.isEmpty()) 16.dp else 0.dp).background(Color(0xFFFBC02D), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { onEditFiador(fiador) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) { val phoneStr = if(fiador.phone.isNotBlank()) " \uD83D\uDCDE ${fiador.phone}" else ""; Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("Resta: ${formatCOP(remaining)} de ${formatCOP(fiador.amount)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp) }
+                    Column(modifier = Modifier.weight(1f)) { val phoneStr = if(fiador.phone.isNotBlank()) " \uD83D\uDCDE ${fiador.phone}" else ""; Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("Resta: ${formatMoneyMain(remaining, selectedCountry)} de ${formatMoneyMain(fiador.amount, selectedCountry)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp) }
                     IconButton(onClick = { onSettleFiador(fiador) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Check, contentDescription = "Saldado", tint = Color.Black) }
                 }
             }
@@ -1811,7 +1963,10 @@ fun StoreScreen(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { showInversionDialog = true }.padding(4.dp)) {
                         Text("Valor del Inventario", color = Color.Gray, fontSize = 13.sp)
-                        Text(text = formatCOP(totalInventoryValue), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                        Text(text = formatMoneyMain(totalInventoryValue, selectedCountry), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                        if (selectedCountry == "Venezuela") {
+                            Text(text = formatMoneySec(totalInventoryValue, selectedCountry, bcvRate), color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).alpha(if(isLockedStore) 0.5f else 1f).padding(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1819,7 +1974,10 @@ fun StoreScreen(
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(Icons.Filled.Refresh, contentDescription = "Reiniciar", tint = Color.Gray, modifier = Modifier.size(20.dp).clickable { if (isLockedStore) showPremiumToast() else onResetProfitsClick() })
                         }
-                        Text(text = formatCOP(totalProfit), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4CAF50), modifier = Modifier.clickable { if (isLockedStore) showPremiumToast() else showGananciaFuturaDialog = true })
+                        Text(text = formatMoneyMain(totalProfit, selectedCountry), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4CAF50), modifier = Modifier.clickable { if (isLockedStore) showPremiumToast() else showGananciaFuturaDialog = true })
+                        if (selectedCountry == "Venezuela") {
+                            Text(text = formatMoneySec(totalProfit, selectedCountry, bcvRate), color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -1833,14 +1991,27 @@ fun StoreScreen(
 
         AnimatedVisibility(visible = shoppingCart.isNotEmpty()) {
             val totalCart = shoppingCart.sumOf { it.first.price * it.second }; val totalItems = shoppingCart.sumOf { it.second }
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) { Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White); Spacer(Modifier.width(12.dp)); Column(modifier = Modifier.weight(1f)) { Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White); Text("Total: ${formatCOP(totalCart)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f)) }; Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White) } }
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) { Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White); Spacer(Modifier.width(12.dp)); Column(modifier = Modifier.weight(1f)) { Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White); Text("Total: ${formatMoneyMain(totalCart, selectedCountry)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f)) }; Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White) } }
         }
     }
     if (showVendidosDialog) ProductosVendidosDialog(transactions = transactions, activeFiadores = activeFiadores, onDismiss = { showVendidosDialog = false }, onDeleteVentas = onDeleteVentas)
 }
 
 @Composable
-fun InventoryScreen(products: List<Product>, shoppingCart: List<Pair<Product, Int>>, onBack: () -> Unit, onAddProductClick: () -> Unit, onAddToCartClick: (Product) -> Unit, onOpenCheckout: () -> Unit, onEditClick: (Product) -> Unit, onDeleteClick: (Product) -> Unit, onLongDeleteClick: (Product) -> Unit, onInfoClick: (Product) -> Unit) {
+fun InventoryScreen(
+    products: List<Product>,
+    shoppingCart: List<Pair<Product, Int>>,
+    selectedCountry: String, // SOLUCIÓN: Agregado
+    bcvRate: Double,         // SOLUCIÓN: Agregado
+    onBack: () -> Unit,
+    onAddProductClick: () -> Unit,
+    onAddToCartClick: (Product) -> Unit,
+    onOpenCheckout: () -> Unit,
+    onEditClick: (Product) -> Unit,
+    onDeleteClick: (Product) -> Unit,
+    onLongDeleteClick: (Product) -> Unit,
+    onInfoClick: (Product) -> Unit
+) {
     var searchQuery by remember { mutableStateOf("") }; var sortBy by remember { mutableStateOf("A-Z") }
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
 
@@ -1855,7 +2026,7 @@ fun InventoryScreen(products: List<Product>, shoppingCart: List<Pair<Product, In
 
             AnimatedVisibility(visible = shoppingCart.isNotEmpty()) {
                 val totalCart = shoppingCart.sumOf { it.first.price * it.second }; val totalItems = shoppingCart.sumOf { it.second }
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) { Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White); Spacer(Modifier.width(12.dp)); Column(modifier = Modifier.weight(1f)) { Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White); Text("Total: ${formatCOP(totalCart)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f)) }; Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White) } }
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) { Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White); Spacer(Modifier.width(12.dp)); Column(modifier = Modifier.weight(1f)) { Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White); Text("Total: ${formatMoneyMain(totalCart, selectedCountry)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f)) }; Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White) } }
             }
             val sortedProducts = remember(products, searchQuery, sortBy) {
                 val filtered = products.filter { it.name.contains(searchQuery, ignoreCase = true) }
@@ -1864,7 +2035,17 @@ fun InventoryScreen(products: List<Product>, shoppingCart: List<Pair<Product, In
             LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
                 if (sortedProducts.isEmpty()) { item { Text("No se encontraron productos.", color = Color.Gray, modifier = Modifier.padding(16.dp).fillMaxWidth(), textAlign = TextAlign.Center) } }
                 items(sortedProducts, key = { it.id }) { product ->
-                    ProductItem(product = product, onAddToCart = { onAddToCartClick(product) }, onEdit = { onEditClick(product) }, onDelete = { onDeleteClick(product) }, onLongDelete = { onLongDeleteClick(product) }, onInfo = { onInfoClick(product) }, onImageClick = { expandedImageUri = product.imageUri })
+                    ProductItem(
+                        product = product,
+                        selectedCountry = selectedCountry, // SOLUCIÓN: Agregado
+                        bcvRate = bcvRate,                 // SOLUCIÓN: Agregado
+                        onAddToCart = { onAddToCartClick(product) },
+                        onEdit = { onEditClick(product) },
+                        onDelete = { onDeleteClick(product) },
+                        onLongDelete = { onLongDeleteClick(product) },
+                        onInfo = { onInfoClick(product) },
+                        onImageClick = { expandedImageUri = product.imageUri }
+                    )
                 }
             }
         }
@@ -1876,7 +2057,17 @@ fun InventoryScreen(products: List<Product>, shoppingCart: List<Pair<Product, In
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ProductItem(product: Product, onAddToCart: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit, onLongDelete: () -> Unit, onInfo: () -> Unit, onImageClick: () -> Unit) {
+fun ProductItem(
+    product: Product,
+    selectedCountry: String, // SOLUCIÓN: Agregado
+    bcvRate: Double,         // SOLUCIÓN: Agregado
+    onAddToCart: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onLongDelete: () -> Unit,
+    onInfo: () -> Unit,
+    onImageClick: () -> Unit
+) {
     val context = LocalContext.current
     val isOutOfStock = product.stock <= 0; val isLowStock = product.minStock > 0 && product.stock <= product.minStock && !isOutOfStock
     val isExpired = product.expirationDateInMillis != null && product.expirationDateInMillis < System.currentTimeMillis()
@@ -1896,8 +2087,9 @@ fun ProductItem(product: Product, onAddToCart: () -> Unit, onEdit: () -> Unit, o
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Text(text = product.name, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)); if (isExpired) { Spacer(modifier = Modifier.width(8.dp)); Surface(color = Color(0xFFD32F2F), shape = RoundedCornerShape(4.dp)) { Text("⚠️ VENCIDO", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) } }; if (isLowStock) { Spacer(modifier = Modifier.width(8.dp)); Surface(color = Color(0xFFE65100), shape = RoundedCornerShape(4.dp)) { Text("⚠️ POCO STOCK", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) } } }
-                    Text(text = "Precio: ${formatCOP(product.price)}", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    val totalStockVal = product.price * product.stock; if (totalStockVal > 0) { Text(text = "Total en stock: ${formatCOP(totalStockVal)}", color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
+                    // SOLUCIÓN: Cambiado formatCOP por formatMoneyMain
+                    Text(text = "Precio: ${formatMoneyMain(product.price, selectedCountry)}", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    val totalStockVal = product.price * product.stock; if (totalStockVal > 0) { Text(text = "Total en stock: ${formatMoneyMain(totalStockVal, selectedCountry)}", color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
                     Row(verticalAlignment = Alignment.CenterVertically) { Text(text = "Stock: ${product.stock} ${product.unit}", color = if (isOutOfStock) Color.Red else Color.Gray, fontSize = 14.sp, fontWeight = if (isOutOfStock) FontWeight.Bold else FontWeight.Normal); if (product.expirationDateInMillis != null) { Spacer(modifier = Modifier.width(8.dp)); Text(text = "Vence: ${formatDateOnly(product.expirationDateInMillis)}", color = if (isExpired) Color.Red else Color.Gray, fontSize = 12.sp) } }
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Button(onClick = onAddToCart, enabled = !isOutOfStock, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), modifier = Modifier.height(36.dp)) { Text("Añadir 🛒") }; Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.padding(top = 4.dp)) { IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Edit, "Editar", tint = Color.Blue, modifier = Modifier.size(20.dp)) }; IconButton(onClick = { if (product.stock <= 0) onLongDelete() else onDelete() }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Borrar", tint = Color.Red, modifier = Modifier.size(20.dp)) } } }
@@ -2374,9 +2566,11 @@ fun CalendarDialog(currentTab: Int, reminders: List<Reminder>, fiadores: List<Fi
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selectedCountry: String, bcvRate: Double, onDismiss: () -> Unit, onConfirm: (Double, Double) -> Unit) {
     val context = LocalContext.current
     var showDatePicker by remember { mutableStateOf(false) }
+    var inputCurrency by remember { mutableStateOf("USD") } // Para modo Venezuela
+    val isBsInput = selectedCountry == "Venezuela" && inputCurrency == "BS"
 
     val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? -> if (uri != null) { try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) { e.printStackTrace() }; draftState.imageUri = uri.toString() } }
     if (showDatePicker) { CustomDatePickerDialog(initialDateMillis = draftState.expiryDateMillis ?: System.currentTimeMillis(), onDismiss = { showDatePicker = false }, onDateSelected = { selected -> draftState.expiryDateMillis = selected; showDatePicker = false }) }
@@ -2394,10 +2588,55 @@ fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, onDismi
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(value = draftState.name, onValueChange = { input -> draftState.name = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nombre del Producto") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(value = draftState.purchasePriceRaw, onValueChange = { draftState.purchasePriceRaw = cleanAmountInput(it) }, label = { Text("Precio de Compra") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) })
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // SELECTOR DE MONEDA DE INGRESO (SOLO VENEZUELA)
+                if (selectedCountry == "Venezuela") {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        FilterChip(selected = inputCurrency == "USD", onClick = { inputCurrency = "USD" }, label = { Text("Dólares ($)") })
+                        FilterChip(selected = inputCurrency == "BS", onClick = { inputCurrency = "BS" }, label = { Text("Bolívares (Bs)") })
+                    }
+                    Text("Llénalo para calcular tu ganancia real al vender.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp, top = 4.dp))
+                }
+
+                val visualTrans = if (selectedCountry == "Venezuela") VisualTransformation.None else AmountVisualTransformation()
+                val cleaner = { input: String -> if (selectedCountry == "Venezuela") cleanDecimalInput(input) else cleanAmountInput(input) }
+                val symbolText = if (selectedCountry == "Venezuela") if (isBsInput) "(Bs)" else "($)" else ""
+                val leadingSym = if (selectedCountry == "Venezuela") if (isBsInput) "Bs" else "$" else "$"
+
+                OutlinedTextField(
+                    value = draftState.purchasePriceRaw,
+                    onValueChange = { draftState.purchasePriceRaw = cleaner(it) },
+                    label = { Text("Precio de Compra (Costo) $symbolText") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    visualTransformation = visualTrans,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Text(leadingSym, color = Color.Gray, modifier = Modifier.padding(start=8.dp)) }
+                )
+                if (selectedCountry == "Venezuela" && draftState.purchasePriceRaw.isNotEmpty()) {
+                    val entered = draftState.purchasePriceRaw.toDoubleOrNull() ?: 0.0
+                    val converted = if (isBsInput) (if (bcvRate > 0) "= ${formatUSD(entered / bcvRate)}" else "= $0.00") else "= ${formatBs(entered * bcvRate)}"
+                    Text(converted, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
+                }
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(value = draftState.priceRaw, onValueChange = { draftState.priceRaw = cleanAmountInput(it) }, label = { Text("Precio de Venta") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) })
+
+                OutlinedTextField(
+                    value = draftState.priceRaw,
+                    onValueChange = { draftState.priceRaw = cleaner(it) },
+                    label = { Text("Precio de Venta al Público $symbolText") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    visualTransformation = visualTrans,
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = { Text(leadingSym, color = Color.Gray, modifier = Modifier.padding(start=8.dp)) }
+                )
+                if (selectedCountry == "Venezuela" && draftState.priceRaw.isNotEmpty()) {
+                    val entered = draftState.priceRaw.toDoubleOrNull() ?: 0.0
+                    val converted = if (isBsInput) (if (bcvRate > 0) "= ${formatUSD(entered / bcvRate)}" else "= $0.00") else "= ${formatBs(entered * bcvRate)}"
+                    Text(converted, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
+                }
+
                 Spacer(modifier = Modifier.height(12.dp)); Text("Unidad de Medida", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) { FilterChip(selected = draftState.selectedUnit == "Uds", onClick = { draftState.selectedUnit = "Uds" }, label = { Text("Unidad") }); FilterChip(selected = draftState.selectedUnit == "Kg", onClick = { draftState.selectedUnit = "Kg" }, label = { Text("Kilos") }); FilterChip(selected = draftState.selectedUnit == "L", onClick = { draftState.selectedUnit = "L" }, label = { Text("Litros") }) }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -2409,7 +2648,19 @@ fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, onDismi
                 if (draftState.hasExpiry) { Spacer(modifier = Modifier.height(4.dp)); OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth()) { Text(if (draftState.expiryDateMillis == null) "Seleccionar Fecha 📅" else "Vence: ${formatDateOnly(draftState.expiryDateMillis!!)}") } }
             }
         },
-        confirmButton = { Button(onClick = onConfirm) { Text("Guardar ✔️") } }, dismissButton = { }
+        confirmButton = {
+            Button(onClick = {
+                val parsedPurchaseRaw = draftState.purchasePriceRaw.toDoubleOrNull() ?: 0.0
+                val parsedPriceRaw = draftState.priceRaw.toDoubleOrNull() ?: 0.0
+
+                // Normaliza siempre a USD internamente si está en Venezuela
+                val finalPurchase = if (selectedCountry == "Venezuela" && inputCurrency == "BS" && bcvRate > 0) parsedPurchaseRaw / bcvRate else parsedPurchaseRaw
+                val finalPrice = if (selectedCountry == "Venezuela" && inputCurrency == "BS" && bcvRate > 0) parsedPriceRaw / bcvRate else parsedPriceRaw
+
+                onConfirm(finalPurchase, finalPrice)
+            }) { Text("Guardar ✔️") }
+        },
+        dismissButton = { }
     )
 }
 
