@@ -1054,31 +1054,28 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     if (showRoleUpgradeDialog != null) {
         AlertDialog(
-            onDismissRequest = { showRoleUpgradeDialog = null },
-            title = { Text("¡Felicidades! 🎉", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("¡Felicidades! 🎉", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showRoleUpgradeDialog = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
             text = { Text("Tu plan ha sido actualizado a ${showRoleUpgradeDialog}. ¡Disfruta de tus nuevos privilegios!") },
-            confirmButton = { Button(onClick = { showRoleUpgradeDialog = null }) { Text("Aceptar") } },
-            containerColor = MaterialTheme.colorScheme.surface
+            confirmButton = { }, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
         )
     }
 
     if (showRoleDowngradeDialog) {
         AlertDialog(
-            onDismissRequest = { showRoleDowngradeDialog = false },
-            title = { Text("Plan Expirado ⚠️", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Plan Expirado ⚠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showRoleDowngradeDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
             text = { Text("El tiempo de tu plan ha culminado. Ahora eres INVITADO. Contacta al administrador para renovar.") },
-            confirmButton = { Button(onClick = { showRoleDowngradeDialog = false }) { Text("Aceptar") } },
-            containerColor = MaterialTheme.colorScheme.surface
+            confirmButton = { }, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
         )
     }
 
     if (showWarningDialog != null) {
         AlertDialog(
-            onDismissRequest = { showWarningDialog = null },
-            title = { Text("Aviso de Expiración ⏳", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Aviso de Expiración ⏳", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showWarningDialog = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
             text = { Text(showWarningDialog!!) },
-            confirmButton = { Button(onClick = { showWarningDialog = null }) { Text("Entendido") } },
-            containerColor = MaterialTheme.colorScheme.surface
+            confirmButton = { }, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
         )
     }
 
@@ -1386,8 +1383,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
         if (showPlansDialog) {
             AlertDialog(
-                onDismissRequest = { showPlansDialog = false },
-                title = { Text("Planes Disponibles 🚀", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+                onDismissRequest = { }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Planes Disponibles 🚀", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)); IconButton(onClick = { showPlansDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                 containerColor = MaterialTheme.colorScheme.surface,
                 text = {
                     Column {
@@ -1399,8 +1396,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         }
                     }
                 },
-                confirmButton = { Button(onClick = { showPlansDialog = false }, modifier = Modifier.fillMaxWidth()) { Text("¡Entendido, Comenzar!") } },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
+                confirmButton = { }, dismissButton = { }
             )
         }
 
@@ -1413,8 +1409,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
             if (roleToAssign != null && targetEmailToAssign != null) {
                 AlertDialog(
-                    onDismissRequest = { roleToAssign = null; targetEmailToAssign = null },
-                    title = { Text("Duración para $roleToAssign ⏱️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+                    onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+                    title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Duración para $roleToAssign ⏱️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)); IconButton(onClick = { roleToAssign = null; targetEmailToAssign = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                     text = {
                         Column {
                             Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 2592000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Mes (30 días)") }
@@ -1424,12 +1420,14 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 31104000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Año (360 días)") }
                         }
                     },
-                    confirmButton = {}, dismissButton = { TextButton(onClick = { roleToAssign = null; targetEmailToAssign = null }) { Text("Cancelar") } }, containerColor = MaterialTheme.colorScheme.surface
+                    confirmButton = {}, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
                 )
             }
 
             AlertDialog(
-                onDismissRequest = { showAdminPanelDialog = false }, title = { Text("Panel de Control 🛠️", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface,
+                onDismissRequest = { }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Panel de Control 🛠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showAdminPanelDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
+                containerColor = MaterialTheme.colorScheme.surface,
                 text = {
                     if (isLoadingUsers) { CircularProgressIndicator(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally)) }
                     else if (usersList.isNullOrEmpty()) { Text("No hay usuarios registrados.", color = Color.Gray) }
@@ -1471,7 +1469,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             }
                         }
                     }
-                }, confirmButton = { TextButton(onClick = { showAdminPanelDialog = false }) { Text("Cerrar") } }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)
+                }, confirmButton = { }, dismissButton = { }
             )
         }
 
@@ -1480,7 +1478,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             val isAutoEnabled = viewModel.autoSyncFrequency > 0
 
             AlertDialog(
-                onDismissRequest = { if (!viewModel.isSyncing) showCloudSyncDialog = false }, title = { Text("Sincronización Nube ☁️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, containerColor = MaterialTheme.colorScheme.surface,
+                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Sincronización Nube ☁️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)); if (!viewModel.isSyncing) { IconButton(onClick = { showCloudSyncDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } } }, containerColor = MaterialTheme.colorScheme.surface,
                 text = {
                     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Tus datos se guardan en el servidor de forma segura.", textAlign = TextAlign.Center, color = Color.Gray, fontSize = 13.sp); Spacer(modifier = Modifier.height(16.dp))
@@ -1521,16 +1520,24 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             OutlinedButton(onClick = { if (isManualSyncAllowed) { isLoadingList = true; viewModel.fetchBackupList { list -> isLoadingList = false; cloudBackupsList = list; showBackupListDialog = true } } else { showPremiumToastMsg(context) } }, modifier = Modifier.fillMaxWidth()) { if (isLoadingList) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.primary) else Text(if (isManualSyncAllowed) "Listas de Copias de Seguridad 🗂️" else "👑 Listas de Copias de Seguridad 🗂️", color = if (isManualSyncAllowed) MaterialTheme.colorScheme.primary else Color.Gray) }
                         }
                     }
-                }, confirmButton = {}, dismissButton = { if (!viewModel.isSyncing) TextButton(onClick = { showCloudSyncDialog = false }) { Text("Cerrar") } }
+                }, confirmButton = {}, dismissButton = { }
             )
         }
 
-        if (showBackupNameDialog) { AlertDialog(onDismissRequest = { showBackupNameDialog = false }, title = { Text("Nombre del Respaldo", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { OutlinedTextField(value = backupNameInput, onValueChange = { backupNameInput = it.replaceFirstChar { c -> if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString() } }, label = { Text("Ej: Antes de formatear") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)) }, confirmButton = { Button(onClick = { if (backupNameInput.isNotBlank()) { viewModel.manualBackup(backupNameInput.trim()) { msg -> customToastMessage = msg; showBackupNameDialog = false; showCloudSyncDialog = false } } else { Toast.makeText(context, "Ingresa un nombre", Toast.LENGTH_SHORT).show() } }) { Text("Guardar Respaldo") } }, dismissButton = { TextButton(onClick = { showBackupNameDialog = false }) { Text("Cancelar") } }) }
+        if (showBackupNameDialog) {
+            AlertDialog(
+                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Nombre del Respaldo", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showBackupNameDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } }, containerColor = MaterialTheme.colorScheme.surface,
+                text = { OutlinedTextField(value = backupNameInput, onValueChange = { backupNameInput = it.replaceFirstChar { c -> if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString() } }, label = { Text("Ej: Antes de formatear") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)) },
+                confirmButton = { Button(onClick = { if (backupNameInput.isNotBlank()) { viewModel.manualBackup(backupNameInput.trim()) { msg -> customToastMessage = msg; showBackupNameDialog = false; showCloudSyncDialog = false } } else { Toast.makeText(context, "Ingresa un nombre", Toast.LENGTH_SHORT).show() } }) { Text("Guardar Respaldo") } },
+                dismissButton = { }
+            )
+        }
 
         if (showBackupListDialog) {
             AlertDialog(
-                onDismissRequest = { showBackupListDialog = false },
-                title = { Text("Copias de Seguridad 🗂️", fontWeight = FontWeight.Bold) },
+                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Copias de Seguridad 🗂️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showBackupListDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                 containerColor = MaterialTheme.colorScheme.surface,
                 text = {
                     if (cloudBackupsList.isNullOrEmpty()) {
@@ -1559,152 +1566,69 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         }
                     }
                 },
-                confirmButton = { TextButton(onClick = { showBackupListDialog = false }) { Text("Volver") } }
+                confirmButton = { }, dismissButton = { }
             )
         }
 
         if (showAddDialog) AddTransactionDialog(onDismiss = { showAddDialog = false }, onConfirm = { d, a, i, n, m -> viewModel.addTransaction(d, a, i, n, m); showAddDialog = false })
         if (showLimitDialog) LimitDialog(currentLimit = viewModel.minBalanceThreshold, onDismiss = { showLimitDialog = false }, onConfirm = { viewModel.updateMinBalance(it); showLimitDialog = false })
 
+        // ELIMINACIÓN DE LOS BOTONES DE DEUDA EN EL CALENDARIO Y CERRADO CON X
         if (showDayEventsDialog && preselectedDateForEvent != null) {
             val dayReminders = currentTabReminders.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) }
             val dayFiadores = currentTabFiadores.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) }
             val dayProducts = if(currentTab == 1) products.filter { it.expirationDateInMillis != null && isSameDay(it.expirationDateInMillis, preselectedDateForEvent!!) } else emptyList()
 
             AlertDialog(
-                onDismissRequest = { showDayEventsDialog = false; preselectedDateForEvent = null },
-                title = { Text("Eventos del Día 📅", fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) },
+                onDismissRequest = { }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+                title = {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Eventos del Día 📅", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                        IconButton(onClick = { showDayEventsDialog = false; preselectedDateForEvent = null }) { Icon(Icons.Filled.Close, "Cerrar") }
+                    }
+                },
                 containerColor = MaterialTheme.colorScheme.surface,
                 text = {
                     LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                         items(dayReminders) { r ->
-                            Card(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                                    showDayEventsDialog = false
-                                    reminderToEdit = r
-                                    showReminderDialog = true
-                                },
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2).copy(alpha = 0.2f))
-                            ) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🔵", modifier = Modifier.padding(end = 8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Pagar Deuda", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                                        Text(r.title, fontWeight = FontWeight.Bold)
-                                        if (r.amount > 0) {
-                                            Text(formatCOP(r.amount), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                                        }
-                                    }
-                                }
+                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { showDayEventsDialog = false; reminderToEdit = r; showReminderDialog = true }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2).copy(alpha = 0.2f))) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🔵", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { Text("Pagar Deuda", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary); Text(r.title, fontWeight = FontWeight.Bold); if (r.amount > 0) { Text(formatCOP(r.amount), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) } } }
                             }
                         }
                         items(dayFiadores) { f ->
-                            Card(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                                    showDayEventsDialog = false
-                                    fiadorToEdit = f
-                                    showFiadorDialog = true
-                                },
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFFFBC02D).copy(alpha = 0.2f))
-                            ) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🟡", modifier = Modifier.padding(end = 8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        val remaining = f.amount - f.paidAmount
-                                        Text("Cobrar Dinero", fontSize = 12.sp, color = Color(0xFFFBC02D))
-                                        Text("${f.name} - Resta: ${formatCOP(remaining)}", fontWeight = FontWeight.Bold)
-                                    }
-                                }
+                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { showDayEventsDialog = false; fiadorToEdit = f; showFiadorDialog = true }, colors = CardDefaults.cardColors(containerColor = Color(0xFFFBC02D).copy(alpha = 0.2f))) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🟡", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { val remaining = f.amount - f.paidAmount; Text("Cobrar Dinero", fontSize = 12.sp, color = Color(0xFFFBC02D)); Text("${f.name} - Resta: ${formatCOP(remaining)}", fontWeight = FontWeight.Bold) } }
                             }
                         }
                         items(dayProducts) { p ->
-                            Card(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFFD32F2F).copy(alpha = 0.2f))
-                            ) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("🔴", modifier = Modifier.padding(end = 8.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text("Vencimiento de Producto", fontSize = 12.sp, color = Color(0xFFD32F2F))
-                                        Text("${p.name} (${p.stock} ${p.unit})", fontWeight = FontWeight.Bold)
-                                    }
-                                }
+                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFD32F2F).copy(alpha = 0.2f))) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🔴", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { Text("Vencimiento de Producto", fontSize = 12.sp, color = Color(0xFFD32F2F)); Text("${p.name} (${p.stock} ${p.unit})", fontWeight = FontWeight.Bold) } }
                             }
                         }
                     }
                 },
-                confirmButton = {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
-                            showDayEventsDialog = false
-                            reminderToEdit = null
-                            showReminderDialog = true
-                        }) { Text("Añadir Deuda") }
-                        Button(onClick = {
-                            showDayEventsDialog = false
-                            fiadorToEdit = null
-                            showFiadorDialog = true
-                        }) { Text("Añadir Deudor") }
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDayEventsDialog = false; preselectedDateForEvent = null }) { Text("Cerrar") }
-                },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
+                confirmButton = { }, dismissButton = { }
             )
         }
 
-        if (showCalendarDialog) {
-            CalendarDialog(
-                currentTab = currentTab,
-                reminders = currentTabReminders,
-                fiadores = currentTabFiadores,
-                products = products,
-                onDismiss = { showCalendarDialog = false },
-                onDayClick = { dateMillis, hasEvents ->
-                    if (isDeudasAllowed) {
-                        preselectedDateForEvent = dateMillis
-                        showDayEventsDialog = true
-                    } else {
-                        showPremiumToastMsg(context)
-                    }
-                },
-                onViewReminders = { showRemindersListDialog = true; showCalendarDialog = false },
-                onViewFiadores = { showFiadoresListDialog = true; showCalendarDialog = false }
-            )
-        }
-
+        if (showCalendarDialog) { CalendarDialog(currentTab = currentTab, reminders = currentTabReminders, fiadores = currentTabFiadores, products = products, onDismiss = { showCalendarDialog = false }, onDayClick = { dateMillis, hasEvents -> if (isDeudasAllowed) { preselectedDateForEvent = dateMillis; showDayEventsDialog = true } else { showPremiumToastMsg(context) } }, onViewReminders = { showRemindersListDialog = true; showCalendarDialog = false }, onViewFiadores = { showFiadoresListDialog = true; showCalendarDialog = false }) }
         if (showSummaryDialog) SummaryDialog(totalIncome = totalIncome, totalExpense = totalExpense, balance = balance, transactionCount = personalTransactions.size, onDismiss = { showSummaryDialog = false })
-
-        if (showSoundDialog) {
-            SoundSettingsDialog(
-                personalSoundUri = viewModel.personalSoundUri,
-                storeSoundUri = viewModel.storeSoundUri,
-                touchSoundUri = viewModel.touchSoundUri,
-                isVoiceEnabled = viewModel.isVoiceAssistantEnabled,
-                onDismiss = { showSoundDialog = false },
-                onSelectPersonal = { viewModel.updatePersonalSoundPreference(it, context) },
-                onSelectStore = { viewModel.updateStoreSoundPreference(it, context) },
-                onSelectTouch = { viewModel.updateTouchSoundPreference(it, context) },
-                onVoiceToggle = { viewModel.updateVoicePreference(it) }
-            )
-        }
+        if (showSoundDialog) { SoundSettingsDialog(personalSoundUri = viewModel.personalSoundUri, storeSoundUri = viewModel.storeSoundUri, touchSoundUri = viewModel.touchSoundUri, isVoiceEnabled = viewModel.isVoiceAssistantEnabled, onDismiss = { showSoundDialog = false }, onSelectPersonal = { viewModel.updatePersonalSoundPreference(it, context) }, onSelectStore = { viewModel.updateStoreSoundPreference(it, context) }, onSelectTouch = { viewModel.updateTouchSoundPreference(it, context) }, onVoiceToggle = { viewModel.updateVoicePreference(it) }) }
 
         if (showDeleteHistoryConfirmDialog) {
             AlertDialog(
-                onDismissRequest = { showDeleteHistoryConfirmDialog = false },
-                title = { Text("Borrar Historial Personal ⚠️", fontWeight = FontWeight.Bold) },
+                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Borrar Historial Personal ⚠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showDeleteHistoryConfirmDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                 text = { Text("¿Estás seguro de que deseas borrar todo el historial personal de transacciones?") },
                 confirmButton = { Button(onClick = { viewModel.deletePersonalTransactions(); showDeleteHistoryConfirmDialog = false; customToastMessage = "Historial borrado 🗑️" }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F), contentColor = Color.White)) { Text("Sí, borrar", fontWeight = FontWeight.Bold) } },
-                dismissButton = { TextButton(onClick = { showDeleteHistoryConfirmDialog = false }) { Text("Cancelar") } },
-                containerColor = MaterialTheme.colorScheme.surface
+                dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
             )
         }
 
         if (showResetProfitsDialog) {
             AlertDialog(
-                onDismissRequest = { showResetProfitsDialog = false },
-                title = { Text("Opciones de Ganancias 💰", fontWeight = FontWeight.Bold) },
+                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Opciones de Ganancias 💰", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showResetProfitsDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                 text = {
                     Column {
                         Text("Ganancias Totales: ${formatCOP(totalProfit)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -1723,33 +1647,20 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
                             if (totalStoreCash >= viewModel.pocketDebt) {
                                 Button(
-                                    onClick = {
-                                        viewModel.reimbursePocketDebt(viewModel.pocketDebt)
-                                        customToastMessage = "Deuda al bolsillo recuperada"
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Recuperar Vuelto a mi Bolsillo")
-                                }
+                                    onClick = { viewModel.reimbursePocketDebt(viewModel.pocketDebt); customToastMessage = "Deuda al bolsillo recuperada" },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)), modifier = Modifier.fillMaxWidth()
+                                ) { Text("Recuperar Vuelto a mi Bolsillo") }
                             } else {
                                 Text("⚠️ Aún no hay suficiente efectivo en caja para recuperar el vuelto.", color = Color.Red, fontSize = 12.sp)
                             }
                         }
 
                         Divider(modifier = Modifier.padding(vertical = 12.dp))
-                        Button(
-                            onClick = { showAddBaseDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("➕ Ingresar Base a Caja (Menudo)")
-                        }
+                        Button(onClick = { showAddBaseDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), modifier = Modifier.fillMaxWidth()) { Text("➕ Ingresar Base a Caja (Menudo)") }
                     }
                 },
-                confirmButton = { Button(onClick = { showResetProfitsDialog = false }) { Text("Cerrar") } },
-                dismissButton = { TextButton(onClick = { viewModel.resetAllProfits(); showResetProfitsDialog = false; customToastMessage = "Caja y Banco reiniciados a $0" }) { Text("Reiniciar a $0", color = Color.Red) } },
-                containerColor = MaterialTheme.colorScheme.surface
+                confirmButton = { TextButton(onClick = { viewModel.resetAllProfits(); showResetProfitsDialog = false; customToastMessage = "Caja y Banco reiniciados a $0" }) { Text("Reiniciar a $0", color = Color.Red) } },
+                dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
             )
         }
 
@@ -1758,23 +1669,15 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             val focusRequester = remember { FocusRequester() }
             LaunchedEffect(Unit) { delay(100); focusRequester.requestFocus() }
             AlertDialog(
-                onDismissRequest = { showAddBaseDialog = false },
-                title = { Text("Ingresar Base de Caja 💵", fontWeight = FontWeight.Bold) },
+                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Ingresar Base de Caja 💵", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showAddBaseDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                 containerColor = MaterialTheme.colorScheme.surface,
                 text = {
                     Column {
                         Text("Ingresa el monto de menudo para dar vueltos.", fontSize = 13.sp, color = Color.Gray)
                         Spacer(modifier = Modifier.height(8.dp))
                         OutlinedTextField(
-                            value = baseAmount,
-                            onValueChange = { baseAmount = cleanAmountInput(it) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            visualTransformation = AmountVisualTransformation(),
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
-                            leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) },
-                            placeholder = { Text("0") },
-                            textStyle = LocalTextStyle.current.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            value = baseAmount, onValueChange = { baseAmount = cleanAmountInput(it) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().focusRequester(focusRequester), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) }, placeholder = { Text("0") }, textStyle = LocalTextStyle.current.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         )
                     }
                 },
@@ -1782,24 +1685,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     Button(onClick = {
                         val amount = baseAmount.toDoubleOrNull() ?: 0.0
                         if (amount > 0) {
-                            viewModel.insertRawTransaction(
-                                Transaction(
-                                    description = "Venta: Base de Caja",
-                                    amount = 0.0,
-                                    isIncome = true,
-                                    note = "Dinero ingresado para dar vueltos",
-                                    profit = 0.0,
-                                    cashAmount = amount,
-                                    digitalAmount = 0.0
-                                )
-                            )
+                            viewModel.insertRawTransaction(Transaction(description = "Venta: Base de Caja", amount = 0.0, isIncome = true, note = "Dinero ingresado para dar vueltos", profit = 0.0, cashAmount = amount, digitalAmount = 0.0))
                             customToastMessage = "Base de caja ingresada: ${formatCOP(amount)}"
-                            showAddBaseDialog = false
-                            showResetProfitsDialog = false
+                            showAddBaseDialog = false; showResetProfitsDialog = false
                         }
                     }) { Text("Añadir") }
                 },
-                dismissButton = { TextButton(onClick = { showAddBaseDialog = false }) { Text("Cancelar") } }
+                dismissButton = { }
             )
         }
 
@@ -1807,151 +1699,27 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
         if (productToFullDelete != null) {
             AlertDialog(
-                onDismissRequest = { productToFullDelete = null },
-                title = { Text("Eliminar Producto ⚠️", fontWeight = FontWeight.Bold) },
+                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Eliminar Producto ⚠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { productToFullDelete = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                 text = { Text("¿Estás seguro de que deseas eliminar completamente '${productToFullDelete!!.name}' de tu inventario?") },
                 confirmButton = { Button(onClick = { val restoredProduct = productToFullDelete!!; viewModel.deleteProductEntirely(productToFullDelete!!, context); undoMessage = "Producto '${productToFullDelete!!.name}' eliminado"; undoAction = { viewModel.restoreProductStock(restoredProduct, 0, context) }; productToFullDelete = null }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F), contentColor = Color.White)) { Text("Eliminar", fontWeight = FontWeight.Bold) } },
-                dismissButton = { TextButton(onClick = { productToFullDelete = null }) { Text("Cancelar") } },
-                containerColor = MaterialTheme.colorScheme.surface
+                dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
             )
         }
 
-        if (showAddProductDialog) {
-            AddProductDialog(
-                isEditMode = productToEdit != null,
-                draftState = productDraftState,
-                onDismiss = {
-                    showAddProductDialog = false
-                    if (productToEdit != null) {
-                        productDraftState.clear()
-                        productToEdit = null
-                    }
-                },
-                onConfirm = {
-                    val parsedPrice = productDraftState.priceRaw.toDoubleOrNull() ?: 0.0
-                    val parsedPurchase = productDraftState.purchasePriceRaw.toDoubleOrNull() ?: 0.0
-                    val s = productDraftState.stockRaw.toIntOrNull()
-                    val minS = productDraftState.minStockRaw.toIntOrNull() ?: 0
-
-                    if (productDraftState.name.isNotBlank() && parsedPrice > 0 && s != null) {
-                        val capName = productDraftState.name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-                        val expiry = if (productDraftState.hasExpiry) productDraftState.expiryDateMillis else null
-
-                        if (productToEdit != null) {
-                            viewModel.editProduct(
-                                productToEdit!!.copy(
-                                    name = capName, purchasePrice = parsedPurchase, price = parsedPrice,
-                                    stock = s, unit = productDraftState.selectedUnit, expirationDateInMillis = expiry,
-                                    minStock = minS, imageUri = productDraftState.imageUri
-                                ), context
-                            ) { msg -> customToastMessage = msg }
-                        } else {
-                            viewModel.addProduct(
-                                capName, parsedPurchase, parsedPrice, s, productDraftState.selectedUnit,
-                                expiry, minS, productDraftState.imageUri, context
-                            ) { msg -> customToastMessage = msg }
-                        }
-
-                        productDraftState.clear()
-                        showAddProductDialog = false
-                        productToEdit = null
-                    } else {
-                        Toast.makeText(context, "Llena los campos correctamente", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
-        }
-
+        if (showAddProductDialog) { AddProductDialog(isEditMode = productToEdit != null, draftState = productDraftState, onDismiss = { showAddProductDialog = false; if (productToEdit != null) { productDraftState.clear(); productToEdit = null } }, onConfirm = { val parsedPrice = productDraftState.priceRaw.toDoubleOrNull() ?: 0.0; val parsedPurchase = productDraftState.purchasePriceRaw.toDoubleOrNull() ?: 0.0; val s = productDraftState.stockRaw.toIntOrNull(); val minS = productDraftState.minStockRaw.toIntOrNull() ?: 0; if (productDraftState.name.isNotBlank() && parsedPrice > 0 && s != null) { val capName = productDraftState.name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }; val expiry = if (productDraftState.hasExpiry) productDraftState.expiryDateMillis else null; if (productToEdit != null) { viewModel.editProduct(productToEdit!!.copy(name = capName, purchasePrice = parsedPurchase, price = parsedPrice, stock = s, unit = productDraftState.selectedUnit, expirationDateInMillis = expiry, minStock = minS, imageUri = productDraftState.imageUri), context) { msg -> customToastMessage = msg } } else { viewModel.addProduct(capName, parsedPurchase, parsedPrice, s, productDraftState.selectedUnit, expiry, minS, productDraftState.imageUri, context) { msg -> customToastMessage = msg } }; productDraftState.clear(); showAddProductDialog = false; productToEdit = null } else { Toast.makeText(context, "Llena los campos correctamente", Toast.LENGTH_SHORT).show() } }) }
         if (productToAddToCart != null) { AddToCartDialog(product = productToAddToCart!!, currentCartQty = shoppingCart.find { it.first.id == productToAddToCart!!.id }?.second ?: 0, onDismiss = { productToAddToCart = null }, onConfirm = { qty -> val existing = shoppingCart.find { it.first.id == productToAddToCart!!.id }; if (existing != null) { val idx = shoppingCart.indexOf(existing); shoppingCart[idx] = existing.copy(second = existing.second + qty) } else { shoppingCart.add(Pair(productToAddToCart!!, qty)) }; customToastMessage = "Añadido al carrito 🛒"; productToAddToCart = null }) }
 
         if (showCheckoutDialog) {
-            CheckoutDialog(
-                cartItems = shoppingCart,
-                products = products,
-                totalStoreCash = totalStoreCash,
-                totalStoreDigital = totalStoreDigital,
-                onDismiss = { showCheckoutDialog = false },
-                onConfirmSale = { items, buyer, summary, netCash, netDigital, pocketDebtAmount ->
-                    viewModel.processCartSale(items, buyer, summary, netCash, netDigital, context) { msg -> customToastMessage = msg }
-                    if (pocketDebtAmount > 0) {
-                        viewModel.addPocketDebt(pocketDebtAmount)
-                    }
-                    shoppingCart.clear()
-                    showCheckoutDialog = false
-                    showInventoryScreen = false
-                },
-                onFiarVenta = { buyer, cashAmount, digitalAmount ->
-                    checkoutToFiadorName = buyer
-                    checkoutToFiadorCart = shoppingCart.toList()
-                    checkoutToFiadorCash = cashAmount
-                    checkoutToFiadorDigital = digitalAmount
-                    showCheckoutDialog = false
-                    fiadorToEdit = null
-                    preselectedDateForEvent = null
-                    showFiadorDialog = true
-                }
-            )
+            CheckoutDialog(cartItems = shoppingCart, products = products, totalStoreCash = totalStoreCash, totalStoreDigital = totalStoreDigital, onDismiss = { showCheckoutDialog = false }, onConfirmSale = { items, buyer, summary, netCash, netDigital, pocketDebtAmount -> viewModel.processCartSale(items, buyer, summary, netCash, netDigital, context) { msg -> customToastMessage = msg }; if (pocketDebtAmount > 0) { viewModel.addPocketDebt(pocketDebtAmount) }; shoppingCart.clear(); showCheckoutDialog = false; showInventoryScreen = false }, onFiarVenta = { buyer, cashAmount, digitalAmount -> checkoutToFiadorName = buyer; checkoutToFiadorCart = shoppingCart.toList(); checkoutToFiadorCash = cashAmount; checkoutToFiadorDigital = digitalAmount; showCheckoutDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadorDialog = true })
         }
 
         if (showDeleteQtyDialog && productToDelete != null) { DeleteQuantityDialog(product = productToDelete!!, initialQty = qtyToDelete, onDismiss = { showDeleteQtyDialog = false; productToDelete = null }, onConfirm = { qty -> qtyToDelete = qty.toString(); showDeleteQtyDialog = false; showRedWarningDialog = true }) }
         if (showRedWarningDialog && productToDelete != null) { RedWarningDialog(productName = productToDelete!!.name, qty = qtyToDelete.toIntOrNull() ?: 1, onDismiss = { showRedWarningDialog = false; productToDelete = null }, onConfirm = { val p = productToDelete!!; val q = qtyToDelete.toIntOrNull() ?: 1; viewModel.reduceProductStock(p, q, context); undoMessage = "Eliminados $q uds. de '${p.name}'"; undoAction = { viewModel.restoreProductStock(p, q, context) }; showRedWarningDialog = false; productToDelete = null }) }
-
         if (showRemindersListDialog) { ScheduledRemindersDialog(reminders = currentTabReminders, onDismiss = { showRemindersListDialog = false }, onDelete = { viewModel.deleteReminder(it, context) }, onEdit = { reminderToEdit = it; showRemindersListDialog = false; showReminderDialog = true }, onCreateNew = { reminderToEdit = null; showRemindersListDialog = false; showReminderDialog = true }) }
-
-        if (showReminderDialog) {
-            ReminderDialog(
-                initialReminder = reminderToEdit,
-                preselectedDate = preselectedDateForEvent,
-                onDismiss = { showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null },
-                onConfirm = { t, a, d ->
-                    if (reminderToEdit != null) {
-                        viewModel.updateExistingReminder(reminderToEdit!!.copy(title = t, amount = a, targetDateInMillis = d), context) { customToastMessage = it }
-                    } else {
-                        viewModel.addReminder(t, a, d, currentTab == 1, context) { customToastMessage = it }
-                    }
-                    showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null
-                }
-            )
-        }
-
+        if (showReminderDialog) { ReminderDialog(initialReminder = reminderToEdit, preselectedDate = preselectedDateForEvent, onDismiss = { showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }, onConfirm = { t, a, d -> if (reminderToEdit != null) { viewModel.updateExistingReminder(reminderToEdit!!.copy(title = t, amount = a, targetDateInMillis = d), context) { customToastMessage = it } } else { viewModel.addReminder(t, a, d, currentTab == 1, context) { customToastMessage = it } }; showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }) }
         if (showFiadoresListDialog) { ScheduledFiadoresDialog(fiadores = currentTabFiadores, onDismiss = { showFiadoresListDialog = false }, onDelete = { viewModel.deleteFiador(it, context) }, onEdit = { fiadorToEdit = it; showFiadoresListDialog = false; showFiadorDialog = true }, onCreateNew = { fiadorToEdit = null; showFiadoresListDialog = false; showFiadorDialog = true }) }
-
-        if (showFiadorDialog) {
-            FiadorDialog(
-                initialFiador = fiadorToEdit,
-                initialName = checkoutToFiadorName,
-                initialCart = checkoutToFiadorCart,
-                initialCash = checkoutToFiadorCash,
-                initialDigital = checkoutToFiadorDigital,
-                products = products,
-                preselectedDate = preselectedDateForEvent,
-                isStore = currentTab == 1,
-                onDismiss = {
-                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0
-                },
-                onConfirmNew = { n, p, cartItemsFiado, pAmount, d, iCash, iDigital ->
-                    viewModel.addFiador(n, p, cartItemsFiado, pAmount, d, iCash, iDigital, currentTab == 1, context) { customToastMessage = it }
-                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
-
-                    if (checkoutToFiadorCart.isNotEmpty()) {
-                        shoppingCart.clear()
-                        showInventoryScreen = false
-                    }
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0
-                },
-                onConfirmEdit = { f, d ->
-                    viewModel.updateExistingFiador(f.copy(targetDateInMillis = d), context) { customToastMessage = it }
-                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0
-                },
-                onConfirmAbono = { f, abono, method ->
-                    viewModel.registerAbonoFiador(f, abono, method, context) { customToastMessage = it }
-                    showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0
-                }
-            )
-        }
+        if (showFiadorDialog) { FiadorDialog(initialFiador = fiadorToEdit, initialName = checkoutToFiadorName, initialCart = checkoutToFiadorCart, initialCash = checkoutToFiadorCash, initialDigital = checkoutToFiadorDigital, products = products, preselectedDate = preselectedDateForEvent, isStore = currentTab == 1, onDismiss = { showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0 }, onConfirmNew = { n, p, cartItemsFiado, pAmount, d, iCash, iDigital -> viewModel.addFiador(n, p, cartItemsFiado, pAmount, d, iCash, iDigital, currentTab == 1, context) { customToastMessage = it }; showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; if (checkoutToFiadorCart.isNotEmpty()) { shoppingCart.clear(); showInventoryScreen = false }; checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0 }, onConfirmEdit = { f, d -> viewModel.updateExistingFiador(f.copy(targetDateInMillis = d), context) { customToastMessage = it }; showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0 }, onConfirmAbono = { f, abono, method -> viewModel.registerAbonoFiador(f, abono, method, context) { customToastMessage = it }; showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0 }) }
     }
 }
 
@@ -1989,69 +1757,41 @@ fun StoreScreen(
 
     if (showInversionDialog) {
         AlertDialog(
-            onDismissRequest = { showInversionDialog = false },
-            title = { Text("Inversión de Inventario 📦", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Inversión 📦", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showInversionDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
             text = { Text("El dinero total que invertiste en los productos actuales (calculado por su precio de compra original) es:\n\n${formatCOP(totalInversion)}", fontSize = 16.sp) },
-            confirmButton = { Button(onClick = { showInversionDialog = false }) { Text("Entendido") } },
-            containerColor = MaterialTheme.colorScheme.surface
+            confirmButton = { }, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
         )
     }
 
-    // --- DIÁLOGO DE GANANCIAS COMPLETAMENTE REDISEÑADO ---
     if (showGananciaFuturaDialog) {
         AlertDialog(
-            onDismissRequest = { showGananciaFuturaDialog = false },
-            title = { Text("Resumen de Ganancias 🚀", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Ganancias 🚀", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showGananciaFuturaDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
             text = {
                 Column {
                     Text("Ganancia Obtenida (Ventas Realizadas):", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
                     Text(formatCOP(totalProfit), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("Desglose Actual:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
-                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Caja (Efectivo):", fontSize = 13.sp)
-                        Text(formatCOP(totalStoreCash), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
-                    }
-                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Banco (Digital):", fontSize = 13.sp)
-                        Text(formatCOP(totalStoreDigital), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
-                    }
-
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("Caja (Efectivo):", fontSize = 13.sp); Text(formatCOP(totalStoreCash), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text("Banco (Digital):", fontSize = 13.sp); Text(formatCOP(totalStoreDigital), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
                     Divider(modifier = Modifier.padding(vertical = 12.dp))
-
                     Text("Ganancia Futura (Inventario Restante):", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
                     Text(formatCOP(gananciaFutura), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     Text("Esta es la ganancia neta que obtendrás al vender todo tu stock actual.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
                 }
             },
-            confirmButton = { Button(onClick = { showGananciaFuturaDialog = false }) { Text("Entendido") } },
-            containerColor = MaterialTheme.colorScheme.surface
+            confirmButton = { }, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
         )
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
         activeReminders.forEachIndexed { index, reminder ->
             AnimatedVisibility(visible = true) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .padding(top = if(index == 0) 16.dp else 0.dp)
-                        .background(Color(0xFF1976D2), RoundedCornerShape(8.dp))
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onEditReminder(reminder) }
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("📅 Pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        if (reminder.amount > 0) {
-                            Text("Monto: ${formatCOP(reminder.amount)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-                        }
-                    }
-                    IconButton(onClick = { onSettleReminder(reminder) }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White)
-                    }
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).padding(top = if(index == 0) 16.dp else 0.dp).background(Color(0xFF1976D2), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { onEditReminder(reminder) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) { Text("📅 Pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp); if (reminder.amount > 0) { Text("Monto: ${formatCOP(reminder.amount)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp) } }
+                    IconButton(onClick = { onSettleReminder(reminder) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White) }
                 }
             }
         }
@@ -2059,25 +1799,9 @@ fun StoreScreen(
         activeFiadores.forEachIndexed { index, fiador ->
             val remaining = fiador.amount - fiador.paidAmount
             AnimatedVisibility(visible = true) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                        .padding(top = if(index == 0 && activeReminders.isEmpty()) 16.dp else 0.dp)
-                        .background(Color(0xFFFBC02D), RoundedCornerShape(8.dp))
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onEditFiador(fiador) }
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        val phoneStr = if(fiador.phone.isNotBlank()) " \uD83D\uDCDE ${fiador.phone}" else ""
-                        Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Resta: ${formatCOP(remaining)} de ${formatCOP(fiador.amount)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp)
-                    }
-                    IconButton(onClick = { onSettleFiador(fiador) }, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Filled.Check, contentDescription = "Saldado", tint = Color.Black)
-                    }
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).padding(top = if(index == 0 && activeReminders.isEmpty()) 16.dp else 0.dp).background(Color(0xFFFBC02D), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { onEditFiador(fiador) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) { val phoneStr = if(fiador.phone.isNotBlank()) " \uD83D\uDCDE ${fiador.phone}" else ""; Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("Resta: ${formatCOP(remaining)} de ${formatCOP(fiador.amount)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp) }
+                    IconButton(onClick = { onSettleFiador(fiador) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Check, contentDescription = "Saldado", tint = Color.Black) }
                 }
             }
         }
@@ -2085,51 +1809,17 @@ fun StoreScreen(
         Card(modifier = Modifier.fillMaxWidth().padding(16.dp).padding(top = if(activeFiadores.isNotEmpty() || activeReminders.isNotEmpty()) 0.dp else 0.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { showInversionDialog = true }
-                            .padding(4.dp)
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { showInversionDialog = true }.padding(4.dp)) {
                         Text("Valor del Inventario", color = Color.Gray, fontSize = 13.sp)
                         Text(text = formatCOP(totalInventoryValue), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
                     }
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .alpha(if(isLockedStore) 0.5f else 1f)
-                            .padding(4.dp)
-                    ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).alpha(if(isLockedStore) 0.5f else 1f).padding(4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = if(isLockedStore) "👑 Ganancias" else "Ganancias Obtenidas",
-                                color = Color.Gray,
-                                fontSize = 13.sp,
-                                modifier = Modifier.clickable { if (isLockedStore) showPremiumToast() else showGananciaFuturaDialog = true }
-                            )
+                            Text(text = if(isLockedStore) "👑 Ganancias" else "Ganancias Obtenidas", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.clickable { if (isLockedStore) showPremiumToast() else showGananciaFuturaDialog = true })
                             Spacer(modifier = Modifier.width(4.dp))
-                            Icon(
-                                Icons.Filled.Refresh,
-                                contentDescription = "Reiniciar",
-                                tint = Color.Gray,
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clickable { if (isLockedStore) showPremiumToast() else onResetProfitsClick() }
-                            )
+                            Icon(Icons.Filled.Refresh, contentDescription = "Reiniciar", tint = Color.Gray, modifier = Modifier.size(20.dp).clickable { if (isLockedStore) showPremiumToast() else onResetProfitsClick() })
                         }
-                        Text(
-                            text = formatCOP(totalProfit),
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF4CAF50),
-                            modifier = Modifier.clickable { if (isLockedStore) showPremiumToast() else showGananciaFuturaDialog = true }
-                        )
+                        Text(text = formatCOP(totalProfit), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4CAF50), modifier = Modifier.clickable { if (isLockedStore) showPremiumToast() else showGananciaFuturaDialog = true })
                     }
                 }
             }
@@ -2146,7 +1836,6 @@ fun StoreScreen(
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) { Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White); Spacer(Modifier.width(12.dp)); Column(modifier = Modifier.weight(1f)) { Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White); Text("Total: ${formatCOP(totalCart)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f)) }; Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White) } }
         }
     }
-    // MODIFICADO: Se le pasan los activeFiadores
     if (showVendidosDialog) ProductosVendidosDialog(transactions = transactions, activeFiadores = activeFiadores, onDismiss = { showVendidosDialog = false }, onDeleteVentas = onDeleteVentas)
 }
 
@@ -2175,23 +1864,13 @@ fun InventoryScreen(products: List<Product>, shoppingCart: List<Pair<Product, In
             LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
                 if (sortedProducts.isEmpty()) { item { Text("No se encontraron productos.", color = Color.Gray, modifier = Modifier.padding(16.dp).fillMaxWidth(), textAlign = TextAlign.Center) } }
                 items(sortedProducts, key = { it.id }) { product ->
-                    ProductItem(
-                        product = product,
-                        onAddToCart = { onAddToCartClick(product) },
-                        onEdit = { onEditClick(product) },
-                        onDelete = { onDeleteClick(product) },
-                        onLongDelete = { onLongDeleteClick(product) },
-                        onInfo = { onInfoClick(product) },
-                        onImageClick = { expandedImageUri = product.imageUri }
-                    )
+                    ProductItem(product = product, onAddToCart = { onAddToCartClick(product) }, onEdit = { onEditClick(product) }, onDelete = { onDeleteClick(product) }, onLongDelete = { onLongDeleteClick(product) }, onInfo = { onInfoClick(product) }, onImageClick = { expandedImageUri = product.imageUri })
                 }
             }
         }
         FloatingActionButton(onClick = onAddProductClick, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = 16.dp)) { Icon(Icons.Filled.Add, contentDescription = "Agregar Producto") }
 
-        if (expandedImageUri != null) {
-            ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null })
-        }
+        if (expandedImageUri != null) { ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null }) }
     }
 }
 
@@ -2207,35 +1886,11 @@ fun ProductItem(product: Product, onAddToCart: () -> Unit, onEdit: () -> Unit, o
             Box(modifier = Modifier.width(6.dp).fillMaxHeight().background(unitColor))
             Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
 
-                Box(
-                    modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(Color.Gray.copy(alpha = 0.2f))
-                        .clickable { if (product.imageUri != null) onImageClick() },
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(Color.Gray.copy(alpha = 0.2f)).clickable { if (product.imageUri != null) onImageClick() }, contentAlignment = Alignment.Center) {
                     if (product.imageUri != null) {
-                        val bitmap = remember(product.imageUri) {
-                            try {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(product.imageUri)))
-                                } else {
-                                    @Suppress("DEPRECATION")
-                                    android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(product.imageUri))
-                                }
-                            } catch (e: Exception) { null }
-                        }
-                        if (bitmap != null) {
-                            Image(
-                                bitmap = bitmap.asImageBitmap(),
-                                contentDescription = "Imagen de ${product.name}",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            Icon(Icons.Filled.ImageNotSupported, contentDescription = null, tint = Color.Gray)
-                        }
-                    } else {
-                        Icon(Icons.Filled.Inventory, contentDescription = null, tint = Color.Gray)
-                    }
+                        val bitmap = remember(product.imageUri) { try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) { android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(product.imageUri))) } else { @Suppress("DEPRECATION") android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(product.imageUri)) } } catch (e: Exception) { null } }
+                        if (bitmap != null) { Image(bitmap = bitmap.asImageBitmap(), contentDescription = "Imagen de ${product.name}", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop) } else { Icon(Icons.Filled.ImageNotSupported, contentDescription = null, tint = Color.Gray) }
+                    } else { Icon(Icons.Filled.Inventory, contentDescription = null, tint = Color.Gray) }
                 }
                 Spacer(modifier = Modifier.width(12.dp))
 
@@ -2258,11 +1913,11 @@ fun ProductItem(product: Product, onAddToCart: () -> Unit, onEdit: () -> Unit, o
 fun ExpandedImageDialog(imageUri: String, onDismiss: () -> Unit) {
     val context = LocalContext.current
     Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = true)
+        onDismissRequest = { }, // Bloqueado al botón de retroceso/fuera
+        properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)
     ) {
         Box(
-            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)).clickable { onDismiss() },
+            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)), // Quitamos el clickable de fondo
             contentAlignment = Alignment.Center
         ) {
             var bitmap by remember(imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -2308,8 +1963,13 @@ fun CustomDatePickerDialog(initialDateMillis: Long?, onDismiss: () -> Unit, onDa
     val formatMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
 
     AlertDialog(
-        onDismissRequest = onDismiss, modifier = Modifier.fillMaxWidth().padding(16.dp), containerColor = MaterialTheme.colorScheme.surface,
-        title = { Text("Seleccionar Fecha 🗓️", fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) },
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false), modifier = Modifier.fillMaxWidth().padding(16.dp), containerColor = MaterialTheme.colorScheme.surface,
+        title = {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Seleccionar Fecha 🗓️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") }
+            }
+        },
         text = {
             Column {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -2354,7 +2014,7 @@ fun CustomDatePickerDialog(initialDateMillis: Long?, onDismiss: () -> Unit, onDa
             }
         },
         confirmButton = { Button(onClick = { if (selectedDate != null) onDateSelected(selectedDate!!.timeInMillis) }, enabled = selectedDate != null) { Text("Seleccionar") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
+        dismissButton = { }
     )
 }
 
@@ -2365,15 +2025,16 @@ fun AddToCartDialog(product: Product, currentCartQty: Int, onDismiss: () -> Unit
     val focusRequester = remember { FocusRequester() }
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
-    LaunchedEffect(Unit) {
-        delay(200)
-        focusRequester.requestFocus()
-        keyboardController?.show()
-    }
+    LaunchedEffect(Unit) { delay(200); focusRequester.requestFocus(); keyboardController?.show() }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Añadir al Carrito 🛒", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+        title = {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Añadir al Carrito 🛒", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") }
+            }
+        },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
@@ -2381,19 +2042,12 @@ fun AddToCartDialog(product: Product, currentCartQty: Int, onDismiss: () -> Unit
                 Text("Disponible para añadir: $maxAvailable ${product.unit}", color = Color.Gray)
                 Spacer(modifier = Modifier.height(16.dp))
                 OutlinedTextField(
-                    value = qtyRaw,
-                    onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d },
-                    label = { Text("Cantidad") },
-                    placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    singleLine = true,
-                    modifier = Modifier.width(150.dp).padding(vertical = 8.dp).focusRequester(focusRequester),
-                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cantidad") }, placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.width(150.dp).padding(vertical = 8.dp).focusRequester(focusRequester), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                 )
             }
         },
         confirmButton = { Button(onClick = { val q = qtyRaw.toIntOrNull() ?: 0; if (q > 0 && q <= maxAvailable) { onConfirm(q) } }) { Text("Añadir") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
+        dismissButton = { }
     )
 }
 
@@ -2404,15 +2058,7 @@ fun PaymentInputRow(name: String, amountRaw: String, onAmountChange: (String) ->
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CheckoutDialog(
-    cartItems: MutableList<Pair<Product, Int>>,
-    products: List<Product>,
-    totalStoreCash: Double,
-    totalStoreDigital: Double,
-    onDismiss: () -> Unit,
-    onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double, Double) -> Unit,
-    onFiarVenta: (String, Double, Double) -> Unit // MODIFICADO PARA RECIBIR CAJA Y DIGITAL
-) {
+fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Product>, totalStoreCash: Double, totalStoreDigital: Double, onDismiss: () -> Unit, onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double, Double) -> Unit, onFiarVenta: (String, Double, Double) -> Unit) {
     var step by remember { mutableStateOf(1) }
     var buyerName by remember { mutableStateOf("") }
     var isDivided by remember { mutableStateOf(false) }
@@ -2423,11 +2069,9 @@ fun CheckoutDialog(
     var cashChangeRaw by remember { mutableStateOf("") }
     var digitalChangeRaw by remember { mutableStateOf("") }
     var itemToEdit by remember { mutableStateOf<Pair<Int, Pair<Product, Int>>?>(null) }
-
     var showProductSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var productToSelectQty by remember { mutableStateOf<Product?>(null) }
-
     var pocketChange by remember { mutableStateOf(false) }
 
     val totalCOP = cartItems.sumOf { it.first.price * it.second }
@@ -2435,36 +2079,11 @@ fun CheckoutDialog(
     if (itemToEdit != null) {
         var editQtyRaw by remember { mutableStateOf(itemToEdit!!.second.second.toString()) }
         AlertDialog(
-            onDismissRequest = { itemToEdit = null },
-            title = { Text("Editar cantidad", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text(itemToEdit!!.second.first.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = editQtyRaw,
-                        onValueChange = { editQtyRaw = it.filter { c -> c.isDigit() } },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        label = { Text("Nueva Cantidad") },
-                        singleLine = true,
-                        modifier = Modifier.width(150.dp),
-                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    val newQty = editQtyRaw.toIntOrNull() ?: 0
-                    if (newQty > 0 && newQty <= itemToEdit!!.second.first.stock) {
-                        cartItems[itemToEdit!!.first] = itemToEdit!!.second.first to newQty
-                        itemToEdit = null
-                    } else if (newQty == 0) {
-                        cartItems.removeAt(itemToEdit!!.first)
-                        itemToEdit = null
-                    }
-                }) { Text("Guardar") }
-            },
-            dismissButton = { TextButton(onClick = { itemToEdit = null }) { Text("Cancelar") } }
+            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Editar cantidad", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = { itemToEdit = null }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
+            text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { Text(itemToEdit!!.second.first.name, fontWeight = FontWeight.Bold, fontSize = 18.sp); Spacer(modifier = Modifier.height(16.dp)); OutlinedTextField(value = editQtyRaw, onValueChange = { editQtyRaw = it.filter { c -> c.isDigit() } }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), label = { Text("Nueva Cantidad") }, singleLine = true, modifier = Modifier.width(150.dp), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)) } },
+            confirmButton = { Button(onClick = { val newQty = editQtyRaw.toIntOrNull() ?: 0; if (newQty > 0 && newQty <= itemToEdit!!.second.first.stock) { cartItems[itemToEdit!!.first] = itemToEdit!!.second.first to newQty; itemToEdit = null } else if (newQty == 0) { cartItems.removeAt(itemToEdit!!.first); itemToEdit = null } }) { Text("Guardar") } },
+            dismissButton = { }
         )
     }
 
@@ -2476,55 +2095,25 @@ fun CheckoutDialog(
         val focusRequester = remember { FocusRequester() }
         val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
 
-        LaunchedEffect(Unit) {
-            delay(200)
-            focusRequester.requestFocus()
-            keyboardController?.show()
-        }
+        LaunchedEffect(Unit) { delay(200); focusRequester.requestFocus(); keyboardController?.show() }
 
         AlertDialog(
-            onDismissRequest = { productToSelectQty = null },
-            title = { Text("Añadir ${p.name}", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                    Text("Disponible: $maxAvailable ${p.unit}", color = Color.Gray)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = qtyRaw,
-                        onValueChange = { qtyRaw = it.filter { c -> c.isDigit() } },
-                        label = { Text("Cantidad") },
-                        placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true,
-                        modifier = Modifier.width(150.dp).padding(vertical = 8.dp).focusRequester(focusRequester),
-                        textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    val q = qtyRaw.toIntOrNull() ?: 0
-                    if (q > 0 && q <= maxAvailable) {
-                        val existing = cartItems.find { it.first.id == p.id }
-                        if (existing != null) {
-                            val idx = cartItems.indexOf(existing)
-                            cartItems[idx] = existing.copy(second = existing.second + q)
-                        } else {
-                            cartItems.add(Pair(p, q))
-                        }
-                        productToSelectQty = null
-                        showProductSearch = false
-                        searchQuery = ""
-                    }
-                }) { Text("Añadir") }
-            },
-            dismissButton = { TextButton(onClick = { productToSelectQty = null }) { Text("Cancelar") } }
+            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Añadir ${p.name}", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { productToSelectQty = null }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
+            text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { Text("Disponible: $maxAvailable ${p.unit}", color = Color.Gray); Spacer(modifier = Modifier.height(16.dp)); OutlinedTextField(value = qtyRaw, onValueChange = { qtyRaw = it.filter { c -> c.isDigit() } }, label = { Text("Cantidad") }, placeholder = { Text("0", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, color = Color.Gray.copy(alpha = 0.5f)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.width(150.dp).padding(vertical = 8.dp).focusRequester(focusRequester), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)) } },
+            confirmButton = { Button(onClick = { val q = qtyRaw.toIntOrNull() ?: 0; if (q > 0 && q <= maxAvailable) { val existing = cartItems.find { it.first.id == p.id }; if (existing != null) { val idx = cartItems.indexOf(existing); cartItems[idx] = existing.copy(second = existing.second + q) } else { cartItems.add(Pair(p, q)) }; productToSelectQty = null; showProductSearch = false; searchQuery = "" } }) { Text("Añadir") } },
+            dismissButton = { }
         )
     }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (showProductSearch) "Buscar Producto 🔍" else if (step == 1) "Resumen de Venta 🛒" else "Opciones de Pago 💳", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+        title = {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (showProductSearch) "Buscar Producto 🔍" else if (step == 1) "Resumen de Venta 🛒" else "Opciones de Pago 💳", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") }
+            }
+        },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -2534,35 +2123,18 @@ fun CheckoutDialog(
                     val filteredProducts = products.filter { it.name.contains(searchQuery, ignoreCase = true) && it.stock > 0 }
                     LazyColumn(modifier = Modifier.heightIn(max = 250.dp)) {
                         items(filteredProducts) { p ->
-                            Row(modifier = Modifier.fillMaxWidth().clickable { productToSelectQty = p }.padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(p.name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    Text("Stock: ${p.stock} ${p.unit}", color = Color.Gray, fontSize = 12.sp)
-                                }
-                                Text(formatCOP(p.price), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            }
+                            Row(modifier = Modifier.fillMaxWidth().clickable { productToSelectQty = p }.padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(modifier = Modifier.weight(1f)) { Text(p.name, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("Stock: ${p.stock} ${p.unit}", color = Color.Gray, fontSize = 12.sp) }; Text(formatCOP(p.price), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
                             Divider(color = Color.Gray.copy(alpha = 0.2f))
                         }
                     }
                 } else if (step == 1) {
-                    if (cartItems.isEmpty()) {
-                        Text("El carrito está vacío.", modifier = Modifier.padding(16.dp))
-                    } else {
+                    if (cartItems.isEmpty()) { Text("El carrito está vacío.", modifier = Modifier.padding(16.dp)) } else {
                         LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
                             itemsIndexed(cartItems) { index, item ->
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                    Text("${item.second}x ${item.first.name}", modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines=1, overflow = TextOverflow.Ellipsis)
-                                    Text(formatCOP(item.first.price * item.second), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    IconButton(onClick = { itemToEdit = Pair(index, item) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Edit, "Editar", tint = Color.Blue, modifier = Modifier.size(16.dp)) }
-                                    IconButton(onClick = { cartItems.removeAt(index) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Red, modifier = Modifier.size(16.dp)) }
-                                }
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("${item.second}x ${item.first.name}", modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines=1, overflow = TextOverflow.Ellipsis); Text(formatCOP(item.first.price * item.second), fontWeight = FontWeight.Bold, fontSize = 14.sp); IconButton(onClick = { itemToEdit = Pair(index, item) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Edit, "Editar", tint = Color.Blue, modifier = Modifier.size(16.dp)) }; IconButton(onClick = { cartItems.removeAt(index) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Red, modifier = Modifier.size(16.dp)) } }
                             }
                         }
-
-                        TextButton(onClick = { showProductSearch = true }, modifier = Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp)) {
-                            Text("+ Agregar producto nuevo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        }
-
+                        TextButton(onClick = { showProductSearch = true }, modifier = Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp)) { Text("+ Agregar producto nuevo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
                         Divider(modifier = Modifier.padding(vertical = 8.dp))
                         Text("Total a cobrar:", fontSize = 12.sp, color = Color.Gray)
                         Text(formatCOP(totalCOP), fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = MaterialTheme.colorScheme.primary)
@@ -2570,305 +2142,54 @@ fun CheckoutDialog(
                         OutlinedTextField(value = buyerName, onValueChange = { buyerName = it.replaceFirstChar { c -> if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString() } }, label = { Text("Nombre del Cliente (Opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words))
                     }
                 } else {
-                    Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.2f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Caja (Efectivo)", fontSize=10.sp, color=Color.Gray)
-                            Text(formatCOP(totalStoreCash), fontSize=13.sp, fontWeight=FontWeight.Bold)
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Banco (Digital)", fontSize=10.sp, color=Color.Gray)
-                            Text(formatCOP(totalStoreDigital), fontSize=13.sp, fontWeight=FontWeight.Bold)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Total de la compra:", fontSize = 13.sp)
-                    Text(formatCOP(totalCOP), fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { isDivided = !isDivided; pocketChange = false }) {
-                        Switch(
-                            checked = isDivided,
-                            onCheckedChange = { isDivided = it; pocketChange = false },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                uncheckedThumbColor = Color.White,
-                                checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                uncheckedTrackColor = Color.Gray,
-                                uncheckedBorderColor = Color.Transparent
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (isDivided) "Pago Dividido Múltiple" else "Pago Único", fontWeight = FontWeight.Bold)
-                    }
-
+                    Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.2f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("Caja (Efectivo)", fontSize=10.sp, color=Color.Gray); Text(formatCOP(totalStoreCash), fontSize=13.sp, fontWeight=FontWeight.Bold) }; Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("Banco (Digital)", fontSize=10.sp, color=Color.Gray); Text(formatCOP(totalStoreDigital), fontSize=13.sp, fontWeight=FontWeight.Bold) } }
+                    Spacer(modifier = Modifier.height(12.dp)); Text("Total de la compra:", fontSize = 13.sp); Text(formatCOP(totalCOP), fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary); Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { isDivided = !isDivided; pocketChange = false }) { Switch(checked = isDivided, onCheckedChange = { isDivided = it; pocketChange = false }, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, uncheckedThumbColor = Color.White, checkedTrackColor = MaterialTheme.colorScheme.primary, uncheckedTrackColor = Color.Gray, uncheckedBorderColor = Color.Transparent)); Spacer(modifier = Modifier.width(8.dp)); Text(if (isDivided) "Pago Dividido Múltiple" else "Pago Único", fontWeight = FontWeight.Bold) }
                     Spacer(modifier = Modifier.height(8.dp))
-
                     if (!isDivided) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                            FilterChip(selected = simpleMethod == "Efectivo", onClick = { simpleMethod = "Efectivo" }, label = { Text("Efectivo") })
-                            FilterChip(selected = simpleMethod == "Digital", onClick = { simpleMethod = "Digital" }, label = { Text("Digital") })
-                        }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) { FilterChip(selected = simpleMethod == "Efectivo", onClick = { simpleMethod = "Efectivo" }, label = { Text("Efectivo") }); FilterChip(selected = simpleMethod == "Digital", onClick = { simpleMethod = "Digital" }, label = { Text("Digital") }) }
                         PaymentInputRow("Monto Recibido", simpleReceivedRaw, { simpleReceivedRaw = it })
-
                         val rec = simpleReceivedRaw.toDoubleOrNull() ?: 0.0
                         val change = rec - totalCOP
-
                         if (change > 0) {
                             Text("Vuelto a devolver: ${formatCOP(change)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(8.dp))
-
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) {
-                                Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it })
-                                Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            if (pocketChange) {
-                                Text("El vuelto se dará de tu bolsillo personal. La ganancia ingresará completa a la tienda y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
-                            } else {
-                                val hasEnoughFunds = if (simpleMethod == "Efectivo") change <= totalStoreCash else change <= totalStoreDigital
-                                if (!hasEnoughFunds) {
-                                    Text("⚠️ Fondos insuficientes en ${if(simpleMethod == "Efectivo") "Caja" else "Banco"}. La caja quedará en negativo.", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                } else {
-                                    Text("El vuelto saldrá de: $simpleMethod", fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50), fontSize = 12.sp)
-                                }
-                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) { Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it }); Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                            if (pocketChange) { Text("El vuelto se dará de tu bolsillo personal. La ganancia ingresará completa a la tienda y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) } else { val hasEnoughFunds = if (simpleMethod == "Efectivo") change <= totalStoreCash else change <= totalStoreDigital; if (!hasEnoughFunds) { Text("⚠️ Fondos insuficientes en ${if(simpleMethod == "Efectivo") "Caja" else "Banco"}. La caja quedará en negativo.", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp) } else { Text("El vuelto saldrá de: $simpleMethod", fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50), fontSize = 12.sp) } }
                         } else if (change < 0) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                                if (rec > 0) {
-                                    Text("Falta: ${formatCOP(abs(change))}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                } else {
-                                    Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp)
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(onClick = {
-                                    // MODIFICADO: Pasa valores divididos
-                                    val cash = if (simpleMethod == "Efectivo") rec else 0.0
-                                    val digital = if (simpleMethod == "Digital") rec else 0.0
-                                    onFiarVenta(buyerName, cash, digital)
-                                }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
-                                    Text(if (rec > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        } else if (change == 0.0 && rec > 0) {
-                            Text("Pago exacto ✅", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
-                        }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (rec > 0) { Text("Falta: ${formatCOP(abs(change))}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { val cash = if (simpleMethod == "Efectivo") rec else 0.0; val digital = if (simpleMethod == "Digital") rec else 0.0; onFiarVenta(buyerName, cash, digital) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (rec > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold) } }
+                        } else if (change == 0.0 && rec > 0) { Text("Pago exacto ✅", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold) }
                     } else {
-                        PaymentInputRow("Efectivo Recibido", cashRaw, { cashRaw = it })
-                        PaymentInputRow("Digital Recibido", digitalRaw, { digitalRaw = it })
+                        PaymentInputRow("Efectivo Recibido", cashRaw, { cashRaw = it }); PaymentInputRow("Digital Recibido", digitalRaw, { digitalRaw = it })
                         val cV = cashRaw.toDoubleOrNull() ?: 0.0
                         val qV = digitalRaw.toDoubleOrNull() ?: 0.0
                         val receivedCOP = cV + qV
                         val changeCOP = receivedCOP - totalCOP
-
                         if (changeCOP > 0) {
                             Text("Vuelto a devolver: ${formatCOP(changeCOP)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(8.dp))
-
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) {
-                                Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it })
-                                Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            if (pocketChange) {
-                                Text("El vuelto se dará de tu bolsillo. La ganancia ingresará intacta y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray)
-                            } else {
-                                Text("¿De dónde darás el vuelto?", fontSize = 12.sp, color = Color.Gray)
-                                PaymentInputRow("Vuelto Efectivo", cashChangeRaw, { cashChangeRaw = it })
-                                PaymentInputRow("Vuelto Digital", digitalChangeRaw, { digitalChangeRaw = it })
-                                val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0
-                                val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0
-
-                                if (cc + dc != changeCOP) {
-                                    Text("La suma del vuelto no cuadra con ${formatCOP(changeCOP)}", color = Color.Red, fontSize = 11.sp)
-                                } else if (cc > totalStoreCash) {
-                                    Text("⚠️ Caja quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                } else if (dc > totalStoreDigital) {
-                                    Text("⚠️ Banco quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                } else {
-                                    Text("Vuelto distribuido correctamente ✅", color = Color(0xFF4CAF50), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) { Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it }); Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                            if (pocketChange) { Text("El vuelto se dará de tu bolsillo. La ganancia ingresará intacta y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray) } else { Text("¿De dónde darás el vuelto?", fontSize = 12.sp, color = Color.Gray); PaymentInputRow("Vuelto Efectivo", cashChangeRaw, { cashChangeRaw = it }); PaymentInputRow("Vuelto Digital", digitalChangeRaw, { digitalChangeRaw = it }); val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0; val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0; if (cc + dc != changeCOP) { Text("La suma del vuelto no cuadra con ${formatCOP(changeCOP)}", color = Color.Red, fontSize = 11.sp) } else if (cc > totalStoreCash) { Text("⚠️ Caja quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else if (dc > totalStoreDigital) { Text("⚠️ Banco quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else { Text("Vuelto distribuido correctamente ✅", color = Color(0xFF4CAF50), fontSize = 11.sp, fontWeight = FontWeight.Bold) } }
                         } else if (changeCOP < 0) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                                if (receivedCOP > 0) {
-                                    Text("Falta dinero: ${formatCOP(abs(changeCOP))}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                } else {
-                                    Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp)
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Button(onClick = {
-                                    // MODIFICADO: Pasa valores divididos en pago múltiple
-                                    onFiarVenta(buyerName, cV, qV)
-                                }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
-                                    Text(if (receivedCOP > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        } else if (changeCOP == 0.0 && receivedCOP > 0) {
-                            Text("Pago completo y exacto ✅", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (receivedCOP > 0) { Text("Falta dinero: ${formatCOP(abs(changeCOP))}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { onFiarVenta(buyerName, cV, qV) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (receivedCOP > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold) } }
+                        } else if (changeCOP == 0.0 && receivedCOP > 0) { Text("Pago completo y exacto ✅", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold, fontSize = 14.sp) }
                     }
                 }
             }
         },
         confirmButton = {
-            if (showProductSearch) {
-                // No confirm button needed here
-            } else if (step == 1) {
+            if (step == 1 && !showProductSearch) {
                 Button(onClick = { step = 2 }, enabled = cartItems.isNotEmpty()) { Text("Siguiente") }
-            } else {
+            } else if (step == 2) {
                 var isEnabled = false
-                if (!isDivided) {
-                    val rec = simpleReceivedRaw.toDoubleOrNull() ?: 0.0
-                    if (rec >= totalCOP) {
-                        isEnabled = true
-                    }
-                } else {
-                    val cV = cashRaw.toDoubleOrNull() ?: 0.0
-                    val dV = digitalRaw.toDoubleOrNull() ?: 0.0
-                    val receivedCOP = cV + dV
-                    val changeCOP = receivedCOP - totalCOP
-                    if (changeCOP == 0.0) isEnabled = true
-                    if (changeCOP > 0.0) {
-                        if (pocketChange) {
-                            isEnabled = true
-                        } else {
-                            val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0
-                            val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0
-                            if (cc + dc == changeCOP) isEnabled = true
-                        }
-                    }
-                }
-
-                Button(
-                    onClick = {
-                        var netC = 0.0
-                        var netD = 0.0
-                        var summary = ""
-                        var pocketDebtAmount = 0.0
-
-                        if (!isDivided) {
-                            val rec = simpleReceivedRaw.toDoubleOrNull() ?: 0.0
-                            val change = rec - totalCOP
-                            if (simpleMethod == "Efectivo") {
-                                netC = totalCOP
-                                summary = "Pago Efectivo: ${formatCOP(rec)}" + if(change>0) " | Vuelto: ${formatCOP(change)}" + if(pocketChange) " (De bolsillo)" else "" else ""
-                            } else {
-                                netD = totalCOP
-                                summary = "Pago Digital: ${formatCOP(rec)}" + if(change>0) " | Vuelto: ${formatCOP(change)}" + if(pocketChange) " (De bolsillo)" else "" else ""
-                            }
-                            if (pocketChange && change > 0) {
-                                pocketDebtAmount = change
-                            }
-                        } else {
-                            val cV = cashRaw.toDoubleOrNull() ?: 0.0
-                            val dV = digitalRaw.toDoubleOrNull() ?: 0.0
-                            val changeCOP = (cV + dV) - totalCOP
-
-                            if (pocketChange) {
-                                netC = cV
-                                netD = dV
-                                summary = "Efectivo recibido: ${formatCOP(cV)} | Digital recibido: ${formatCOP(dV)}"
-                                if (changeCOP > 0) {
-                                    summary += "\nVuelto: ${formatCOP(changeCOP)} (De bolsillo)"
-                                    pocketDebtAmount = changeCOP
-                                }
-                            } else {
-                                val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0
-                                val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0
-                                netC = cV - cc
-                                netD = dV - dc
-                                summary = "Efectivo recibido: ${formatCOP(cV)} | Digital recibido: ${formatCOP(dV)}"
-                                if (cc > 0 || dc > 0) {
-                                    summary += "\nVuelto Efectivo: ${formatCOP(cc)} | Vuelto Digital: ${formatCOP(dc)}"
-                                }
-                            }
-                        }
-                        onConfirmSale(cartItems.toList(), buyerName.trim(), summary, netC, netD, pocketDebtAmount)
-                    },
-                    enabled = isEnabled
-                ) { Text("Confirmar Venta") }
+                if (!isDivided) { val rec = simpleReceivedRaw.toDoubleOrNull() ?: 0.0; if (rec >= totalCOP) { isEnabled = true } } else { val cV = cashRaw.toDoubleOrNull() ?: 0.0; val dV = digitalRaw.toDoubleOrNull() ?: 0.0; val changeCOP = (cV + dV) - totalCOP; if (changeCOP == 0.0) isEnabled = true; if (changeCOP > 0.0) { if (pocketChange) { isEnabled = true } else { val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0; val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0; if (cc + dc == changeCOP) isEnabled = true } } }
+                Button(onClick = { var netC = 0.0; var netD = 0.0; var summary = ""; var pocketDebtAmount = 0.0; if (!isDivided) { val rec = simpleReceivedRaw.toDoubleOrNull() ?: 0.0; val change = rec - totalCOP; if (simpleMethod == "Efectivo") { netC = totalCOP; summary = "Pago Efectivo: ${formatCOP(rec)}" + if(change>0) " | Vuelto: ${formatCOP(change)}" + if(pocketChange) " (De bolsillo)" else "" else "" } else { netD = totalCOP; summary = "Pago Digital: ${formatCOP(rec)}" + if(change>0) " | Vuelto: ${formatCOP(change)}" + if(pocketChange) " (De bolsillo)" else "" else "" }; if (pocketChange && change > 0) { pocketDebtAmount = change } } else { val cV = cashRaw.toDoubleOrNull() ?: 0.0; val dV = digitalRaw.toDoubleOrNull() ?: 0.0; val changeCOP = (cV + dV) - totalCOP; if (pocketChange) { netC = cV; netD = dV; summary = "Efectivo recibido: ${formatCOP(cV)} | Digital recibido: ${formatCOP(dV)}"; if (changeCOP > 0) { summary += "\nVuelto: ${formatCOP(changeCOP)} (De bolsillo)"; pocketDebtAmount = changeCOP } } else { val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0; val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0; netC = cV - cc; netD = dV - dc; summary = "Efectivo recibido: ${formatCOP(cV)} | Digital recibido: ${formatCOP(dV)}"; if (cc > 0 || dc > 0) { summary += "\nVuelto Efectivo: ${formatCOP(cc)} | Vuelto Digital: ${formatCOP(dc)}" } } }; onConfirmSale(cartItems.toList(), buyerName.trim(), summary, netC, netD, pocketDebtAmount) }, enabled = isEnabled) { Text("Confirmar Venta") }
             }
         },
         dismissButton = {
-            if (showProductSearch) {
-                TextButton(onClick = { showProductSearch = false }) { Text("Volver al carrito") }
-            } else {
-                TextButton(onClick = { if (step == 2) step = 1 else onDismiss() }) { Text(if (step == 2) "Atrás" else "Cancelar") }
-            }
+            if (showProductSearch) { TextButton(onClick = { showProductSearch = false }) { Text("Volver al carrito") } } else if (step == 2) { TextButton(onClick = { step = 1 }) { Text("Atrás") } }
         }
     )
-}
-
-@Composable
-fun ProductInfoDialog(product: Product, onDismiss: () -> Unit, onDeleteCompletely: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Detalle del Producto ℹ️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Text(product.name, fontSize = 20.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.height(16.dp)); Text("Precio Unitario: ${formatCOP(product.price)}", fontSize = 14.sp); Spacer(modifier = Modifier.height(8.dp)); Text("Stock Disponible: ${product.stock} ${product.unit}", fontSize = 14.sp); Spacer(modifier = Modifier.height(16.dp)); Divider(color = Color.Gray.copy(alpha = 0.2f)); Spacer(modifier = Modifier.height(16.dp)); val totalUsd = product.price * product.stock; Text("Valor Total en Inventario:", fontSize = 14.sp, color = Color.Gray); Text(formatCOP(totalUsd), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary) } }, confirmButton = { Button(onClick = onDismiss) { Text("Cerrar") } }, dismissButton = { TextButton(onClick = onDeleteCompletely, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) { Text("Eliminar del Inventario", fontWeight = FontWeight.Bold) } })
-}
-
-@Composable
-fun DashboardCard(balance: Double, income: Double, expense: Double, cashBalance: Double, digitalBalance: Double) {
-    Card(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("Saldo Total", color = Color.Gray, fontSize = 16.sp)
-            Text(text = formatCOP(balance), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = if (balance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.1f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Efectivo", fontSize=12.sp, color=Color.Gray)
-                    Text(formatCOP(cashBalance), fontSize=14.sp, fontWeight=FontWeight.Bold, color = if (cashBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Digital", fontSize=12.sp, color=Color.Gray)
-                    Text(formatCOP(digitalBalance), fontSize=14.sp, fontWeight=FontWeight.Bold, color = if (digitalBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
-                }
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFE8F5E9).copy(alpha = 0.2f)).padding(4.dp)) { Text("🟢", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Ingresos", color = Color.Gray) }; Text(formatCOP(income), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFFFEBEE).copy(alpha = 0.2f)).padding(4.dp)) { Text("🔴", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Gastos", color = Color.Gray) }; Text(formatCOP(expense), fontWeight = FontWeight.Bold, color = Color(0xFFF44336)) }
-            }
-        }
-    }
-}
-
-@Composable
-fun TransactionItem(transaction: Transaction, onDelete: () -> Unit) {
-    val isIncome = transaction.isIncome
-    val color = if (isIncome) Color(0xFF4CAF50) else Color(0xFFF44336)
-    val emoji = getSmartEmoji(transaction.description, isIncome)
-
-    val methodText = when {
-        transaction.cashAmount > 0 && transaction.digitalAmount == 0.0 -> "Efectivo"
-        transaction.digitalAmount > 0 && transaction.cashAmount == 0.0 -> "Digital"
-        transaction.cashAmount > 0 && transaction.digitalAmount > 0 -> "Mixto"
-        else -> ""
-    }
-
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(color.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Text(text = emoji, fontSize = 24.sp) }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                Text(text = transaction.description, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-
-                val noteAndMethod = buildString {
-                    if (transaction.note.isNotBlank()) append(transaction.note)
-                    if (methodText.isNotEmpty()) {
-                        if (isNotEmpty()) append(" | ")
-                        append(methodText)
-                    }
-                }
-                if (noteAndMethod.isNotEmpty()) {
-                    Text(text = noteAndMethod, color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 2.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-
-                Text(text = formatDate(transaction.timestamp), color = Color.Gray.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1)
-            }
-            Column(horizontalAlignment = Alignment.End) { Text(text = "${if (isIncome) "+" else "-"}${formatCOP(transaction.amount)}", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = color, maxLines = 1) }
-            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Gray, modifier = Modifier.size(20.dp)) }
-        }
-    }
 }
 
 @Composable
@@ -2882,8 +2203,13 @@ fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Bool
     var method by remember { mutableStateOf("Efectivo") }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Nuevo Movimiento ✍️", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+        title = {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Nuevo Movimiento ✍️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") }
+            }
+        },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
             Column {
@@ -2919,434 +2245,194 @@ fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Bool
         },
         confirmButton = {
             Button(onClick = {
-                if (isIncome) {
-                    val a = amountIncome.toDoubleOrNull()
-                    if (descIncome.isNotBlank() && a != null) {
-                        val capTitle = descIncome.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-                        onConfirm(capTitle, a, true, "", method)
-                    }
-                } else {
-                    val a = amountExpense.toDoubleOrNull()
-                    if (descExpense.isNotBlank() && a != null) {
-                        val capTitle = descExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-                        onConfirm(capTitle, a, false, noteExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, method)
-                    }
-                }
+                if (isIncome) { val a = amountIncome.toDoubleOrNull(); if (descIncome.isNotBlank() && a != null) { onConfirm(descIncome.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, a, true, "", method) } } else { val a = amountExpense.toDoubleOrNull(); if (descExpense.isNotBlank() && a != null) { onConfirm(descExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, a, false, noteExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, method) } }
             }) { Text("Guardar ✔️") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar ❌") } }
+        dismissButton = { }
     )
 }
 
 @Composable
 fun LimitDialog(currentLimit: Double, onDismiss: () -> Unit, onConfirm: (Double) -> Unit) {
     val initial = if(currentLimit > 0) currentLimit.toLong().toString() else ""; var amountRaw by remember { mutableStateOf(initial) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Saldo Crítico 🔔") }, containerColor = MaterialTheme.colorScheme.surface, text = { Column { Text("Te avisaremos si tu saldo baja de esta cantidad (Déjalo en 0 para apagar):", fontSize = 14.sp); Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = amountRaw, onValueChange = { amountRaw = cleanAmountInput(it) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), leadingIcon = { Icon(Icons.Filled.AttachMoney, null) }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = AmountVisualTransformation()) } }, confirmButton = { Button(onClick = { onConfirm(amountRaw.toDoubleOrNull() ?: 0.0) }) { Text("Guardar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
+    AlertDialog(
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Saldo Crítico 🔔", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = { Column { Text("Te avisaremos si tu saldo baja de esta cantidad (Déjalo en 0 para apagar):", fontSize = 14.sp); Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = amountRaw, onValueChange = { amountRaw = cleanAmountInput(it) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), leadingIcon = { Icon(Icons.Filled.AttachMoney, null) }, singleLine = true, modifier = Modifier.fillMaxWidth(), visualTransformation = AmountVisualTransformation()) } },
+        confirmButton = { Button(onClick = { onConfirm(amountRaw.toDoubleOrNull() ?: 0.0) }) { Text("Guardar") } }, dismissButton = { }
+    )
 }
 
 @Composable
 fun SummaryDialog(totalIncome: Double, totalExpense: Double, balance: Double, transactionCount: Int, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Resumen de Totales 📊", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(modifier = Modifier.fillMaxWidth()) { Text("Aquí tienes el balance histórico general de todos tus movimientos personales:", fontSize = 14.sp, color = Color.Gray); Spacer(modifier = Modifier.height(16.dp)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Total Ingresos:", fontWeight = FontWeight.Bold); Column(horizontalAlignment = Alignment.End) { Text(formatCOP(totalIncome), color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold) } }; Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Total Gastado:", fontWeight = FontWeight.Bold); Column(horizontalAlignment = Alignment.End) { Text(formatCOP(totalExpense), color = Color(0xFFF44336), fontWeight = FontWeight.Bold) } }; Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Balance Total:", fontWeight = FontWeight.Bold); Column(horizontalAlignment = Alignment.End) { Text(formatCOP(balance), color = if (balance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935), fontWeight = FontWeight.Bold) } }; Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Cant. Movimientos:", fontWeight = FontWeight.Bold); Text("$transactionCount", fontWeight = FontWeight.Bold) } } }, confirmButton = { Button(onClick = onDismiss) { Text("Entendido") } })
+    AlertDialog(
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Resumen de Totales 📊", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = { Column(modifier = Modifier.fillMaxWidth()) { Text("Aquí tienes el balance histórico general de todos tus movimientos personales:", fontSize = 14.sp, color = Color.Gray); Spacer(modifier = Modifier.height(16.dp)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Total Ingresos:", fontWeight = FontWeight.Bold); Column(horizontalAlignment = Alignment.End) { Text(formatCOP(totalIncome), color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold) } }; Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Total Gastado:", fontWeight = FontWeight.Bold); Column(horizontalAlignment = Alignment.End) { Text(formatCOP(totalExpense), color = Color(0xFFF44336), fontWeight = FontWeight.Bold) } }; Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Balance Total:", fontWeight = FontWeight.Bold); Column(horizontalAlignment = Alignment.End) { Text(formatCOP(balance), color = if (balance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935), fontWeight = FontWeight.Bold) } }; Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha = 0.2f)); Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Cant. Movimientos:", fontWeight = FontWeight.Bold); Text("$transactionCount", fontWeight = FontWeight.Bold) } } },
+        confirmButton = { }, dismissButton = { }
+    )
 }
 
 @Composable
-fun SoundSettingsDialog(
-    personalSoundUri: String?,
-    storeSoundUri: String?,
-    touchSoundUri: String?,
-    isVoiceEnabled: Boolean,
-    onDismiss: () -> Unit,
-    onSelectPersonal: (String) -> Unit,
-    onSelectStore: (String) -> Unit,
-    onSelectTouch: (String) -> Unit,
-    onVoiceToggle: (Boolean) -> Unit
-) {
+fun SoundSettingsDialog(personalSoundUri: String?, storeSoundUri: String?, touchSoundUri: String?, isVoiceEnabled: Boolean, onDismiss: () -> Unit, onSelectPersonal: (String) -> Unit, onSelectStore: (String) -> Unit, onSelectTouch: (String) -> Unit, onVoiceToggle: (Boolean) -> Unit) {
     val context = LocalContext.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION).toFloat() }
     var currentVolume by remember { mutableStateOf(audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION).toFloat()) }
-
     var targetForPicker by remember { mutableStateOf("") }
     var selectedSoundTab by remember { mutableStateOf(0) }
     val tabs = listOf("General ⚙️", "Personal 👤", "Tienda 🏪")
 
-    val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) {
-            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) {}
-            when (targetForPicker) {
-                "PERSONAL" -> onSelectPersonal(uri.toString())
-                "STORE" -> onSelectStore(uri.toString())
-                "TOUCH" -> onSelectTouch(uri.toString())
-            }
-        }
-    }
+    val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> if (uri != null) { try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) {}; when (targetForPicker) { "PERSONAL" -> onSelectPersonal(uri.toString()); "STORE" -> onSelectStore(uri.toString()); "TOUCH" -> onSelectTouch(uri.toString()) } } }
+    val ringtonePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result -> if (result.resultCode == android.app.Activity.RESULT_OK) { val uri: Uri? = result.data?.getParcelableExtra(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI); if (uri != null) { when (targetForPicker) { "PERSONAL" -> onSelectPersonal(uri.toString()); "STORE" -> onSelectStore(uri.toString()); "TOUCH" -> onSelectTouch(uri.toString()) } } } }
 
-    val ringtonePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val uri: Uri? = result.data?.getParcelableExtra(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
-            if (uri != null) {
-                when (targetForPicker) {
-                    "PERSONAL" -> onSelectPersonal(uri.toString())
-                    "STORE" -> onSelectStore(uri.toString())
-                    "TOUCH" -> onSelectTouch(uri.toString())
-                }
-            }
-        }
-    }
-
-    fun openRingtonePicker(target: String) {
-        targetForPicker = target
-        val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_NOTIFICATION)
-            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
-            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true)
-        }
-        ringtonePicker.launch(intent)
-    }
-
-    fun openAudioPicker(target: String) {
-        targetForPicker = target
-        audioPicker.launch("audio/*")
-    }
+    fun openRingtonePicker(target: String) { targetForPicker = target; val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply { putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_NOTIFICATION); putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true); putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, true) }; ringtonePicker.launch(intent) }
+    fun openAudioPicker(target: String) { targetForPicker = target; audioPicker.launch("audio/*") }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Configuración de Sonido 🎵", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Configuración de Sonido 🎵", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-
-                TabRow(selectedTabIndex = selectedSoundTab, containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.primary) {
-                    tabs.forEachIndexed { index, title ->
-                        Tab(
-                            selected = selectedSoundTab == index,
-                            onClick = { selectedSoundTab = index },
-                            text = { Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
-                        )
-                    }
-                }
-
+                TabRow(selectedTabIndex = selectedSoundTab, containerColor = Color.Transparent, contentColor = MaterialTheme.colorScheme.primary) { tabs.forEachIndexed { index, title -> Tab(selected = selectedSoundTab == index, onClick = { selectedSoundTab = index }, text = { Text(title, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1) }) } }
                 Spacer(modifier = Modifier.height(16.dp))
-
                 Crossfade(targetState = selectedSoundTab, label = "SoundTabs") { tab ->
-                    Column(
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
+                    Column(modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         when (tab) {
-                            0 -> { // General
-                                Text("Ajusta el volumen (escucharás un tono al soltar).", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
-                                Spacer(modifier = Modifier.height(16.dp))
-
+                            0 -> {
+                                Text("Ajusta el volumen (escucharás un tono al soltar).", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(16.dp))
                                 Text("Volumen del Sistema", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                    Text("🔉", fontSize = 20.sp)
-                                    Slider(
-                                        value = currentVolume,
-                                        onValueChange = {
-                                            currentVolume = it
-                                            audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, it.toInt(), 0)
-                                        },
-                                        onValueChangeFinished = { AppSounds.play(context, "") },
-                                        valueRange = 0f..maxVolume,
-                                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
-                                    )
-                                    Text("🔊", fontSize = 20.sp)
-                                }
-                                Text("${(currentVolume / maxVolume * 100).toInt()}%", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-
-                                Spacer(modifier = Modifier.height(24.dp))
-                                Divider(color = Color.Gray.copy(alpha = 0.2f))
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onVoiceToggle(!isVoiceEnabled) }.padding(vertical = 8.dp)) {
-                                    Switch(checked = isVoiceEnabled, onCheckedChange = onVoiceToggle)
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Text("Asistente de Voz 🎙️", fontWeight = FontWeight.Bold)
-                                        Text("Leer notificaciones en voz alta", fontSize = 12.sp, color = Color.Gray)
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Divider(color = Color.Gray.copy(alpha = 0.2f))
-                                Spacer(modifier = Modifier.height(16.dp))
-
-                                Text("👆 Sonido de Toques (Acciones en App)", fontWeight = FontWeight.Bold, fontSize = 13.sp, textAlign = TextAlign.Center)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                    OutlinedButton(onClick = { onSelectTouch("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }
-                                    Button(onClick = { openRingtonePicker("TOUCH") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }
-                                    Button(onClick = { openAudioPicker("TOUCH") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) }
-                                }
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) { Text("🔉", fontSize = 20.sp); Slider(value = currentVolume, onValueChange = { currentVolume = it; audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, it.toInt(), 0) }, onValueChangeFinished = { AppSounds.play(context, "") }, valueRange = 0f..maxVolume, modifier = Modifier.weight(1f).padding(horizontal = 8.dp)); Text("🔊", fontSize = 20.sp) }
+                                Text("${(currentVolume / maxVolume * 100).toInt()}%", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.height(24.dp)); Divider(color = Color.Gray.copy(alpha = 0.2f)); Spacer(modifier = Modifier.height(16.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onVoiceToggle(!isVoiceEnabled) }.padding(vertical = 8.dp)) { Switch(checked = isVoiceEnabled, onCheckedChange = onVoiceToggle); Spacer(modifier = Modifier.width(12.dp)); Column { Text("Asistente de Voz 🎙️", fontWeight = FontWeight.Bold); Text("Leer notificaciones en voz alta", fontSize = 12.sp, color = Color.Gray) } }
+                                Spacer(modifier = Modifier.height(16.dp)); Divider(color = Color.Gray.copy(alpha = 0.2f)); Spacer(modifier = Modifier.height(16.dp))
+                                Text("👆 Sonido de Toques (Acciones en App)", fontWeight = FontWeight.Bold, fontSize = 13.sp, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(8.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { OutlinedButton(onClick = { onSelectTouch("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }; Button(onClick = { openRingtonePicker("TOUCH") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }; Button(onClick = { openAudioPicker("TOUCH") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) } }
                             }
-                            1 -> { // Personal
-                                Text("Notificaciones de Agenda Personal", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text("🔵 Recordatorios de Deudas", fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = TextAlign.Center)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                    OutlinedButton(onClick = { onSelectPersonal("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }
-                                    Button(onClick = { openRingtonePicker("PERSONAL") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }
-                                    Button(onClick = { openAudioPicker("PERSONAL") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) }
-                                }
+                            1 -> {
+                                Text("Notificaciones de Agenda Personal", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(16.dp)); Text("🔵 Recordatorios de Deudas", fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(16.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { OutlinedButton(onClick = { onSelectPersonal("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }; Button(onClick = { openRingtonePicker("PERSONAL") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }; Button(onClick = { openAudioPicker("PERSONAL") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) } }
                             }
-                            2 -> { // Tienda
-                                Text("Notificaciones de la Tienda", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text("🏪 Cobros, Fiadores y Stock", fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = TextAlign.Center)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                                    OutlinedButton(onClick = { onSelectStore("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }
-                                    Button(onClick = { openRingtonePicker("STORE") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }
-                                    Button(onClick = { openAudioPicker("STORE") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) }
-                                }
+                            2 -> {
+                                Text("Notificaciones de la Tienda", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(16.dp)); Text("🏪 Cobros, Fiadores y Stock", fontWeight = FontWeight.Bold, fontSize = 14.sp, textAlign = TextAlign.Center); Spacer(modifier = Modifier.height(16.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) { OutlinedButton(onClick = { onSelectStore("") }, modifier = Modifier.weight(1f).padding(end=4.dp), contentPadding = PaddingValues(0.dp)) { Text("Por Defecto", fontSize = 11.sp) }; Button(onClick = { openRingtonePicker("STORE") }, modifier = Modifier.weight(1f).padding(horizontal=2.dp), contentPadding = PaddingValues(0.dp)) { Text("Tono", fontSize = 11.sp) }; Button(onClick = { openAudioPicker("STORE") }, modifier = Modifier.weight(1f).padding(start=4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), contentPadding = PaddingValues(0.dp)) { Text("Audio", fontSize = 11.sp) } }
                             }
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } }
+        confirmButton = { }, dismissButton = { }
     )
 }
 
 @Composable
-fun CalendarDialog(
-    currentTab: Int,
-    reminders: List<Reminder>,
-    fiadores: List<Fiador>,
-    products: List<Product>,
-    onDismiss: () -> Unit,
-    onDayClick: (Long, Boolean) -> Unit,
-    onViewReminders: () -> Unit,
-    onViewFiadores: () -> Unit
-) {
+fun CalendarDialog(currentTab: Int, reminders: List<Reminder>, fiadores: List<Fiador>, products: List<Product>, onDismiss: () -> Unit, onDayClick: (Long, Boolean) -> Unit, onViewReminders: () -> Unit, onViewFiadores: () -> Unit) {
     var currentMonth by remember { mutableStateOf(Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }) }
     val formatMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
     val titleText = if (currentTab == 0) "Agenda Personal \uD83D\uDDD3\uFE0F" else "Agenda de Tienda \uD83D\uDDD3\uFE0F"
 
     AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.fillMaxWidth().padding(16.dp),
-        containerColor = MaterialTheme.colorScheme.surface,
-        title = { Text(titleText, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center) },
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false), modifier = Modifier.fillMaxWidth().padding(16.dp), containerColor = MaterialTheme.colorScheme.surface,
+        title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(titleText, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
         text = {
             Column {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { val newCal = currentMonth.clone() as Calendar; newCal.add(Calendar.MONTH, -1); newCal.set(Calendar.DAY_OF_MONTH, 1); currentMonth = newCal }) { Icon(Icons.Filled.ChevronLeft, "Anterior") }
-                    Text(text = formatMonth.format(currentMonth.time).replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                    IconButton(onClick = { val newCal = currentMonth.clone() as Calendar; newCal.add(Calendar.MONTH, 1); newCal.set(Calendar.DAY_OF_MONTH, 1); currentMonth = newCal }) { Icon(Icons.Filled.ChevronRight, "Siguiente") }
-                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = { val newCal = currentMonth.clone() as Calendar; newCal.add(Calendar.MONTH, -1); newCal.set(Calendar.DAY_OF_MONTH, 1); currentMonth = newCal }) { Icon(Icons.Filled.ChevronLeft, "Anterior") }; Text(text = formatMonth.format(currentMonth.time).replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold, fontSize = 16.sp); IconButton(onClick = { val newCal = currentMonth.clone() as Calendar; newCal.add(Calendar.MONTH, 1); newCal.set(Calendar.DAY_OF_MONTH, 1); currentMonth = newCal }) { Icon(Icons.Filled.ChevronRight, "Siguiente") } }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(modifier = Modifier.fillMaxWidth()) { listOf("Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb").forEach { Text(text = it, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)) } }
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    listOf("Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb").forEach {
-                        Text(text = it, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.weight(1f))
-                    }
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-
-                val daysInMonth = currentMonth.getActualMaximum(Calendar.DAY_OF_MONTH)
-                val tempCal = currentMonth.clone() as Calendar
-                tempCal.set(Calendar.DAY_OF_MONTH, 1)
-                val firstDayOfWeek = tempCal.get(Calendar.DAY_OF_WEEK) - 1
-                val totalCells = daysInMonth + firstDayOfWeek
-                val rows = (totalCells + 6) / 7
-
+                val daysInMonth = currentMonth.getActualMaximum(Calendar.DAY_OF_MONTH); val tempCal = currentMonth.clone() as Calendar; tempCal.set(Calendar.DAY_OF_MONTH, 1); val firstDayOfWeek = tempCal.get(Calendar.DAY_OF_WEEK) - 1; val totalCells = daysInMonth + firstDayOfWeek; val rows = (totalCells + 6) / 7
                 Column(modifier = Modifier.fillMaxWidth()) {
                     for (i in 0 until rows) {
                         Row(modifier = Modifier.fillMaxWidth()) {
                             for (j in 0..6) {
-                                val cellIndex = i * 7 + j
-                                val dayNumber = cellIndex - firstDayOfWeek + 1
-
+                                val cellIndex = i * 7 + j; val dayNumber = cellIndex - firstDayOfWeek + 1
                                 if (dayNumber in 1..daysInMonth) {
-                                    val dayCal = currentMonth.clone() as Calendar
-                                    dayCal.set(Calendar.DAY_OF_MONTH, dayNumber)
-
-                                    val hasReminder = reminders.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }
-                                    val hasFiador = fiadores.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }
-                                    val hasProduct = if (currentTab == 1) products.any { it.expirationDateInMillis != null && isSameDay(it.expirationDateInMillis, dayCal.timeInMillis) } else false
-                                    val hasEvents = hasReminder || hasFiador || hasProduct
-
-                                    val bgColor = when {
-                                        hasProduct -> Color(0xFFD32F2F)
-                                        hasReminder -> Color(0xFF1976D2)
-                                        hasFiador -> Color(0xFFFBC02D)
-                                        else -> Color.Transparent
-                                    }
-
-                                    val textColor = if (bgColor == Color.Transparent) MaterialTheme.colorScheme.onSurface else Color.White
-
-                                    Box(
-                                        modifier = Modifier.weight(1f).aspectRatio(1f).padding(2.dp).clip(CircleShape).background(bgColor).clickable {
-                                            onDayClick(dayCal.timeInMillis, hasEvents)
-                                        },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(text = dayNumber.toString(), fontSize = 14.sp, fontWeight = if (hasEvents) FontWeight.Bold else FontWeight.Normal, color = textColor)
-                                    }
-                                } else {
-                                    Box(modifier = Modifier.weight(1f).aspectRatio(1f))
-                                }
+                                    val dayCal = currentMonth.clone() as Calendar; dayCal.set(Calendar.DAY_OF_MONTH, dayNumber)
+                                    val hasReminder = reminders.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }; val hasFiador = fiadores.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }; val hasProduct = if (currentTab == 1) products.any { it.expirationDateInMillis != null && isSameDay(it.expirationDateInMillis, dayCal.timeInMillis) } else false; val hasEvents = hasReminder || hasFiador || hasProduct
+                                    val bgColor = when { hasProduct -> Color(0xFFD32F2F); hasReminder -> Color(0xFF1976D2); hasFiador -> Color(0xFFFBC02D); else -> Color.Transparent }; val textColor = if (bgColor == Color.Transparent) MaterialTheme.colorScheme.onSurface else Color.White
+                                    Box(modifier = Modifier.weight(1f).aspectRatio(1f).padding(2.dp).clip(CircleShape).background(bgColor).clickable { onDayClick(dayCal.timeInMillis, hasEvents) }, contentAlignment = Alignment.Center) { Text(text = dayNumber.toString(), fontSize = 14.sp, fontWeight = if (hasEvents) FontWeight.Bold else FontWeight.Normal, color = textColor) }
+                                } else { Box(modifier = Modifier.weight(1f).aspectRatio(1f)) }
                             }
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                Divider(color = Color.Gray.copy(alpha = 0.2f))
-
+                Spacer(modifier = Modifier.height(16.dp)); Divider(color = Color.Gray.copy(alpha = 0.2f))
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = onViewReminders,
-                        modifier = Modifier.weight(1f).height(48.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2), contentColor = Color.White)
-                    ) { Text("💸 Mis Deudas", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
-
-                    Button(
-                        onClick = onViewFiadores,
-                        modifier = Modifier.weight(1f).height(48.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)
-                    ) { Text("📋 Mis Deudores", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
+                    Button(onClick = onViewReminders, modifier = Modifier.weight(1f).height(48.dp), contentPadding = PaddingValues(horizontal = 4.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2), contentColor = Color.White)) { Text("💸 Mis Deudas", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
+                    Button(onClick = onViewFiadores, modifier = Modifier.weight(1f).height(48.dp), contentPadding = PaddingValues(horizontal = 4.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text("📋 Mis Deudores", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
                 }
             }
         },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } }
+        confirmButton = {}, dismissButton = { }
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddProductDialog(
-    isEditMode: Boolean,
-    draftState: ProductDraftState,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
+fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     val context = LocalContext.current
     var showDatePicker by remember { mutableStateOf(false) }
 
-    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } catch (e: Exception) { e.printStackTrace() }
-            draftState.imageUri = uri.toString()
-        }
-    }
-
-    if (showDatePicker) {
-        CustomDatePickerDialog(
-            initialDateMillis = draftState.expiryDateMillis ?: System.currentTimeMillis(),
-            onDismiss = { showDatePicker = false },
-            onDateSelected = { selected -> draftState.expiryDateMillis = selected; showDatePicker = false }
-        )
-    }
+    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? -> if (uri != null) { try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) { e.printStackTrace() }; draftState.imageUri = uri.toString() } }
+    if (showDatePicker) { CustomDatePickerDialog(initialDateMillis = draftState.expiryDateMillis ?: System.currentTimeMillis(), onDismiss = { showDatePicker = false }, onDateSelected = { selected -> draftState.expiryDateMillis = selected; showDatePicker = false }) }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (isEditMode) "Editar Producto ✏️" else "Nuevo Producto 🏷️", modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) },
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(if (isEditMode) "Editar Producto ✏️" else "Nuevo Producto 🏷️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(150.dp)
-                        .background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
-                        .clickable { imagePickerLauncher.launch(arrayOf("image/*")) },
-                    contentAlignment = Alignment.Center
-                ) {
+                Box(modifier = Modifier.fillMaxWidth().height(150.dp).background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(12.dp)).clickable { imagePickerLauncher.launch(arrayOf("image/*")) }, contentAlignment = Alignment.Center) {
                     var bitmap by remember(draftState.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
-                    LaunchedEffect(draftState.imageUri) {
-                        if (draftState.imageUri != null) {
-                            val loadedBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                try {
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(draftState.imageUri!!)))
-                                    } else {
-                                        @Suppress("DEPRECATION")
-                                        android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(draftState.imageUri!!))
-                                    }
-                                } catch (e: Exception) { null }
-                            }
-                            bitmap = loadedBitmap
-                        } else {
-                            bitmap = null
-                        }
-                    }
-
-                    if (draftState.imageUri != null) {
-                        if (bitmap != null) {
-                            Image(
-                                bitmap = bitmap!!.asImageBitmap(),
-                                contentDescription = "Imagen del producto",
-                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)),
-                                contentScale = ContentScale.Crop
-                            )
-                        } else {
-                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                        }
-                    } else {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Filled.Image, contentDescription = "Añadir foto", modifier = Modifier.size(48.dp), tint = Color.Gray)
-                            Text("Añadir foto del producto", color = Color.Gray, fontSize = 12.sp)
-                        }
-                    }
+                    LaunchedEffect(draftState.imageUri) { if (draftState.imageUri != null) { val loadedBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) { android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(draftState.imageUri!!))) } else { @Suppress("DEPRECATION") android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(draftState.imageUri!!)) } } catch (e: Exception) { null } }; bitmap = loadedBitmap } else { bitmap = null } }
+                    if (draftState.imageUri != null) { if (bitmap != null) { Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Imagen del producto", modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop) } else { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary) } } else { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Filled.Image, contentDescription = "Añadir foto", modifier = Modifier.size(48.dp), tint = Color.Gray); Text("Añadir foto del producto", color = Color.Gray, fontSize = 12.sp) } }
                 }
                 Spacer(modifier = Modifier.height(12.dp))
-
                 OutlinedTextField(value = draftState.name, onValueChange = { input -> draftState.name = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nombre del Producto") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(value = draftState.purchasePriceRaw, onValueChange = { draftState.purchasePriceRaw = cleanAmountInput(it) }, label = { Text("Precio de Compra") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) })
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(value = draftState.priceRaw, onValueChange = { draftState.priceRaw = cleanAmountInput(it) }, label = { Text("Precio de Venta") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) })
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Unidad de Medida", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    FilterChip(selected = draftState.selectedUnit == "Uds", onClick = { draftState.selectedUnit = "Uds" }, label = { Text("Unidad") })
-                    FilterChip(selected = draftState.selectedUnit == "Kg", onClick = { draftState.selectedUnit = "Kg" }, label = { Text("Kilos") })
-                    FilterChip(selected = draftState.selectedUnit == "L", onClick = { draftState.selectedUnit = "L" }, label = { Text("Litros") })
-                }
+                Spacer(modifier = Modifier.height(12.dp)); Text("Unidad de Medida", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) { FilterChip(selected = draftState.selectedUnit == "Uds", onClick = { draftState.selectedUnit = "Uds" }, label = { Text("Unidad") }); FilterChip(selected = draftState.selectedUnit == "Kg", onClick = { draftState.selectedUnit = "Kg" }, label = { Text("Kilos") }); FilterChip(selected = draftState.selectedUnit == "L", onClick = { draftState.selectedUnit = "L" }, label = { Text("Litros") }) }
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(value = draftState.stockRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; draftState.stockRaw = d }, label = { Text("Cantidad Inicial en Stock") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(value = draftState.minStockRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; draftState.minStockRaw = d }, label = { Text("Alerta de cantidad baja") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { draftState.hasExpiry = !draftState.hasExpiry }) {
-                    Checkbox(checked = draftState.hasExpiry, onCheckedChange = { draftState.hasExpiry = it })
-                    Text("Tiene fecha de vencimiento", fontSize = 14.sp)
-                }
-                if (draftState.hasExpiry) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (draftState.expiryDateMillis == null) "Seleccionar Fecha 📅" else "Vence: ${formatDateOnly(draftState.expiryDateMillis!!)}")
-                    }
-                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { draftState.hasExpiry = !draftState.hasExpiry }) { Checkbox(checked = draftState.hasExpiry, onCheckedChange = { draftState.hasExpiry = it }); Text("Tiene fecha de vencimiento", fontSize = 14.sp) }
+                if (draftState.hasExpiry) { Spacer(modifier = Modifier.height(4.dp)); OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.fillMaxWidth()) { Text(if (draftState.expiryDateMillis == null) "Seleccionar Fecha 📅" else "Vence: ${formatDateOnly(draftState.expiryDateMillis!!)}") } }
             }
         },
-        confirmButton = {
-            Button(onClick = onConfirm) { Text("Guardar ✔️") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar ❌") } }
+        confirmButton = { Button(onClick = onConfirm) { Text("Guardar ✔️") } }, dismissButton = { }
     )
 }
 
 @Composable
 fun DeleteQuantityDialog(product: Product, initialQty: String, onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
     var qtyRaw by remember { mutableStateOf(initialQty) }; val context = LocalContext.current
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Eliminar Stock 🗑️", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { Text("¿Cuántas unidades de '${product.name}' deseas eliminar?", textAlign = TextAlign.Center, fontSize = 14.sp); Spacer(modifier = Modifier.height(16.dp)); OutlinedTextField(value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cantidad") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.width(150.dp), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)); Text("Stock actual: ${product.stock} ${product.unit}", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) } }, confirmButton = { Button(onClick = { val q = qtyRaw.toIntOrNull() ?: -1; if (q > product.stock) { Toast.makeText(context, "Supera el stock actual.", Toast.LENGTH_SHORT).show() } else if (q <= 0) { Toast.makeText(context, "No se puede eliminar 0.", Toast.LENGTH_SHORT).show() } else { onConfirm(q) } }) { Text("Siguiente") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } })
+    AlertDialog(
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Eliminar Stock 🗑️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { Text("¿Cuántas unidades de '${product.name}' deseas eliminar?", textAlign = TextAlign.Center, fontSize = 14.sp); Spacer(modifier = Modifier.height(16.dp)); OutlinedTextField(value = qtyRaw, onValueChange = { n -> val d = n.filter { it.isDigit() }; qtyRaw = d }, label = { Text("Cantidad") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.width(150.dp), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Bold)); Text("Stock actual: ${product.stock} ${product.unit}", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp)) } },
+        confirmButton = { Button(onClick = { val q = qtyRaw.toIntOrNull() ?: -1; if (q > product.stock) { Toast.makeText(context, "Supera el stock actual.", Toast.LENGTH_SHORT).show() } else if (q <= 0) { Toast.makeText(context, "No se puede eliminar 0.", Toast.LENGTH_SHORT).show() } else { onConfirm(q) } }) { Text("Siguiente") } }, dismissButton = { }
+    )
 }
 
 @Composable
 fun RedWarningDialog(productName: String, qty: Int, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, containerColor = Color(0xFFD32F2F), titleContentColor = Color.White, textContentColor = Color.White, title = { Text("¡Acción Irreversible! ⚠️", fontWeight = FontWeight.Bold) }, text = { Text("Estás a punto de eliminar $qty unidades de '$productName' de tu inventario. ¿Estás seguro?") }, confirmButton = { Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFFD32F2F))) { Text("Sí, Eliminar", fontWeight = FontWeight.Bold) } }, dismissButton = { TextButton(onClick = onDismiss, colors = ButtonDefaults.textButtonColors(contentColor = Color.White)) { Text("Cancelar") } })
+    AlertDialog(
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false), containerColor = Color(0xFFD32F2F), titleContentColor = Color.White, textContentColor = Color.White,
+        title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("¡Acción Irreversible! ⚠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar", tint = Color.White) } } },
+        text = { Text("Estás a punto de eliminar $qty unidades de '$productName' de tu inventario. ¿Estás seguro?") },
+        confirmButton = { Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFFD32F2F))) { Text("Sí, Eliminar", fontWeight = FontWeight.Bold) } }, dismissButton = { }
+    )
 }
 
 @Composable
@@ -4077,7 +3163,83 @@ fun PlanCardInfo(
         }
     }
 }
+@Composable
+fun ProductInfoDialog(product: Product, onDismiss: () -> Unit, onDeleteCompletely: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Detalle del Producto ℹ️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = { Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Text(product.name, fontSize = 20.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.height(16.dp)); Text("Precio Unitario: ${formatCOP(product.price)}", fontSize = 14.sp); Spacer(modifier = Modifier.height(8.dp)); Text("Stock Disponible: ${product.stock} ${product.unit}", fontSize = 14.sp); Spacer(modifier = Modifier.height(16.dp)); Divider(color = Color.Gray.copy(alpha = 0.2f)); Spacer(modifier = Modifier.height(16.dp)); val totalUsd = product.price * product.stock; Text("Valor Total en Inventario:", fontSize = 14.sp, color = Color.Gray); Text(formatCOP(totalUsd), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary) } },
+        confirmButton = { }, dismissButton = { TextButton(onClick = onDeleteCompletely, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) { Text("Eliminar del Inventario", fontWeight = FontWeight.Bold) } }
+    )
+}
 
+@Composable
+fun DashboardCard(balance: Double, income: Double, expense: Double, cashBalance: Double, digitalBalance: Double) {
+    Card(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Saldo Total", color = Color.Gray, fontSize = 16.sp)
+            Text(text = formatCOP(balance), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = if (balance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.1f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Efectivo", fontSize=12.sp, color=Color.Gray)
+                    Text(formatCOP(cashBalance), fontSize=14.sp, fontWeight=FontWeight.Bold, color = if (cashBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Digital", fontSize=12.sp, color=Color.Gray)
+                    Text(formatCOP(digitalBalance), fontSize=14.sp, fontWeight=FontWeight.Bold, color = if (digitalBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFE8F5E9).copy(alpha = 0.2f)).padding(4.dp)) { Text("🟢", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Ingresos", color = Color.Gray) }; Text(formatCOP(income), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFFFEBEE).copy(alpha = 0.2f)).padding(4.dp)) { Text("🔴", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Gastos", color = Color.Gray) }; Text(formatCOP(expense), fontWeight = FontWeight.Bold, color = Color(0xFFF44336)) }
+            }
+        }
+    }
+}
+
+@Composable
+fun TransactionItem(transaction: Transaction, onDelete: () -> Unit) {
+    val isIncome = transaction.isIncome
+    val color = if (isIncome) Color(0xFF4CAF50) else Color(0xFFF44336)
+    val emoji = getSmartEmoji(transaction.description, isIncome)
+
+    val methodText = when {
+        transaction.cashAmount > 0 && transaction.digitalAmount == 0.0 -> "Efectivo"
+        transaction.digitalAmount > 0 && transaction.cashAmount == 0.0 -> "Digital"
+        transaction.cashAmount > 0 && transaction.digitalAmount > 0 -> "Mixto"
+        else -> ""
+    }
+
+    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(color.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Text(text = emoji, fontSize = 24.sp) }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                Text(text = transaction.description, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+                val noteAndMethod = buildString {
+                    if (transaction.note.isNotBlank()) append(transaction.note)
+                    if (methodText.isNotEmpty()) {
+                        if (isNotEmpty()) append(" | ")
+                        append(methodText)
+                    }
+                }
+                if (noteAndMethod.isNotEmpty()) {
+                    Text(text = noteAndMethod, color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 2.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+
+                Text(text = formatDate(transaction.timestamp), color = Color.Gray.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1)
+            }
+            Column(horizontalAlignment = Alignment.End) { Text(text = "${if (isIncome) "+" else "-"}${formatCOP(transaction.amount)}", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = color, maxLines = 1) }
+            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Gray, modifier = Modifier.size(20.dp)) }
+        }
+    }
+}
 // ==========================================
 // 9. FUNCIONES DE FORMATO Y UTILIDADES
 // ==========================================
