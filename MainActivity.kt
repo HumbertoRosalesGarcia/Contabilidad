@@ -319,7 +319,7 @@ data class Transaction(
 data class Reminder(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val title: String,
-    val amount: Double = 0.0, // <-- NUEVO: Monto de la deuda personal
+    val amount: Double = 0.0,
     val targetDateInMillis: Long,
     val isStore: Boolean = false
 )
@@ -334,10 +334,12 @@ data class Fiador(
     val targetDateInMillis: Long,
     val paidAmount: Double = 0.0,
     val paymentHistory: String = "",
-    val isStore: Boolean = true
+    val isStore: Boolean = true,
+    val totalCost: Double = 0.0 // <-- NUEVO: Guarda el costo para calcular ganancias progresivas
 )
 
-@Entity(tableName = "products") data class Product(@PrimaryKey(autoGenerate = true) val id: Int = 0, val name: String, val purchasePrice: Double = 0.0, val price: Double, val stock: Int, val unit: String = "Uds", val expirationDateInMillis: Long? = null, val entryDateInMillis: Long = System.currentTimeMillis(), val minStock: Int = 0, val imageUri: String? = null)
+@Entity(tableName = "products")
+data class Product(@PrimaryKey(autoGenerate = true) val id: Int = 0, val name: String, val purchasePrice: Double = 0.0, val price: Double, val stock: Int, val unit: String = "Uds", val expirationDateInMillis: Long? = null, val entryDateInMillis: Long = System.currentTimeMillis(), val minStock: Int = 0, val imageUri: String? = null)
 
 @Dao
 interface FinanceDao {
@@ -377,10 +379,10 @@ val MIGRATION_10_11 = object : Migration(10, 11) { override fun migrate(db: Supp
 val MIGRATION_11_12 = object : Migration(11, 12) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `paidAmount` REAL NOT NULL DEFAULT 0.0"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `paymentHistory` TEXT NOT NULL DEFAULT ''") } }
 val MIGRATION_12_13 = object : Migration(12, 13) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `products` ADD COLUMN `imageUri` TEXT DEFAULT NULL") } }
 val MIGRATION_13_14 = object : Migration(13, 14) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `reminders` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 0"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 1") } }
-// --- NUEVO: Migración para añadir el monto a las deudas existentes ---
 val MIGRATION_14_15 = object : Migration(14, 15) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `reminders` ADD COLUMN `amount` REAL NOT NULL DEFAULT 0.0") } }
+val MIGRATION_15_16 = object : Migration(15, 16) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `totalCost` REAL NOT NULL DEFAULT 0.0") } }
 
-@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 15, exportSchema = false) // <-- AHORA ES VERSIÓN 15
+@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 16, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun financeDao(): FinanceDao
     companion object {
@@ -389,7 +391,7 @@ abstract class AppDatabase : RoomDatabase() {
             return INSTANCES[userId] ?: synchronized(this) {
                 val dbName = "finance_database_$userId"
                 val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, dbName)
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
                     .build()
                 INSTANCES[userId] = instance
                 instance
@@ -608,23 +610,43 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     }
 
     // --- MODIFICADO: Agregado parámetro 'personalDebtAmount' ---
-    fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, personalDebtAmount: Double, dateInMillis: Long, initialPaidAmount: Double = 0.0, paymentMethod: String = "Efectivo", isStore: Boolean, context: Context, onConfigured: (String) -> Unit) {
+    fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, personalDebtAmount: Double, dateInMillis: Long, initialCash: Double = 0.0, initialDigital: Double = 0.0, isStore: Boolean, context: Context, onConfigured: (String) -> Unit) {
         viewModelScope.launch {
             val totalAmount = if (isStore) cartItems.sumOf { it.first.price * it.second } else personalDebtAmount
+            val totalCost = if (isStore) cartItems.sumOf { it.first.purchasePrice * it.second } else 0.0 // Calculamos el costo total
             val reason = if (isStore) cartItems.joinToString(", ") { "${it.second}${it.first.unit} ${it.first.name}" } else "Préstamo personal"
 
+            val initialPaidAmount = initialCash + initialDigital
             val history = if (initialPaidAmount > 0) {
                 val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
-                "$dateStr: +${formatCOP(initialPaidAmount)} ($paymentMethod)"
+                val methodStr = when {
+                    initialCash > 0 && initialDigital == 0.0 -> "Efectivo"
+                    initialDigital > 0 && initialCash == 0.0 -> "Digital"
+                    else -> "Múltiple"
+                }
+                "$dateStr: +${formatCOP(initialPaidAmount)} ($methodStr)"
             } else ""
 
-            val fiadorId = dao.insertFiador(Fiador(name = name, phone = phone, amount = totalAmount, reason = reason, targetDateInMillis = dateInMillis, paidAmount = initialPaidAmount, paymentHistory = history, isStore = isStore)).toInt()
+            val fiadorId = dao.insertFiador(Fiador(name = name, phone = phone, amount = totalAmount, reason = reason, targetDateInMillis = dateInMillis, paidAmount = initialPaidAmount, paymentHistory = history, isStore = isStore, totalCost = totalCost)).toInt()
+
+            // LÓGICA DE GANANCIA PROGRESIVA: Solo hay ganancia si lo pagado supera el costo
+            val totalProfitGenerated = maxOf(0.0, initialPaidAmount - totalCost)
+            var cashProfit = 0.0
+            var digitalProfit = 0.0
 
             if (initialPaidAmount > 0) {
-                val cash = if(paymentMethod == "Efectivo") initialPaidAmount else 0.0
-                val digital = if(paymentMethod == "Digital") initialPaidAmount else 0.0
+                cashProfit = totalProfitGenerated * (initialCash / initialPaidAmount)
+                digitalProfit = totalProfitGenerated * (initialDigital / initialPaidAmount)
+            }
+
+            if (initialCash > 0) {
                 val desc = if (isStore) "Venta: Abono inicial ($name)" else "Ingreso: Abono inicial ($name)"
-                dao.insertTransaction(Transaction(description = desc, amount = initialPaidAmount, isIncome = true, note = "Abono inicial de deuda", cashAmount = cash, digitalAmount = digital))
+                dao.insertTransaction(Transaction(description = desc, amount = initialCash, isIncome = true, note = "Abono inicial en Efectivo", cashAmount = initialCash, digitalAmount = 0.0, profit = cashProfit))
+            }
+
+            if (initialDigital > 0) {
+                val desc = if (isStore) "Venta: Abono inicial ($name)" else "Ingreso: Abono inicial ($name)"
+                dao.insertTransaction(Transaction(description = desc, amount = initialDigital, isIncome = true, note = "Abono inicial en Digital", cashAmount = 0.0, digitalAmount = initialDigital, profit = digitalProfit))
             }
 
             if (isStore) {
@@ -662,8 +684,15 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
     fun registerAbonoFiador(fiador: Fiador, abono: Double, method: String, context: Context, onResult: (String) -> Unit) {
         viewModelScope.launch {
-            val newPaidAmount = fiador.paidAmount + abono
+            val oldPaidAmount = fiador.paidAmount
+            val newPaidAmount = oldPaidAmount + abono
             val remaining = fiador.amount - newPaidAmount
+
+            // LÓGICA DE GANANCIA PROGRESIVA: Calculamos cuánta ganancia nueva generó este abono específico
+            val oldProfit = maxOf(0.0, oldPaidAmount - fiador.totalCost)
+            val newProfit = maxOf(0.0, newPaidAmount - fiador.totalCost)
+            val generatedProfitForThisAbono = newProfit - oldProfit
+
             val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
             val historyEntry = "$dateStr: +${formatCOP(abono)} ($method)"
             val newHistory = if (fiador.paymentHistory.isEmpty()) historyEntry else fiador.paymentHistory + "\n$historyEntry"
@@ -671,7 +700,9 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val cash = if(method == "Efectivo") abono else 0.0
             val digital = if(method == "Digital") abono else 0.0
             val desc = if (fiador.isStore) "Venta: Abono de ${fiador.name}" else "Ingreso: Abono de ${fiador.name}"
-            dao.insertTransaction(Transaction(description = desc, amount = abono, isIncome = true, note = "Abono de deuda parcial", cashAmount = cash, digitalAmount = digital))
+
+            // Insertamos la transacción con la ganancia progresiva calculada
+            dao.insertTransaction(Transaction(description = desc, amount = abono, isIncome = true, note = "Abono de deuda parcial", cashAmount = cash, digitalAmount = digital, profit = generatedProfitForThisAbono))
 
             if (newPaidAmount >= fiador.amount) {
                 dao.deleteFiador(fiador)
@@ -835,6 +866,7 @@ fun TechSplashScreen(onTimeout: () -> Unit) {
     }
 }
 
+@SuppressLint("ContextGetResource", "DiscouragedApi")
 @Composable
 fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
     val context = LocalContext.current
@@ -945,7 +977,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var currentRole by remember { mutableStateOf(if (isSuperAdmin) "ADMIN" else initialRole) }
     var currentConsumed by remember { mutableStateOf(initialConsumedSeconds) }
     var currentPlanDuration by remember { mutableStateOf(initialPlanDuration) }
-    var showPlansDialog by remember { mutableStateOf(!isSuperAdmin) }
+
+    var showPlansDialog by remember { mutableStateOf(!isSuperAdmin && initialRole != "GOLD" && initialRole != "ADMIN") }
 
     var showRoleUpgradeDialog by remember { mutableStateOf<String?>(null) }
     var showRoleDowngradeDialog by remember { mutableStateOf(false) }
@@ -1116,8 +1149,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     var checkoutToFiadorName by remember { mutableStateOf("") }
     var checkoutToFiadorCart by remember { mutableStateOf<List<Pair<Product, Int>>>(emptyList()) }
-    var checkoutToFiadorPaidAmount by remember { mutableStateOf(0.0) }
-    var checkoutToFiadorMethod by remember { mutableStateOf("Efectivo") }
+    var checkoutToFiadorCash by remember { mutableStateOf(0.0) }
+    var checkoutToFiadorDigital by remember { mutableStateOf(0.0) }
 
     var customToastMessage by remember { mutableStateOf<String?>(null) }
     var backPressedOnce by remember { mutableStateOf(false) }
@@ -1342,10 +1375,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     Column {
                         Text("Mejora tu plan comunicándote con el Administrador para desbloquear todo el potencial de la aplicación.", fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(bottom = 12.dp))
                         Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            PlanCardInfo("INVITADO 🪵", "Prueba de 1 mes.", listOf("Pestaña Personal", "Saldo crítico y Sonidos"), listOf("Control de Tienda y Ventas", "Inventario", "Sincronización Automática", "Gestión de Deudas", "Borrar Historial"))
-                            PlanCardInfo("BÁSICO 🥉", "1, 6 o 12 meses.", listOf("Pestaña Personal", "Saldo crítico y Sonidos", "Gestión de Deudas", "Respaldo manual en nube", "Borrar Historial"), listOf("Control de Tienda y Ventas", "Inventario", "Sincronización Automática"))
-                            PlanCardInfo("PREMIUM 🥈", "1, 6 o 12 meses.", listOf("Todo lo del Básico", "Acceso total a Tienda", "Inventario y Fechas", "Resumen de Totales", "Sincronización Automática"), listOf("Prioridad de Soporte"))
-                            PlanCardInfo("GOLD 🥇", "1, 6 o 12 meses.", listOf("Uso de toda la aplicación sin ninguna restricción", "Borrado completo", "Prioridad y Soporte total"), emptyList())
+                            if (currentRole == "INVITADO") { PlanCardInfo("BÁSICO 🥉", "1, 6 o 12 meses.", listOf("Pestaña Personal", "Saldo crítico y Sonidos", "Gestión de Deudas", "Respaldo manual en nube", "Borrar Historial"), listOf("Control de Tienda y Ventas", "Inventario", "Sincronización Automática")) }
+                            if (currentRole == "INVITADO" || currentRole == "BÁSICO") { PlanCardInfo("PREMIUM 🥈", "1, 6 o 12 meses.", listOf("Todo lo del Básico", "Acceso total a Tienda", "Inventario y Fechas", "Resumen de Totales", "Sincronización Automática"), listOf("Prioridad de Soporte")) }
+                            if (currentRole == "INVITADO" || currentRole == "BÁSICO" || currentRole == "PREMIUM") { PlanCardInfo("GOLD 🥇", "1, 6 o 12 meses.", listOf("Uso de toda la aplicación sin ninguna restricción", "Borrado completo", "Prioridad y Soporte total"), emptyList(), isGold = true) }
                         }
                     }
                 },
@@ -1830,11 +1862,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     showCheckoutDialog = false
                     showInventoryScreen = false
                 },
-                onFiarVenta = { buyer, paidAmount, method ->
+                onFiarVenta = { buyer, cashAmount, digitalAmount ->
                     checkoutToFiadorName = buyer
                     checkoutToFiadorCart = shoppingCart.toList()
-                    checkoutToFiadorPaidAmount = paidAmount
-                    checkoutToFiadorMethod = method
+                    checkoutToFiadorCash = cashAmount
+                    checkoutToFiadorDigital = digitalAmount
                     showCheckoutDialog = false
                     fiadorToEdit = null
                     preselectedDateForEvent = null
@@ -1871,34 +1903,34 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 initialFiador = fiadorToEdit,
                 initialName = checkoutToFiadorName,
                 initialCart = checkoutToFiadorCart,
-                initialPaidAmount = checkoutToFiadorPaidAmount,
-                initialMethod = checkoutToFiadorMethod,
+                initialCash = checkoutToFiadorCash,
+                initialDigital = checkoutToFiadorDigital,
                 products = products,
                 preselectedDate = preselectedDateForEvent,
                 isStore = currentTab == 1,
                 onDismiss = {
                     showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0
                 },
-                onConfirmNew = { n, p, cartItemsFiado, pAmount, d, initialPaid, method ->
-                    viewModel.addFiador(n, p, cartItemsFiado, pAmount, d, initialPaid, method, currentTab == 1, context) { customToastMessage = it }
+                onConfirmNew = { n, p, cartItemsFiado, pAmount, d, iCash, iDigital ->
+                    viewModel.addFiador(n, p, cartItemsFiado, pAmount, d, iCash, iDigital, currentTab == 1, context) { customToastMessage = it }
                     showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
 
                     if (checkoutToFiadorCart.isNotEmpty()) {
                         shoppingCart.clear()
                         showInventoryScreen = false
                     }
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0
                 },
                 onConfirmEdit = { f, d ->
                     viewModel.updateExistingFiador(f.copy(targetDateInMillis = d), context) { customToastMessage = it }
                     showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0
                 },
                 onConfirmAbono = { f, abono, method ->
                     viewModel.registerAbonoFiador(f, abono, method, context) { customToastMessage = it }
                     showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null
-                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorPaidAmount = 0.0; checkoutToFiadorMethod = "Efectivo"
+                    checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0
                 }
             )
         }
@@ -1909,9 +1941,75 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 // 7. COMPONENTES DE LA TIENDA E INVENTARIO
 // ==========================================
 @Composable
-fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppingCart: List<Pair<Product, Int>>, isLockedStore: Boolean, totalStoreCash: Double, totalStoreDigital: Double, onOpenInventory: () -> Unit, onOpenCheckout: () -> Unit, onResetProfitsClick: () -> Unit, onDeleteVentas: (List<Transaction>) -> Unit, showPremiumToast: () -> Unit, totalProfit: Double, activeFiadores: List<Fiador>, activeReminders: List<Reminder>, onSettleFiador: (Fiador) -> Unit, onEditFiador: (Fiador) -> Unit, onSettleReminder: (Reminder) -> Unit, onEditReminder: (Reminder) -> Unit) {
+fun StoreScreen(
+    products: List<Product>,
+    transactions: List<Transaction>,
+    shoppingCart: List<Pair<Product, Int>>,
+    isLockedStore: Boolean,
+    totalStoreCash: Double,
+    totalStoreDigital: Double,
+    onOpenInventory: () -> Unit,
+    onOpenCheckout: () -> Unit,
+    onResetProfitsClick: () -> Unit,
+    onDeleteVentas: (List<Transaction>) -> Unit,
+    showPremiumToast: () -> Unit,
+    totalProfit: Double,
+    activeFiadores: List<Fiador>,
+    activeReminders: List<Reminder>,
+    onSettleFiador: (Fiador) -> Unit,
+    onEditFiador: (Fiador) -> Unit,
+    onSettleReminder: (Reminder) -> Unit,
+    onEditReminder: (Reminder) -> Unit
+) {
     val totalInventoryValue = remember(products) { products.sumOf { it.price * it.stock } }
+    val totalInversion = remember(products) { products.sumOf { it.purchasePrice * it.stock } }
+    val gananciaFutura = remember(products) { products.sumOf { (it.price - it.purchasePrice) * it.stock } }
+
     var showVendidosDialog by remember { mutableStateOf(false) }
+    var showInversionDialog by remember { mutableStateOf(false) }
+    var showGananciaFuturaDialog by remember { mutableStateOf(false) }
+
+    if (showInversionDialog) {
+        AlertDialog(
+            onDismissRequest = { showInversionDialog = false },
+            title = { Text("Inversión de Inventario 📦", fontWeight = FontWeight.Bold) },
+            text = { Text("El dinero total que invertiste en los productos actuales (calculado por su precio de compra original) es:\n\n${formatCOP(totalInversion)}", fontSize = 16.sp) },
+            confirmButton = { Button(onClick = { showInversionDialog = false }) { Text("Entendido") } },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
+
+    // --- DIÁLOGO DE GANANCIAS COMPLETAMENTE REDISEÑADO ---
+    if (showGananciaFuturaDialog) {
+        AlertDialog(
+            onDismissRequest = { showGananciaFuturaDialog = false },
+            title = { Text("Resumen de Ganancias 🚀", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Ganancia Obtenida (Ventas Realizadas):", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
+                    Text(formatCOP(totalProfit), fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Desglose Actual:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Caja (Efectivo):", fontSize = 13.sp)
+                        Text(formatCOP(totalStoreCash), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                    }
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Banco (Digital):", fontSize = 13.sp)
+                        Text(formatCOP(totalStoreDigital), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                    }
+
+                    Divider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    Text("Ganancia Futura (Inventario Restante):", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
+                    Text(formatCOP(gananciaFutura), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text("Esta es la ganancia neta que obtendrás al vender todo tu stock actual.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp))
+                }
+            },
+            confirmButton = { Button(onClick = { showGananciaFuturaDialog = false }) { Text("Entendido") } },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         activeReminders.forEachIndexed { index, reminder ->
@@ -1950,7 +2048,7 @@ fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppi
                         .padding(top = if(index == 0 && activeReminders.isEmpty()) 16.dp else 0.dp)
                         .background(Color(0xFFFBC02D), RoundedCornerShape(8.dp))
                         .clip(RoundedCornerShape(8.dp))
-                        .clickable { onEditFiador(fiador) } // Permite abrir el dialogo de abono/info
+                        .clickable { onEditFiador(fiador) }
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -1969,13 +2067,51 @@ fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppi
         Card(modifier = Modifier.fillMaxWidth().padding(16.dp).padding(top = if(activeFiadores.isNotEmpty() || activeReminders.isNotEmpty()) 0.dp else 0.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showInversionDialog = true }
+                            .padding(4.dp)
+                    ) {
                         Text("Valor del Inventario", color = Color.Gray, fontSize = 13.sp)
                         Text(text = formatCOP(totalInventoryValue), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
                     }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).alpha(if(isLockedStore) 0.5f else 1f).clickable { if (isLockedStore) showPremiumToast() else onResetProfitsClick() }.padding(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) { Text(if(isLockedStore) "👑 Ganancias" else "Ganancias Obtenidas", color = Color.Gray, fontSize = 13.sp); Spacer(modifier = Modifier.width(4.dp)); Icon(Icons.Filled.Refresh, contentDescription = "Reiniciar", tint = Color.Gray, modifier = Modifier.size(12.dp)) }
-                        Text(text = formatCOP(totalProfit), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF4CAF50))
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .alpha(if(isLockedStore) 0.5f else 1f)
+                            .padding(4.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if(isLockedStore) "👑 Ganancias" else "Ganancias Obtenidas",
+                                color = Color.Gray,
+                                fontSize = 13.sp,
+                                modifier = Modifier.clickable { if (isLockedStore) showPremiumToast() else showGananciaFuturaDialog = true }
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                Icons.Filled.Refresh,
+                                contentDescription = "Reiniciar",
+                                tint = Color.Gray,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clickable { if (isLockedStore) showPremiumToast() else onResetProfitsClick() }
+                            )
+                        }
+                        Text(
+                            text = formatCOP(totalProfit),
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color(0xFF4CAF50),
+                            modifier = Modifier.clickable { if (isLockedStore) showPremiumToast() else showGananciaFuturaDialog = true }
+                        )
                     }
                 }
             }
@@ -1992,7 +2128,8 @@ fun StoreScreen(products: List<Product>, transactions: List<Transaction>, shoppi
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) { Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White); Spacer(Modifier.width(12.dp)); Column(modifier = Modifier.weight(1f)) { Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White); Text("Total: ${formatCOP(totalCart)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f)) }; Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White) } }
         }
     }
-    if (showVendidosDialog) ProductosVendidosDialog(transactions = transactions, onDismiss = { showVendidosDialog = false }, onDeleteVentas = onDeleteVentas)
+    // MODIFICADO: Se le pasan los activeFiadores
+    if (showVendidosDialog) ProductosVendidosDialog(transactions = transactions, activeFiadores = activeFiadores, onDismiss = { showVendidosDialog = false }, onDeleteVentas = onDeleteVentas)
 }
 
 @Composable
@@ -2256,7 +2393,7 @@ fun CheckoutDialog(
     totalStoreDigital: Double,
     onDismiss: () -> Unit,
     onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double, Double) -> Unit,
-    onFiarVenta: (String, Double, String) -> Unit
+    onFiarVenta: (String, Double, Double) -> Unit // MODIFICADO PARA RECIBIR CAJA Y DIGITAL
 ) {
     var step by remember { mutableStateOf(1) }
     var buyerName by remember { mutableStateOf("") }
@@ -2485,7 +2622,12 @@ fun CheckoutDialog(
                                     Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp)
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Button(onClick = { onFiarVenta(buyerName, rec, simpleMethod) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
+                                Button(onClick = {
+                                    // MODIFICADO: Pasa valores divididos
+                                    val cash = if (simpleMethod == "Efectivo") rec else 0.0
+                                    val digital = if (simpleMethod == "Digital") rec else 0.0
+                                    onFiarVenta(buyerName, cash, digital)
+                                }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
                                     Text(if (rec > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
                                 }
                             }
@@ -2536,7 +2678,10 @@ fun CheckoutDialog(
                                     Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp)
                                 }
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Button(onClick = { onFiarVenta(buyerName, receivedCOP, "Múltiple") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
+                                Button(onClick = {
+                                    // MODIFICADO: Pasa valores divididos en pago múltiple
+                                    onFiarVenta(buyerName, cV, qV)
+                                }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) {
                                     Text(if (receivedCOP > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold)
                                 }
                             }
@@ -3187,10 +3332,157 @@ fun RedWarningDialog(productName: String, qty: Int, onDismiss: () -> Unit, onCon
 }
 
 @Composable
-fun ProductosVendidosDialog(transactions: List<Transaction>, onDismiss: () -> Unit, onDeleteVentas: (List<Transaction>) -> Unit) {
-    val context = LocalContext.current; val ventas = remember(transactions) { transactions.filter { it.isIncome && it.description.startsWith("Venta:") } }; var searchQuery by remember { mutableStateOf("") }; val filteredVentas = remember(ventas, searchQuery) { ventas.filter { sale -> sale.description.contains(searchQuery, ignoreCase = true) || sale.note.contains(searchQuery, ignoreCase = true) || formatDate(sale.timestamp).contains(searchQuery, ignoreCase = true) } }; val totalMonto = remember(filteredVentas) { filteredVentas.sumOf { it.amount } }; val totalGanancia = remember(filteredVentas) { filteredVentas.sumOf { it.profit } }; var showConfirmDelete by remember { mutableStateOf(false) }
-    if (showConfirmDelete) { AlertDialog(onDismissRequest = { showConfirmDelete = false }, title = { Text("Limpiar Historial ⚠️", fontWeight = FontWeight.Bold) }, text = { Text("¿Estás seguro de que deseas borrar este historial de ventas?\n\nEsta acción eliminará permanentemente todos los registros mostrados actualmente.") }, confirmButton = { Button(onClick = { onDeleteVentas(filteredVentas); showConfirmDelete = false; onDismiss() }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))) { Text("Limpiar Todo", fontWeight = FontWeight.Bold) } }, dismissButton = { TextButton(onClick = { showConfirmDelete = false }) { Text("Cancelar") } }) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Productos Vendidos 🛍️", fontWeight = FontWeight.Bold, fontSize = 20.sp); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } }, containerColor = MaterialTheme.colorScheme.surface, text = { Column(modifier = Modifier.fillMaxSize()) { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = { if(filteredVentas.isEmpty()) { Toast.makeText(context, "No hay ventas para exportar", Toast.LENGTH_SHORT).show(); return@OutlinedButton }; val reporte = buildString { appendLine("📊 REPORTE DE VENTAS"); appendLine("Fecha de Exportación: ${formatDate(System.currentTimeMillis())}"); appendLine("--------------------------------"); filteredVentas.forEachIndexed { index, sale -> appendLine("Venta #${filteredVentas.size - index} - ${formatDateOnly(sale.timestamp)}"); appendLine(sale.note); appendLine("Total: ${formatCOP(sale.amount)} | Ganancia: ${formatCOP(sale.profit)}"); appendLine("--------------------------------") }; appendLine("TOTAL VENTAS: ${formatCOP(totalMonto)}"); appendLine("TOTAL GANANCIA: ${formatCOP(totalGanancia)}") }; val intent = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, reporte) }; context.startActivity(Intent.createChooser(intent, "Exportar Reporte")) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Icon(Icons.Filled.Share, contentDescription = "Exportar", modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Exportar", fontSize = 12.sp) }; OutlinedButton(onClick = { if(filteredVentas.isNotEmpty()) showConfirmDelete = true else Toast.makeText(context, "No hay ventas para limpiar", Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFD32F2F)), contentPadding = PaddingValues(0.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Limpiar", modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Limpiar", fontSize = 12.sp) } }; Spacer(modifier = Modifier.height(8.dp)); OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("Buscar...") }, leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Buscar") }, modifier = Modifier.fillMaxWidth().height(50.dp), singleLine = true, shape = RoundedCornerShape(12.dp)); Spacer(modifier = Modifier.height(12.dp)); if (filteredVentas.isEmpty()) { Text("No se encontraron ventas registradas.", color = Color.Gray, modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center) } else { LazyColumn(modifier = Modifier.fillMaxSize()) { itemsIndexed(filteredVentas) { index, sale -> Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))) { Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) { Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) { Text(formatDate(sale.timestamp), fontSize = 11.sp, color = Color.Gray); Text(formatCOP(sale.amount), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }; Spacer(modifier = Modifier.height(4.dp)); Text(sale.note, fontSize = 13.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.onSurface); if (sale.profit > 0) { Spacer(modifier = Modifier.height(6.dp)); Surface(color = Color(0xFFE8F5E9), shape = RoundedCornerShape(4.dp)) { Text("Ganancia: ${formatCOP(sale.profit)}", fontSize = 11.sp, color = Color(0xFF2E7D32), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontWeight = FontWeight.Bold) } } } } } } } } }, confirmButton = {} )
+fun ProductosVendidosDialog(transactions: List<Transaction>, activeFiadores: List<Fiador>, onDismiss: () -> Unit, onDeleteVentas: (List<Transaction>) -> Unit) {
+    val context = LocalContext.current
+    val ventas = remember(transactions) { transactions.filter { it.isIncome && it.description.startsWith("Venta") } }
+    var searchQuery by remember { mutableStateOf("") }
+
+    // Agrupación de Abonos e historial general
+    val processedItems = remember(ventas, searchQuery) {
+        val filteredVentas = ventas.filter { sale -> sale.description.contains(searchQuery, ignoreCase = true) || sale.note.contains(searchQuery, ignoreCase = true) || formatDate(sale.timestamp).contains(searchQuery, ignoreCase = true) }
+
+        val list = mutableListOf<Any>()
+        val fiadorGroups = mutableMapOf<String, MutableList<Transaction>>()
+
+        filteredVentas.forEach { t ->
+            val name = when {
+                t.description.startsWith("Venta: Abono inicial (") && t.description.endsWith(")") -> t.description.removePrefix("Venta: Abono inicial (").removeSuffix(")")
+                t.description.startsWith("Venta a crédito (") && t.description.endsWith(")") -> t.description.removePrefix("Venta a crédito (").removeSuffix(")")
+                t.description.startsWith("Venta: Abono de ") -> t.description.removePrefix("Venta: Abono de ")
+                else -> null
+            }
+
+            if (name != null) {
+                fiadorGroups.getOrPut(name) { mutableListOf() }.add(t)
+            } else {
+                list.add(t)
+            }
+        }
+
+        fiadorGroups.forEach { (name, txs) ->
+            list.add(Pair(name, txs.sortedByDescending { it.timestamp }))
+        }
+
+        list.sortedByDescending {
+            if (it is Transaction) it.timestamp
+            else {
+                @Suppress("UNCHECKED_CAST")
+                val pair = it as Pair<String, List<Transaction>>
+                pair.second.firstOrNull()?.timestamp ?: 0L
+            }
+        }
+    }
+
+    val totalMonto = remember(ventas) { ventas.sumOf { it.amount } }
+    val totalGanancia = remember(ventas) { ventas.sumOf { it.profit } }
+    var showConfirmDelete by remember { mutableStateOf(false) }
+
+    if (showConfirmDelete) { AlertDialog(onDismissRequest = { showConfirmDelete = false }, title = { Text("Limpiar Historial ⚠️", fontWeight = FontWeight.Bold) }, text = { Text("¿Estás seguro de que deseas borrar este historial de ventas?\n\nEsta acción eliminará permanentemente todos los registros mostrados actualmente.") }, confirmButton = { Button(onClick = { onDeleteVentas(ventas); showConfirmDelete = false; onDismiss() }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))) { Text("Limpiar Todo", fontWeight = FontWeight.Bold) } }, dismissButton = { TextButton(onClick = { showConfirmDelete = false }) { Text("Cancelar") } }) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Productos Vendidos 🛍️", fontWeight = FontWeight.Bold, fontSize = 20.sp); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = {
+            Column(modifier = Modifier.fillMaxSize()) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { if(ventas.isEmpty()) { Toast.makeText(context, "No hay ventas para exportar", Toast.LENGTH_SHORT).show(); return@OutlinedButton }; val reporte = buildString { appendLine("📊 REPORTE DE VENTAS"); appendLine("Fecha de Exportación: ${formatDate(System.currentTimeMillis())}"); appendLine("--------------------------------"); ventas.forEachIndexed { index, sale -> appendLine("Venta #${ventas.size - index} - ${formatDateOnly(sale.timestamp)}"); appendLine(sale.description); appendLine(sale.note); appendLine("Total: ${formatCOP(sale.amount)} | Ganancia: ${formatCOP(sale.profit)}"); appendLine("--------------------------------") }; appendLine("TOTAL VENTAS: ${formatCOP(totalMonto)}"); appendLine("TOTAL GANANCIA: ${formatCOP(totalGanancia)}") }; val intent = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_TEXT, reporte) }; context.startActivity(Intent.createChooser(intent, "Exportar Reporte")) }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Icon(Icons.Filled.Share, contentDescription = "Exportar", modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Exportar", fontSize = 12.sp) }
+                    OutlinedButton(onClick = { if(ventas.isNotEmpty()) showConfirmDelete = true else Toast.makeText(context, "No hay ventas para limpiar", Toast.LENGTH_SHORT).show() }, modifier = Modifier.weight(1f), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFD32F2F)), contentPadding = PaddingValues(0.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Limpiar", modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("Limpiar", fontSize = 12.sp) }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("Buscar...") }, leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Buscar") }, modifier = Modifier.fillMaxWidth().height(50.dp), singleLine = true, shape = RoundedCornerShape(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (processedItems.isEmpty()) {
+                    Text("No se encontraron ventas registradas.", color = Color.Gray, modifier = Modifier.padding(16.dp), textAlign = TextAlign.Center)
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        items(processedItems) { item ->
+                            if (item is Transaction) {
+                                val sale = item
+                                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))) {
+                                    Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
+                                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                            Text(formatDate(sale.timestamp), fontSize = 11.sp, color = Color.Gray)
+                                            Text(formatCOP(sale.amount), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(sale.note, fontSize = 13.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.onSurface)
+                                        if (sale.profit > 0) {
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            Surface(color = Color(0xFFE8F5E9), shape = RoundedCornerShape(4.dp)) { Text("Ganancia: ${formatCOP(sale.profit)}", fontSize = 11.sp, color = Color(0xFF2E7D32), modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontWeight = FontWeight.Bold) }
+                                        }
+                                    }
+                                }
+                            } else {
+                                @Suppress("UNCHECKED_CAST")
+                                val group = item as Pair<String, List<Transaction>>
+                                val name = group.first
+                                val txs = group.second
+                                var expanded by remember { mutableStateOf(false) }
+                                val activeFiador = activeFiadores.find { it.name == name && it.isStore }
+                                val totalAbonado = txs.sumOf { it.amount }
+                                val groupGanancia = txs.sumOf { it.profit }
+                                val latestDate = txs.firstOrNull()?.timestamp ?: 0L
+
+                                // LÓGICA DE INTERFAZ AGRUPADA (Como en el video)
+                                val isPaidComplete = activeFiador == null
+                                val badgeColor = if (isPaidComplete) Color(0xFF4CAF50) else Color.Red
+                                val statusText = if (isPaidComplete) "Pago completo ✅" else "Falta por pagar: ${formatCOP(activeFiador!!.amount - activeFiador.paidAmount)}"
+
+                                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { expanded = !expanded }, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))) {
+                                    Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
+                                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                            Text(formatDate(latestDate), fontSize = 11.sp, color = Color.Gray)
+                                            Text(formatCOP(totalAbonado), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("Abonos de $name", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                                Text(statusText, fontSize = 13.sp, color = badgeColor, fontWeight = FontWeight.Bold)
+                                            }
+                                            Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, tint = Color.Gray)
+                                        }
+
+                                        if (groupGanancia > 0) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Surface(
+                                                color = Color.Transparent,
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4CAF50))
+                                            ) {
+                                                Text("Ganancia Obtenida: ${formatCOP(groupGanancia)}", fontSize = 12.sp, color = Color(0xFF4CAF50), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+
+                                        AnimatedVisibility(visible = expanded) {
+                                            Column(modifier = Modifier.padding(top = 12.dp)) {
+                                                Divider(color = Color.Gray.copy(alpha = 0.2f))
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Text("Detalle de movimientos:", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.Bold)
+                                                txs.forEach { tx ->
+                                                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                                            Text(formatDate(tx.timestamp), fontSize = 10.sp, color = Color.Gray)
+                                                            Text(tx.description, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                                            if (tx.note.isNotBlank()) Text(tx.note, fontSize = 12.sp)
+                                                        }
+                                                        Text(formatCOP(tx.amount), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {}
+    )
 }
 
 @Composable
@@ -3285,13 +3577,13 @@ fun FiadorDialog(
     initialFiador: Fiador? = null,
     initialName: String = "",
     initialCart: List<Pair<Product, Int>> = emptyList(),
-    initialPaidAmount: Double = 0.0,
-    initialMethod: String = "Efectivo",
+    initialCash: Double = 0.0, // MODIFICADO
+    initialDigital: Double = 0.0, // MODIFICADO
     products: List<Product>,
     preselectedDate: Long? = null,
-    isStore: Boolean, // --- NUEVO: Sabe en qué pestaña se encuentra
+    isStore: Boolean,
     onDismiss: () -> Unit,
-    onConfirmNew: (String, String, List<Pair<Product, Int>>, Double, Long, Double, String) -> Unit, // --- MODIFICADO: Agrega un Double extra para el monto personal
+    onConfirmNew: (String, String, List<Pair<Product, Int>>, Double, Long, Double, Double) -> Unit, // MODIFICADO
     onConfirmEdit: (Fiador, Long) -> Unit,
     onConfirmAbono: (Fiador, Double, String) -> Unit
 ) {
@@ -3304,13 +3596,20 @@ fun FiadorDialog(
 
     val cartItems = remember { mutableStateListOf<Pair<Product, Int>>().apply { if (initialFiador == null) addAll(initialCart) } }
 
-    // --- NUEVO: Estado para el monto del préstamo personal ---
     var personalDebtAmountRaw by remember { mutableStateOf("") }
 
     var expandedProduct by remember { mutableStateOf(false) }
     var selectedProduct by remember { mutableStateOf<Product?>(null) }
     var qtyRaw by remember { mutableStateOf("1") }
     val calendar = remember { Calendar.getInstance().apply { timeInMillis = initialFiador?.targetDateInMillis ?: preselectedDate ?: System.currentTimeMillis() } }
+
+    // NUEVO: Cálculos para el historial inicial
+    val initialPaidAmount = initialCash + initialDigital
+    val initialMethod = when {
+        initialCash > 0 && initialDigital == 0.0 -> "Efectivo"
+        initialDigital > 0 && initialCash == 0.0 -> "Digital"
+        else -> "Múltiple"
+    }
 
     var showDatePicker by remember { mutableStateOf(false) }
     if (showDatePicker) {
@@ -3427,7 +3726,6 @@ fun FiadorDialog(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     if (initialFiador == null) {
-                        // --- MODIFICADO: Solo muestra productos si es en modo "Tienda" ---
                         if (isStore) {
                             if (initialCart.isEmpty()) {
                                 Text("Productos a fiar:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -3484,7 +3782,6 @@ fun FiadorDialog(
                                 }
                             }
                         } else {
-                            // --- NUEVO: Interfaz para modo "Personal" (Monto crudo sin productos) ---
                             Text("Monto de la deuda:", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedTextField(
@@ -3577,7 +3874,8 @@ fun FiadorDialog(
                             onConfirmEdit(initialFiador.copy(name = name, phone = phone), localCal.timeInMillis)
                         } else {
                             val pAmount = personalDebtAmountRaw.toDoubleOrNull() ?: 0.0
-                            onConfirmNew(name, phone, cartItems.toList(), pAmount, localCal.timeInMillis, initialPaidAmount, initialMethod)
+                            // MODIFICADO: Pasa los montos divididos
+                            onConfirmNew(name, phone, cartItems.toList(), pAmount, localCal.timeInMillis, initialCash, initialDigital)
                         }
                     }
                 }) { Text(if (activeScreen == "EDIT_TIME") "Guardar" else "Aceptar") }
@@ -3712,25 +4010,51 @@ fun ChatDialog(currentUserEmail: String, targetClientEmail: String, isAdmin: Boo
 }
 
 @Composable
-fun PlanCardInfo(title: String, subtitle: String, features: List<String>, restrictions: List<String>) {
-    Card(modifier = Modifier.width(280.dp).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.6f))) {
-        Column(modifier = Modifier.padding(16.dp)) {
+fun PlanCardInfo(
+    title: String,
+    subtitle: String,
+    features: List<String>,
+    restrictions: List<String>,
+    isGold: Boolean = false // <-- NUEVO: Parámetro para saber si es el plan GOLD
+) {
+    Card(
+        modifier = Modifier.width(280.dp).fillMaxHeight(),
+        // MODIFICADO: Agrega el borde dorado si es el plan GOLD
+        border = if (isGold) androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFFFD700)) else null,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.6f))
+    ) {
+        Column(modifier = Modifier.padding(16.dp).fillMaxHeight()) {
             Text(title, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = MaterialTheme.colorScheme.primary)
             Text(subtitle, fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 12.dp))
-            features.forEach { feature ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-                    Icon(Icons.Filled.Check, contentDescription = "Permitido", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(feature, fontSize = 13.sp)
+
+            // Características Permitidas
+            Column(modifier = Modifier.weight(1f)) {
+                features.forEach { feature ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                        Icon(Icons.Filled.Check, contentDescription = "Permitido", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(feature, fontSize = 13.sp)
+                    }
+                }
+                if (restrictions.isNotEmpty()) { Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha=0.2f)) }
+
+                // Restricciones
+                restrictions.forEach { restriction ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp).alpha(0.5f)) {
+                        Icon(Icons.Filled.Close, contentDescription = "No Permitido", tint = Color.Red, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(restriction, fontSize = 13.sp, textDecoration = TextDecoration.LineThrough)
+                    }
                 }
             }
-            if (restrictions.isNotEmpty()) { Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color.Gray.copy(alpha=0.2f)) }
-            restrictions.forEach { restriction ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp).alpha(0.5f)) {
-                    Icon(Icons.Filled.Close, contentDescription = "No Permitido", tint = Color.Red, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(restriction, fontSize = 13.sp, textDecoration = TextDecoration.LineThrough)
-                }
+
+            // NUEVO: Botón de Compra Atractivo
+            Button(
+                onClick = { /* Acción para contactar al admin/comprar */ },
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
+            ) {
+                Text("¡Adquiérelo Ahora!", fontWeight = FontWeight.Bold)
             }
         }
     }
