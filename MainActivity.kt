@@ -572,7 +572,10 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         viewModelScope.launch {
             val reminderId = dao.insertReminder(Reminder(title = title, amount = amount, targetDateInMillis = dateInMillis, isStore = isStore)).toInt()
             val amountStr = amount.toLong().toString()
-            val voiceText = if (amount > 0) "Debes pagar $amountStr pesos de $title" else "Debes pagar $title"
+
+            // LÓGICA DE VOZ ACTUALIZADA
+            val voiceText = if (amount > 0) "Debes pagar tu deuda de $amountStr pesos a $title" else "Debes pagar a $title"
+
             val textMsg = if (amount > 0) "$title: ${formatCOP(amount)}" else title
             val success = scheduleNotification(context, dateInMillis, "¡Hora de Pagar! ⏰", textMsg, reminderId, "ALARM_TRIGGER", voiceText)
             if (success) onConfigured("Alarma programada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}")
@@ -585,7 +588,10 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         viewModelScope.launch {
             dao.updateReminder(reminder)
             val amountStr = reminder.amount.toLong().toString()
-            val voiceText = if (reminder.amount > 0) "Debes pagar $amountStr pesos de ${reminder.title}" else "Debes pagar ${reminder.title}"
+
+            // LÓGICA DE VOZ ACTUALIZADA
+            val voiceText = if (reminder.amount > 0) "Debes pagar tu deuda de $amountStr pesos a ${reminder.title}" else "Debes pagar a ${reminder.title}"
+
             val textMsg = if (reminder.amount > 0) "${reminder.title}: ${formatCOP(reminder.amount)}" else reminder.title
             val success = scheduleNotification(context, reminder.targetDateInMillis, "¡Hora de Pagar! ⏰", textMsg, reminder.id, "ALARM_TRIGGER", voiceText)
             if (success) onConfigured("Alarma actualizada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(reminder.targetDateInMillis))}")
@@ -610,6 +616,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     }
 
     // --- MODIFICADO: Agregado parámetro 'personalDebtAmount' ---
+    // --- MODIFICADO: Agregado parámetro 'personalDebtAmount' e Historial Permanente de Productos ---
     fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, personalDebtAmount: Double, dateInMillis: Long, initialCash: Double = 0.0, initialDigital: Double = 0.0, isStore: Boolean, context: Context, onConfigured: (String) -> Unit) {
         viewModelScope.launch {
             val totalAmount = if (isStore) cartItems.sumOf { it.first.price * it.second } else personalDebtAmount
@@ -639,14 +646,25 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 digitalProfit = totalProfitGenerated * (initialDigital / initialPaidAmount)
             }
 
+            // NUEVO: Guardar los productos en la nota para el historial permanentemente
+            val itemsNote = if (isStore && cartItems.isNotEmpty()) "Productos: $reason" else ""
+
             if (initialCash > 0) {
                 val desc = if (isStore) "Venta: Abono inicial ($name)" else "Ingreso: Abono inicial ($name)"
-                dao.insertTransaction(Transaction(description = desc, amount = initialCash, isIncome = true, note = "Abono inicial en Efectivo", cashAmount = initialCash, digitalAmount = 0.0, profit = cashProfit))
+                val finalNote = if (itemsNote.isNotEmpty()) "Abono inicial en Efectivo\n$itemsNote" else "Abono inicial en Efectivo"
+                dao.insertTransaction(Transaction(description = desc, amount = initialCash, isIncome = true, note = finalNote, cashAmount = initialCash, digitalAmount = 0.0, profit = cashProfit))
             }
 
             if (initialDigital > 0) {
                 val desc = if (isStore) "Venta: Abono inicial ($name)" else "Ingreso: Abono inicial ($name)"
-                dao.insertTransaction(Transaction(description = desc, amount = initialDigital, isIncome = true, note = "Abono inicial en Digital", cashAmount = 0.0, digitalAmount = initialDigital, profit = digitalProfit))
+                val finalNote = if (itemsNote.isNotEmpty()) "Abono inicial en Digital\n$itemsNote" else "Abono inicial en Digital"
+                dao.insertTransaction(Transaction(description = desc, amount = initialDigital, isIncome = true, note = finalNote, cashAmount = 0.0, digitalAmount = initialDigital, profit = digitalProfit))
+            }
+
+            if (initialCash == 0.0 && initialDigital == 0.0) {
+                val desc = if (isStore) "Venta a crédito ($name)" else "Ingreso a crédito ($name)"
+                val finalNote = if (itemsNote.isNotEmpty()) "Venta fiada sin abono inicial\n$itemsNote" else "Venta fiada sin abono inicial"
+                dao.insertTransaction(Transaction(description = desc, amount = 0.0, isIncome = true, note = finalNote, cashAmount = 0.0, digitalAmount = 0.0, profit = 0.0))
             }
 
             if (isStore) {
