@@ -1,6 +1,9 @@
 package com.xxcamixx.contabilidad
 
 // --- Importaciones Base ---
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import android.speech.tts.TextToSpeech
 import android.Manifest
 import android.annotation.SuppressLint
@@ -204,13 +207,26 @@ class CloudSyncWorker(appContext: Context, workerParams: WorkerParameters) : Cor
         val userId = inputData.getString("USER_ID") ?: return Result.failure()
         val db = AppDatabase.getDatabase(applicationContext, userId).financeDao()
         return try {
-            val transactions = db.getAllTransactions().firstOrNull() ?: emptyList(); val reminders = db.getAllReminders().firstOrNull() ?: emptyList(); val fiadores = db.getAllFiadores().firstOrNull() ?: emptyList(); val products = db.getAllProducts().firstOrNull() ?: emptyList()
-            val newData = BackupData(transactions, reminders, fiadores, products); val timeString = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
+            val transactions = db.getBackupTransactions()
+            val reminders = db.getBackupReminders()
+            val fiadores = db.getBackupFiadores()
+            val products = db.getBackupProducts()
+
+            val newData = BackupData(transactions, reminders, fiadores, products)
+            val timeString = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
             val newRecord = BackupRecord(UUID.randomUUID().toString(), "Automático - $timeString", System.currentTimeMillis(), newData)
-            val remotePayload = RetrofitInstance.api.getBackup(userId); val existingBackups = mutableListOf<BackupRecord>()
-            if (remotePayload != null) { if (remotePayload.backups != null) { existingBackups.addAll(remotePayload.backups) } else if (remotePayload.transactions != null) { existingBackups.add(BackupRecord("old", "Respaldo Antiguo", 0L, BackupData(remotePayload.transactions, remotePayload.reminders ?: emptyList(), remotePayload.fiadores ?: emptyList(), remotePayload.products ?: emptyList()))) } }
+
+            val remotePayload = RetrofitInstance.api.getBackup(userId)
+            val existingBackups = mutableListOf<BackupRecord>()
+
+            if (remotePayload != null) {
+                if (remotePayload.backups != null) { existingBackups.addAll(remotePayload.backups) }
+                else if (remotePayload.transactions != null) { existingBackups.add(BackupRecord("old", "Respaldo Antiguo", 0L, BackupData(remotePayload.transactions, remotePayload.reminders ?: emptyList(), remotePayload.fiadores ?: emptyList(), remotePayload.products ?: emptyList()))) }
+            }
+
             existingBackups.add(0, newRecord)
             if (existingBackups.size > 15) { existingBackups.removeAt(existingBackups.size - 1) }
+
             RetrofitInstance.api.uploadBackup(userId, CloudPayload(backups = existingBackups))
             applicationContext.getSharedPreferences("FinancePrefs_$userId", Context.MODE_PRIVATE).edit().putLong("lastSync", System.currentTimeMillis()).apply()
             Result.success()
@@ -349,7 +365,8 @@ data class Transaction(
     val timestamp: Long = System.currentTimeMillis(),
     val profit: Double = 0.0,
     val cashAmount: Double = 0.0,
-    val digitalAmount: Double = 0.0
+    val digitalAmount: Double = 0.0,
+    val country: String = "Colombia" // <-- AGREGADO
 )
 
 @Entity(tableName = "reminders")
@@ -358,7 +375,8 @@ data class Reminder(
     val title: String,
     val amount: Double = 0.0,
     val targetDateInMillis: Long,
-    val isStore: Boolean = false
+    val isStore: Boolean = false,
+    val country: String = "Colombia" // <-- AGREGADO
 )
 
 @Entity(tableName = "fiadores")
@@ -372,38 +390,69 @@ data class Fiador(
     val paidAmount: Double = 0.0,
     val paymentHistory: String = "",
     val isStore: Boolean = true,
-    val totalCost: Double = 0.0 // <-- NUEVO: Guarda el costo para calcular ganancias progresivas
+    val totalCost: Double = 0.0,
+    val country: String = "Colombia" // <-- AGREGADO
 )
 
 @Entity(tableName = "products")
-data class Product(@PrimaryKey(autoGenerate = true) val id: Int = 0, val name: String, val purchasePrice: Double = 0.0, val price: Double, val stock: Int, val unit: String = "Uds", val expirationDateInMillis: Long? = null, val entryDateInMillis: Long = System.currentTimeMillis(), val minStock: Int = 0, val imageUri: String? = null)
+data class Product(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val name: String,
+    val purchasePrice: Double = 0.0,
+    val price: Double,
+    val stock: Int,
+    val unit: String = "Uds",
+    val expirationDateInMillis: Long? = null,
+    val entryDateInMillis: Long = System.currentTimeMillis(),
+    val minStock: Int = 0,
+    val imageUri: String? = null,
+    val country: String = "Colombia" // <-- AGREGADO
+)
 
 @Dao
 interface FinanceDao {
-    @Query("SELECT * FROM transactions ORDER BY timestamp DESC") fun getAllTransactions(): Flow<List<Transaction>>
+    @Query("SELECT * FROM transactions WHERE country = :country ORDER BY timestamp DESC")
+    fun getAllTransactions(country: String): Flow<List<Transaction>>
+
     @Insert suspend fun insertTransaction(transaction: Transaction)
     @Delete suspend fun deleteTransaction(transaction: Transaction)
     @Query("DELETE FROM transactions") suspend fun deleteAllTransactions()
-    @Query("DELETE FROM transactions WHERE description NOT LIKE 'Venta: %'") suspend fun deletePersonalTransactions()
-    @Query("UPDATE transactions SET profit = 0.0, cashAmount = 0.0, digitalAmount = 0.0") suspend fun resetAllProfits()
 
-    @Query("SELECT * FROM reminders ORDER BY targetDateInMillis ASC") fun getAllReminders(): Flow<List<Reminder>>
+    @Query("DELETE FROM transactions WHERE description NOT LIKE 'Venta: %' AND country = :country")
+    suspend fun deletePersonalTransactions(country: String)
+
+    @Query("UPDATE transactions SET profit = 0.0, cashAmount = 0.0, digitalAmount = 0.0 WHERE country = :country")
+    suspend fun resetAllProfits(country: String)
+
+    @Query("SELECT * FROM reminders WHERE country = :country ORDER BY targetDateInMillis ASC")
+    fun getAllReminders(country: String): Flow<List<Reminder>>
+
     @Insert suspend fun insertReminder(reminder: Reminder): Long
     @Update suspend fun updateReminder(reminder: Reminder)
     @Delete suspend fun deleteReminder(reminder: Reminder)
     @Query("DELETE FROM reminders") suspend fun deleteAllReminders()
 
-    @Query("SELECT * FROM fiadores ORDER BY targetDateInMillis ASC") fun getAllFiadores(): Flow<List<Fiador>>
+    @Query("SELECT * FROM fiadores WHERE country = :country ORDER BY targetDateInMillis ASC")
+    fun getAllFiadores(country: String): Flow<List<Fiador>>
+
     @Insert suspend fun insertFiador(fiador: Fiador): Long
     @Update suspend fun updateFiador(fiador: Fiador)
     @Delete suspend fun deleteFiador(fiador: Fiador)
     @Query("DELETE FROM fiadores") suspend fun deleteAllFiadores()
 
-    @Query("SELECT * FROM products ORDER BY name ASC") fun getAllProducts(): Flow<List<Product>>
+    @Query("SELECT * FROM products WHERE country = :country ORDER BY name ASC")
+    fun getAllProducts(country: String): Flow<List<Product>>
+
     @Insert suspend fun insertProduct(product: Product): Long
     @Update suspend fun updateProduct(product: Product)
     @Delete suspend fun deleteProduct(product: Product)
     @Query("DELETE FROM products") suspend fun deleteAllProducts()
+
+    // --- NUEVO: Métodos exclusivos para Backups en la nube (Obtienen datos de TODOS los países) ---
+    @Query("SELECT * FROM transactions ORDER BY timestamp DESC") suspend fun getBackupTransactions(): List<Transaction>
+    @Query("SELECT * FROM reminders ORDER BY targetDateInMillis ASC") suspend fun getBackupReminders(): List<Reminder>
+    @Query("SELECT * FROM fiadores ORDER BY targetDateInMillis ASC") suspend fun getBackupFiadores(): List<Fiador>
+    @Query("SELECT * FROM products ORDER BY name ASC") suspend fun getBackupProducts(): List<Product>
 }
 
 val MIGRATION_4_5 = object : Migration(4, 5) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `products` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `price` REAL NOT NULL, `stock` INTEGER NOT NULL, `expirationDateInMillis` INTEGER)") } }
@@ -418,8 +467,16 @@ val MIGRATION_12_13 = object : Migration(12, 13) { override fun migrate(db: Supp
 val MIGRATION_13_14 = object : Migration(13, 14) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `reminders` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 0"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 1") } }
 val MIGRATION_14_15 = object : Migration(14, 15) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `reminders` ADD COLUMN `amount` REAL NOT NULL DEFAULT 0.0") } }
 val MIGRATION_15_16 = object : Migration(15, 16) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `totalCost` REAL NOT NULL DEFAULT 0.0") } }
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `transactions` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'")
+        db.execSQL("ALTER TABLE `reminders` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'")
+        db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'")
+        db.execSQL("ALTER TABLE `products` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'")
+    }
+}
 
-@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 16, exportSchema = false)
+@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 17, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun financeDao(): FinanceDao
     companion object {
@@ -428,7 +485,7 @@ abstract class AppDatabase : RoomDatabase() {
             return INSTANCES[userId] ?: synchronized(this) {
                 val dbName = "finance_database_$userId"
                 val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, dbName)
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
                     .build()
                 INSTANCES[userId] = instance
                 instance
@@ -440,22 +497,33 @@ abstract class AppDatabase : RoomDatabase() {
 // ==========================================
 // 3. VIEWMODEL Y LÓGICA
 // ==========================================
+// ==========================================
+// 3. VIEWMODEL Y LÓGICA
+// ==========================================
 class FinanceViewModel(application: Application, val userId: String) : AndroidViewModel(application) {
     private val dao = AppDatabase.getDatabase(application, userId).financeDao()
     private val userPrefs = application.getSharedPreferences("FinancePrefs_$userId", Context.MODE_PRIVATE)
 
-    val transactions: Flow<List<Transaction>> = dao.getAllTransactions()
-    val reminders: Flow<List<Reminder>> = dao.getAllReminders()
-    val fiadores: Flow<List<Fiador>> = dao.getAllFiadores()
-    val products: Flow<List<Product>> = dao.getAllProducts()
+    private val _selectedCountryFlow = MutableStateFlow(userPrefs.getString("selectedCountry", "Colombia") ?: "Colombia")
 
-    // --- NUEVAS VARIABLES DE MONEDA ---
-    var selectedCountry by mutableStateOf(userPrefs.getString("selectedCountry", "Colombia") ?: "Colombia")
+    var selectedCountry by mutableStateOf(_selectedCountryFlow.value)
         private set
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val transactions: Flow<List<Transaction>> = _selectedCountryFlow.flatMapLatest { dao.getAllTransactions(it) }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val reminders: Flow<List<Reminder>> = _selectedCountryFlow.flatMapLatest { dao.getAllReminders(it) }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val fiadores: Flow<List<Fiador>> = _selectedCountryFlow.flatMapLatest { dao.getAllFiadores(it) }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val products: Flow<List<Product>> = _selectedCountryFlow.flatMapLatest { dao.getAllProducts(it) }
+
     var bcvRate by mutableStateOf(userPrefs.getFloat("bcvRate", 0f).toDouble())
         private set
 
-    // ... (Mantén tus otras variables intactas: minBalanceThreshold, personalSoundUri, isSyncing, etc) ...
     var minBalanceThreshold by mutableStateOf(userPrefs.getFloat("minBalance", 0f).toDouble()); private set
     var personalSoundUri by mutableStateOf(userPrefs.getString("personalSoundUri", "")); private set
     var storeSoundUri by mutableStateOf(userPrefs.getString("storeSoundUri", "")); private set
@@ -463,21 +531,24 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     var isVoiceAssistantEnabled by mutableStateOf(userPrefs.getBoolean("voiceEnabled", false)); private set
 
     var isSyncing by mutableStateOf(false); private set
+    var syncMessage by mutableStateOf(""); private set // <-- NUEVO: Para enviar mensajes a la pantalla
     var lastSyncDate by mutableStateOf(userPrefs.getLong("lastSync", 0L)); private set
     var autoSyncFrequency by mutableStateOf(userPrefs.getInt("syncFrequency", 0)); private set
     var autoSyncHour by mutableStateOf(userPrefs.getInt("syncHour", 2)); private set
     var autoSyncMinute by mutableStateOf(userPrefs.getInt("syncMinute", 0)); private set
-    var pocketDebt by mutableStateOf(userPrefs.getFloat("pocketDebt", 0f).toDouble()); private set
+
+    var pocketDebt by mutableStateOf(userPrefs.getFloat("pocketDebt_${_selectedCountryFlow.value}", if (_selectedCountryFlow.value == "Colombia") userPrefs.getFloat("pocketDebt", 0f) else 0f).toDouble()); private set
 
     init {
         scheduleAutoSync(application, autoSyncFrequency, autoSyncHour, autoSyncMinute)
         if (selectedCountry == "Venezuela") fetchBcvRate()
     }
 
-    // --- NUEVAS FUNCIONES DE MONEDA ---
     fun updateCountry(country: String) {
         selectedCountry = country
+        _selectedCountryFlow.value = country
         userPrefs.edit().putString("selectedCountry", country).apply()
+        pocketDebt = userPrefs.getFloat("pocketDebt_$country", if (country == "Colombia") userPrefs.getFloat("pocketDebt", 0f) else 0f).toDouble()
         if (country == "Venezuela") fetchBcvRate()
     }
 
@@ -490,15 +561,11 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     userPrefs.edit().putFloat("bcvRate", response.tasa.toFloat()).apply()
                 }
             } catch (e: Exception) {
-                // Falla silenciosa si no hay internet, usará la última guardada
             }
         }
     }
 
-    // ... (Mantén el resto de funciones del ViewModel intactas) ...
-
     fun updateMinBalance(amount: Double) { minBalanceThreshold = amount; userPrefs.edit().putFloat("minBalance", amount.toFloat()).apply() }
-
     fun updatePersonalSoundPreference(uri: String, context: Context) { personalSoundUri = uri; userPrefs.edit().putString("personalSoundUri", uri).apply(); AppSounds.play(context, uri) }
     fun updateStoreSoundPreference(uri: String, context: Context) { storeSoundUri = uri; userPrefs.edit().putString("storeSoundUri", uri).apply(); AppSounds.play(context, uri) }
     fun updateTouchSoundPreference(uri: String, context: Context) { touchSoundUri = uri; userPrefs.edit().putString("touchSoundUri", uri).apply(); AppSounds.play(context, uri) }
@@ -507,7 +574,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     fun addPocketDebt(amount: Double) {
         val newDebt = pocketDebt + amount
         pocketDebt = newDebt
-        userPrefs.edit().putFloat("pocketDebt", newDebt.toFloat()).apply()
+        userPrefs.edit().putFloat("pocketDebt_$selectedCountry", newDebt.toFloat()).apply()
     }
 
     fun reimbursePocketDebt(amount: Double) {
@@ -515,9 +582,9 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val newDebt = pocketDebt - amount
             if (newDebt >= 0) {
                 pocketDebt = newDebt
-                userPrefs.edit().putFloat("pocketDebt", newDebt.toFloat()).apply()
+                userPrefs.edit().putFloat("pocketDebt_$selectedCountry", newDebt.toFloat()).apply()
                 dao.insertTransaction(
-                    Transaction(description = "Venta: Reembolso a Bolsillo", amount = 0.0, isIncome = true, note = "Vuelto devuelto de la caja al bolsillo personal", profit = 0.0, cashAmount = -amount, digitalAmount = 0.0)
+                    Transaction(description = "Venta: Reembolso a Bolsillo", amount = 0.0, isIncome = true, note = "Vuelto devuelto de la caja al bolsillo personal", profit = 0.0, cashAmount = -amount, digitalAmount = 0.0, country = selectedCountry)
                 )
             }
         }
@@ -543,10 +610,11 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     }
 
     fun manualBackup(backupName: String, onResult: (String) -> Unit) {
+        isSyncing = true
+        syncMessage = "Guardando tus cuentas actuales..."
         viewModelScope.launch(Dispatchers.IO) {
-            isSyncing = true
             try {
-                val currentData = BackupData(transactions.firstOrNull() ?: emptyList(), reminders.firstOrNull() ?: emptyList(), fiadores.firstOrNull() ?: emptyList(), products.firstOrNull() ?: emptyList())
+                val currentData = BackupData(dao.getBackupTransactions(), dao.getBackupReminders(), dao.getBackupFiadores(), dao.getBackupProducts())
                 val newRecord = BackupRecord(UUID.randomUUID().toString(), backupName, System.currentTimeMillis(), currentData)
                 val remotePayload = RetrofitInstance.api.getBackup(userId)
                 val existingBackups = mutableListOf<BackupRecord>()
@@ -559,8 +627,8 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 RetrofitInstance.api.uploadBackup(userId, CloudPayload(backups = existingBackups))
                 val now = System.currentTimeMillis()
                 userPrefs.edit().putLong("lastSync", now).apply()
-                launch(Dispatchers.Main) { lastSyncDate = now; onResult("¡Respaldo '$backupName' guardado! ☁️✅"); isSyncing = false }
-            } catch (e: Exception) { launch(Dispatchers.Main) { onResult("Error al subir el respaldo: ${e.message}"); isSyncing = false } }
+                launch(Dispatchers.Main) { lastSyncDate = now; onResult("¡Respaldo '$backupName' guardado! ☁️✅"); isSyncing = false; syncMessage = "" }
+            } catch (e: Exception) { launch(Dispatchers.Main) { onResult("Error al subir el respaldo: ${e.message}"); isSyncing = false; syncMessage = "" } }
         }
     }
 
@@ -592,16 +660,17 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     }
 
     fun restoreFromRecord(record: BackupRecord, onResult: (String) -> Unit) {
+        isSyncing = true
+        syncMessage = "Restaurando tu cuenta guardada..."
         viewModelScope.launch(Dispatchers.IO) {
-            isSyncing = true
             try {
                 dao.deleteAllTransactions(); dao.deleteAllReminders(); dao.deleteAllFiadores(); dao.deleteAllProducts()
-                record.data.transactions.forEach { dao.insertTransaction(it.copy(id = 0)) }
-                record.data.reminders.forEach { dao.insertReminder(it.copy(id = 0)) }
-                record.data.fiadores.forEach { dao.insertFiador(it.copy(id = 0)) }
-                record.data.products.forEach { dao.insertProduct(it.copy(id = 0)) }
-                launch(Dispatchers.Main) { onResult("¡Respaldo '${record.name}' restaurado! ☁️📥"); isSyncing = false }
-            } catch (_: Exception) { launch(Dispatchers.Main) { onResult("Error al restaurar los datos."); isSyncing = false } }
+                record.data.transactions.forEach { val safeCountry = (it.country as String?) ?: "Colombia"; dao.insertTransaction(it.copy(id = 0, country = safeCountry)) }
+                record.data.reminders.forEach { val safeCountry = (it.country as String?) ?: "Colombia"; dao.insertReminder(it.copy(id = 0, country = safeCountry)) }
+                record.data.fiadores.forEach { val safeCountry = (it.country as String?) ?: "Colombia"; dao.insertFiador(it.copy(id = 0, country = safeCountry)) }
+                record.data.products.forEach { val safeCountry = (it.country as String?) ?: "Colombia"; dao.insertProduct(it.copy(id = 0, country = safeCountry)) }
+                launch(Dispatchers.Main) { onResult("¡Respaldo '${record.name}' restaurado! ☁️📥"); isSyncing = false; syncMessage = "" }
+            } catch (_: Exception) { launch(Dispatchers.Main) { onResult("Error al restaurar los datos."); isSyncing = false; syncMessage = "" } }
         }
     }
 
@@ -609,18 +678,18 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         viewModelScope.launch {
             val cash = if (method == "Efectivo") amount else 0.0
             val digital = if (method == "Digital") amount else 0.0
-            dao.insertTransaction(Transaction(description = description, amount = amount, isIncome = isIncome, note = note, cashAmount = cash, digitalAmount = digital))
+            dao.insertTransaction(Transaction(description = description, amount = amount, isIncome = isIncome, note = note, cashAmount = cash, digitalAmount = digital, country = selectedCountry))
         }
         AppSounds.play(getApplication<Application>(), touchSoundUri)
     }
 
-    fun insertRawTransaction(transaction: Transaction) { viewModelScope.launch { dao.insertTransaction(transaction.copy(id = 0)) } }
+    fun insertRawTransaction(transaction: Transaction) { viewModelScope.launch { val safeCountry = (transaction.country as String?) ?: selectedCountry; dao.insertTransaction(transaction.copy(id = 0, country = safeCountry)) } }
     fun deleteTransaction(transaction: Transaction) { viewModelScope.launch { dao.deleteTransaction(transaction) }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
     fun deleteTransactionsList(list: List<Transaction>) { viewModelScope.launch { list.forEach { dao.deleteTransaction(it) } }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
-    fun deletePersonalTransactions() { viewModelScope.launch { dao.deletePersonalTransactions() } }
-    fun resetAllProfits() { viewModelScope.launch { dao.resetAllProfits() }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
+    fun deletePersonalTransactions() { viewModelScope.launch { dao.deletePersonalTransactions(selectedCountry) } }
+    fun resetAllProfits() { viewModelScope.launch { dao.resetAllProfits(selectedCountry) }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
 
-    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(context, touchSoundUri) }
+    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri, country = selectedCountry)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(context, touchSoundUri) }
     fun editProduct(product: Product, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateProduct(product); cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER"); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto actualizado") }; AppSounds.play(context, touchSoundUri) }
     fun deleteProductEntirely(product: Product, context: Context) { viewModelScope.launch { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") }; AppSounds.play(context, touchSoundUri) }
 
@@ -629,22 +698,29 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             var totalSaleCOP = 0.0; var totalProfitCOP = 0.0; val itemNames = mutableListOf<String>()
             cartItems.forEach { (product, qty) -> val newStock = product.stock - qty; dao.updateProduct(product.copy(stock = newStock)); totalSaleCOP += (product.price * qty); totalProfitCOP += ((product.price - product.purchasePrice) * qty); itemNames.add("${qty}${product.unit} ${product.name}"); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") }
             val finalNote = buildString { if (buyerName.isNotBlank()) append("Cliente: $buyerName\n"); append("$paymentSummary\n"); append("Items: ${itemNames.joinToString(", ")}") }; val desc = if (cartItems.size == 1) "Venta: ${cartItems.first().first.name}" else "Venta: Varios Productos"
-            dao.insertTransaction(Transaction(description = desc, amount = totalSaleCOP, isIncome = true, note = finalNote, profit = totalProfitCOP, cashAmount = netCash, digitalAmount = netDigital)); onSold("Venta registrada exitosamente"); AppSounds.play(context, touchSoundUri)
+            dao.insertTransaction(Transaction(description = desc, amount = totalSaleCOP, isIncome = true, note = finalNote, profit = totalProfitCOP, cashAmount = netCash, digitalAmount = netDigital, country = selectedCountry)); onSold("Venta registrada exitosamente"); AppSounds.play(context, touchSoundUri)
         }
     }
 
     fun reduceProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val newStock = product.stock - qty; if (newStock <= 0) { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") } else { dao.updateProduct(product.copy(stock = newStock)); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") } }; AppSounds.play(context, touchSoundUri) }
-    fun restoreProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val currentInDb = dao.getAllProducts().firstOrNull()?.find { it.id == product.id }; if (currentInDb != null) dao.updateProduct(currentInDb.copy(stock = currentInDb.stock + qty)) else { dao.insertProduct(product); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER") } } }
 
-    // --- MODIFICADO: AddReminder ahora recibe y guarda 'amount', y pasa el texto a la voz ---
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun restoreProductStock(product: Product, qty: Int, context: Context) {
+        viewModelScope.launch {
+            val currentInDb = dao.getAllProducts(selectedCountry).firstOrNull()?.find { it.id == product.id };
+            if (currentInDb != null) dao.updateProduct(currentInDb.copy(stock = currentInDb.stock + qty))
+            else {
+                dao.insertProduct(product);
+                if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER")
+            }
+        }
+    }
+
     fun addReminder(title: String, amount: Double, dateInMillis: Long, isStore: Boolean, context: Context, onConfigured: (String) -> Unit) {
         viewModelScope.launch {
-            val reminderId = dao.insertReminder(Reminder(title = title, amount = amount, targetDateInMillis = dateInMillis, isStore = isStore)).toInt()
+            val reminderId = dao.insertReminder(Reminder(title = title, amount = amount, targetDateInMillis = dateInMillis, isStore = isStore, country = selectedCountry)).toInt()
             val amountStr = amount.toLong().toString()
-
-            // LÓGICA DE VOZ ACTUALIZADA
             val voiceText = if (amount > 0) "Debes pagar tu deuda de $amountStr pesos a $title" else "Debes pagar a $title"
-
             val textMsg = if (amount > 0) "$title: ${formatCOP(amount)}" else title
             val success = scheduleNotification(context, dateInMillis, "¡Hora de Pagar! ⏰", textMsg, reminderId, "ALARM_TRIGGER", voiceText)
             if (success) onConfigured("Alarma programada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}")
@@ -652,15 +728,11 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         AppSounds.play(context, touchSoundUri)
     }
 
-    // --- MODIFICADO: updateExistingReminder ahora pasa el texto de voz actualizado ---
     fun updateExistingReminder(reminder: Reminder, context: Context, onConfigured: (String) -> Unit) {
         viewModelScope.launch {
             dao.updateReminder(reminder)
             val amountStr = reminder.amount.toLong().toString()
-
-            // LÓGICA DE VOZ ACTUALIZADA
             val voiceText = if (reminder.amount > 0) "Debes pagar tu deuda de $amountStr pesos a ${reminder.title}" else "Debes pagar a ${reminder.title}"
-
             val textMsg = if (reminder.amount > 0) "${reminder.title}: ${formatCOP(reminder.amount)}" else reminder.title
             val success = scheduleNotification(context, reminder.targetDateInMillis, "¡Hora de Pagar! ⏰", textMsg, reminder.id, "ALARM_TRIGGER", voiceText)
             if (success) onConfigured("Alarma actualizada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(reminder.targetDateInMillis))}")
@@ -670,42 +742,31 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
     fun deleteReminder(reminder: Reminder, context: Context) { viewModelScope.launch { dao.deleteReminder(reminder); cancelAlarm(context, reminder.id, "ALARM_TRIGGER") } }
 
-    // --- NUEVO: Construye el texto fantasma para lectura fluida ---
     private fun createFiadorVoiceText(name: String, amount: Double, reason: String, isStore: Boolean): String {
         val amountStr = amount.toLong().toString()
         if (isStore) {
-            val voiceReason = reason
-                .replace("Uds ", " unidades de ")
-                .replace("Kg ", " kilos de ")
-                .replace("L ", " litros de ")
+            val voiceReason = reason.replace("Uds ", " unidades de ").replace("Kg ", " kilos de ").replace("L ", " litros de ")
             return "$name te debe $amountStr pesos, por la deuda de $voiceReason"
         } else {
             return "$name te debe $amountStr pesos"
         }
     }
 
-    // --- MODIFICADO: Agregado parámetro 'personalDebtAmount' ---
-    // --- MODIFICADO: Agregado parámetro 'personalDebtAmount' e Historial Permanente de Productos ---
     fun addFiador(name: String, phone: String, cartItems: List<Pair<Product, Int>>, personalDebtAmount: Double, dateInMillis: Long, initialCash: Double = 0.0, initialDigital: Double = 0.0, isStore: Boolean, context: Context, onConfigured: (String) -> Unit) {
         viewModelScope.launch {
             val totalAmount = if (isStore) cartItems.sumOf { it.first.price * it.second } else personalDebtAmount
-            val totalCost = if (isStore) cartItems.sumOf { it.first.purchasePrice * it.second } else 0.0 // Calculamos el costo total
+            val totalCost = if (isStore) cartItems.sumOf { it.first.purchasePrice * it.second } else 0.0
             val reason = if (isStore) cartItems.joinToString(", ") { "${it.second}${it.first.unit} ${it.first.name}" } else "Préstamo personal"
 
             val initialPaidAmount = initialCash + initialDigital
             val history = if (initialPaidAmount > 0) {
                 val dateStr = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
-                val methodStr = when {
-                    initialCash > 0 && initialDigital == 0.0 -> "Efectivo"
-                    initialDigital > 0 && initialCash == 0.0 -> "Digital"
-                    else -> "Múltiple"
-                }
+                val methodStr = when { initialCash > 0 && initialDigital == 0.0 -> "Efectivo"; initialDigital > 0 && initialCash == 0.0 -> "Digital"; else -> "Múltiple" }
                 "$dateStr: +${formatCOP(initialPaidAmount)} ($methodStr)"
             } else ""
 
-            val fiadorId = dao.insertFiador(Fiador(name = name, phone = phone, amount = totalAmount, reason = reason, targetDateInMillis = dateInMillis, paidAmount = initialPaidAmount, paymentHistory = history, isStore = isStore, totalCost = totalCost)).toInt()
+            val fiadorId = dao.insertFiador(Fiador(name = name, phone = phone, amount = totalAmount, reason = reason, targetDateInMillis = dateInMillis, paidAmount = initialPaidAmount, paymentHistory = history, isStore = isStore, totalCost = totalCost, country = selectedCountry)).toInt()
 
-            // LÓGICA DE GANANCIA PROGRESIVA: Solo hay ganancia si lo pagado supera el costo
             val totalProfitGenerated = maxOf(0.0, initialPaidAmount - totalCost)
             var cashProfit = 0.0
             var digitalProfit = 0.0
@@ -715,25 +776,24 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 digitalProfit = totalProfitGenerated * (initialDigital / initialPaidAmount)
             }
 
-            // NUEVO: Guardar los productos en la nota para el historial permanentemente
             val itemsNote = if (isStore && cartItems.isNotEmpty()) "Productos: $reason" else ""
 
             if (initialCash > 0) {
                 val desc = if (isStore) "Venta: Abono inicial ($name)" else "Ingreso: Abono inicial ($name)"
                 val finalNote = if (itemsNote.isNotEmpty()) "Abono inicial en Efectivo\n$itemsNote" else "Abono inicial en Efectivo"
-                dao.insertTransaction(Transaction(description = desc, amount = initialCash, isIncome = true, note = finalNote, cashAmount = initialCash, digitalAmount = 0.0, profit = cashProfit))
+                dao.insertTransaction(Transaction(description = desc, amount = initialCash, isIncome = true, note = finalNote, cashAmount = initialCash, digitalAmount = 0.0, profit = cashProfit, country = selectedCountry))
             }
 
             if (initialDigital > 0) {
                 val desc = if (isStore) "Venta: Abono inicial ($name)" else "Ingreso: Abono inicial ($name)"
                 val finalNote = if (itemsNote.isNotEmpty()) "Abono inicial en Digital\n$itemsNote" else "Abono inicial en Digital"
-                dao.insertTransaction(Transaction(description = desc, amount = initialDigital, isIncome = true, note = finalNote, cashAmount = 0.0, digitalAmount = initialDigital, profit = digitalProfit))
+                dao.insertTransaction(Transaction(description = desc, amount = initialDigital, isIncome = true, note = finalNote, cashAmount = 0.0, digitalAmount = initialDigital, profit = digitalProfit, country = selectedCountry))
             }
 
             if (initialCash == 0.0 && initialDigital == 0.0) {
                 val desc = if (isStore) "Venta a crédito ($name)" else "Ingreso a crédito ($name)"
                 val finalNote = if (itemsNote.isNotEmpty()) "Venta fiada sin abono inicial\n$itemsNote" else "Venta fiada sin abono inicial"
-                dao.insertTransaction(Transaction(description = desc, amount = 0.0, isIncome = true, note = finalNote, cashAmount = 0.0, digitalAmount = 0.0, profit = 0.0))
+                dao.insertTransaction(Transaction(description = desc, amount = 0.0, isIncome = true, note = finalNote, cashAmount = 0.0, digitalAmount = 0.0, profit = 0.0, country = selectedCountry))
             }
 
             if (isStore) {
@@ -775,7 +835,6 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val newPaidAmount = oldPaidAmount + abono
             val remaining = fiador.amount - newPaidAmount
 
-            // LÓGICA DE GANANCIA PROGRESIVA: Calculamos cuánta ganancia nueva generó este abono específico
             val oldProfit = maxOf(0.0, oldPaidAmount - fiador.totalCost)
             val newProfit = maxOf(0.0, newPaidAmount - fiador.totalCost)
             val generatedProfitForThisAbono = newProfit - oldProfit
@@ -788,8 +847,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val digital = if(method == "Digital") abono else 0.0
             val desc = if (fiador.isStore) "Venta: Abono de ${fiador.name}" else "Ingreso: Abono de ${fiador.name}"
 
-            // Insertamos la transacción con la ganancia progresiva calculada
-            dao.insertTransaction(Transaction(description = desc, amount = abono, isIncome = true, note = "Abono de deuda parcial", cashAmount = cash, digitalAmount = digital, profit = generatedProfitForThisAbono))
+            dao.insertTransaction(Transaction(description = desc, amount = abono, isIncome = true, note = "Abono de deuda parcial", cashAmount = cash, digitalAmount = digital, profit = generatedProfitForThisAbono, country = selectedCountry))
 
             if (newPaidAmount >= fiador.amount) {
                 dao.deleteFiador(fiador)
@@ -797,10 +855,8 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 launch(Dispatchers.Main) { onResult("¡Deuda de ${fiador.name} saldada por completo! 🎉") }
             } else {
                 dao.updateFiador(fiador.copy(paidAmount = newPaidAmount, paymentHistory = newHistory))
-
                 val voiceText = createFiadorVoiceText(fiador.name, remaining, fiador.reason, fiador.isStore)
                 scheduleNotification(context, fiador.targetDateInMillis, "¡Cobrar a ${fiador.name}! 💰", "Monto: ${formatCOP(remaining)} - ${fiador.reason}", fiador.id + 100000, "FIADOR_TRIGGER", voiceText)
-
                 launch(Dispatchers.Main) { onResult("Abono de ${formatCOP(abono)} registrado. Resta: ${formatCOP(remaining)}") }
             }
             AppSounds.play(context, touchSoundUri)
@@ -1076,8 +1132,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var preselectedDateForEvent by remember { mutableStateOf<Long?>(null) }
     var showDayEventsDialog by remember { mutableStateOf(false) }
 
-    // Estado del nuevo menú de opciones
     var showOptionsDialog by remember { mutableStateOf(false) }
+
+    // NUEVO: Estado para sincronizar la cuenta
+    var isSyncingAccount by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         while(true) {
@@ -1324,6 +1382,38 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
                             if (isManualSyncAllowed) { DropdownMenuItem(text = { Text("☁️ Sincronización Nube") }, onClick = { showCloudSyncDialog = true; showMenu = false }) }
                             else { DropdownMenuItem(text = { Text("👑 Sincronización Nube", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }, onClick = { showPremiumToastMsg(context); showMenu = false }) }
+
+                            // NUEVO BOTÓN: Sincronizar Cuenta
+                            DropdownMenuItem(text = { Text("🔄 Sincronizar Cuenta") }, onClick = {
+                                showMenu = false
+                                isSyncingAccount = true
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        val response = RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, userName))
+                                        launch(Dispatchers.Main) {
+                                            val newRole = response.role ?: currentRole
+                                            if (newRole != currentRole && !isSuperAdmin) {
+                                                if (newRole == "INVITADO") { showRoleDowngradeDialog = true } else { showRoleUpgradeDialog = newRole }
+                                                currentRole = newRole
+                                                authPrefs.edit().putString("userRole", currentRole).putString("lastKnownRole", currentRole).apply()
+                                            }
+                                            if (response.planDuration > 0L) {
+                                                currentConsumed = response.consumedSeconds
+                                                currentPlanDuration = response.planDuration
+                                                authPrefs.edit().putLong("consumedSeconds", currentConsumed).putLong("planDuration", currentPlanDuration).apply()
+                                            }
+                                            customToastMessage = "Sincronización completada ✅"
+                                            isSyncingAccount = false
+                                        }
+                                    } catch (e: Exception) {
+                                        launch(Dispatchers.Main) {
+                                            customToastMessage = "Error al sincronizar cuenta"
+                                            isSyncingAccount = false
+                                        }
+                                    }
+                                }
+                            })
+
                             Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
 
                             if (currentTab == 0) {
@@ -1331,7 +1421,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 DropdownMenuItem(text = { Text("🔔 Saldo Crítico") }, onClick = { showLimitDialog = true; showMenu = false })
                             }
 
-                            // NUEVA OPCIÓN EN EL MENÚ
                             DropdownMenuItem(text = { Text("⚙️ Opciones") }, onClick = { showOptionsDialog = true; showMenu = false })
 
                             if (currentTab == 0 && isBorrarHistorialAllowed) { DropdownMenuItem(text = { Text("⚠️ Borrar Historial", color = Color(0xFFE53935)) }, onClick = { showDeleteHistoryConfirmDialog = true; showMenu = false }) }
@@ -1463,6 +1552,26 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
             AnimatedVisibility(visible = undoMessage != null, enter = slideInVertically(initialOffsetY = { 50 }) + fadeIn(tween(300)), exit = fadeOut(tween(500)), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp, start = 16.dp, end = 16.dp)) { Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF323232), RoundedCornerShape(8.dp)).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { Text(text = undoMessage ?: "", color = Color.White, modifier = Modifier.weight(1f), fontSize = 14.sp); TextButton(onClick = { undoAction?.invoke(); undoMessage = null; undoAction = null }) { Text("DESHACER", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) } } }
             AnimatedVisibility(visible = customToastMessage != null, enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { 50 }), exit = fadeOut(tween(1500)), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)) { Box(modifier = Modifier.background(Color.DarkGray.copy(alpha = 0.9f), RoundedCornerShape(24.dp)).padding(horizontal = 24.dp, vertical = 12.dp)) { Text(text = customToastMessage ?: "", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp) } }
+
+            // NUEVO: Cartel Visual Flotante para Respaldos y Sincronización
+            if (isSyncingAccount || viewModel.isSyncing) {
+                val displayMessage = if (isSyncingAccount) "Sincronizando tu información..." else viewModel.syncMessage
+                Dialog(onDismissRequest = { }) {
+                    Box(
+                        modifier = Modifier
+                            .size(240.dp)
+                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(60.dp), strokeWidth = 6.dp)
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Text(displayMessage, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
         }
 
         // DIÁLOGO NUEVO: OPCIONES GENERALES
