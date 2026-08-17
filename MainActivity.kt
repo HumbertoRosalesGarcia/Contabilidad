@@ -609,6 +609,28 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
+    // NUEVO MÉTODO PARA SINCRONIZACIÓN BAJO PERFIL CADA 30 SEGUNDOS
+    fun silentBackup() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val currentData = BackupData(dao.getBackupTransactions(), dao.getBackupReminders(), dao.getBackupFiadores(), dao.getBackupProducts())
+                val timeString = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
+                val newRecord = BackupRecord(UUID.randomUUID().toString(), "AutoSync 30s", System.currentTimeMillis(), currentData)
+                val remotePayload = RetrofitInstance.api.getBackup(userId)
+                val existingBackups = mutableListOf<BackupRecord>()
+                if (remotePayload != null) {
+                    if (remotePayload.backups != null) { existingBackups.addAll(remotePayload.backups) }
+                }
+                existingBackups.add(0, newRecord)
+                // Mantiene solo los últimos 10 respaldos en la nube para no saturar
+                if (existingBackups.size > 10) { existingBackups.removeAt(existingBackups.size - 1) }
+                RetrofitInstance.api.uploadBackup(userId, CloudPayload(backups = existingBackups))
+            } catch (e: Exception) {
+                // Falla silenciosamente si no hay internet
+            }
+        }
+    }
+
     fun manualBackup(backupName: String, onResult: (String) -> Unit) {
         isSyncing = true
         syncMessage = "Guardando tus cuentas actuales..."
@@ -829,7 +851,6 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
     fun deleteFiador(fiador: Fiador, context: Context) { viewModelScope.launch { dao.deleteFiador(fiador); cancelAlarm(context, fiador.id + 100000, "FIADOR_TRIGGER") } }
 
-    // NUEVA FUNCIÓN PARA RESTAURAR DEUDAS BORRADAS POR ERROR
     fun restoreFiador(name: String, totalAmount: Double, paidAmount: Double, context: Context, onResult: (String) -> Unit) {
         viewModelScope.launch {
             val f = Fiador(
@@ -1062,6 +1083,10 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
     val credentialManager = remember { CredentialManager.create(context) }
     var isLoading by remember { mutableStateOf(false) }
 
+    // SOLUCIÓN ERROR 1: Extraemos el valor del stringResource fuera del onClick para respetar el entorno Composable
+    val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+    val webClientId = if (resId != 0) androidx.compose.ui.res.stringResource(id = resId) else ""
+
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.AccountCircle, contentDescription = "Login", modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary)
@@ -1079,9 +1104,6 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
                         isLoading = true
                         coroutineScope.launch {
                             try {
-                                val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-                                val webClientId = if (resId != 0) context.getString(resId) else ""
-
                                 val googleIdOption = GetGoogleIdOption.Builder()
                                     .setFilterByAuthorizedAccounts(false)
                                     .setServerClientId(webClientId)
@@ -1144,6 +1166,43 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
                     Text("Añadir cuenta nueva", fontWeight = FontWeight.Bold)
                 }
 
+                Spacer(modifier = Modifier.height(24.dp))
+                Divider(color = Color.Gray.copy(alpha = 0.2f), modifier = Modifier.fillMaxWidth(0.8f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // BOTÓN DE INVITADO GOLD
+                Button(
+                    onClick = {
+                        isLoading = true
+                        coroutineScope.launch(Dispatchers.IO) {
+                            val authPrefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
+                            var guestId = authPrefs.getString("trialGuestId", null)
+                            if (guestId == null) {
+                                guestId = "prueba_" + UUID.randomUUID().toString().substring(0, 8)
+                                authPrefs.edit().putString("trialGuestId", guestId).apply()
+                            }
+                            try {
+                                RetrofitInstance.api.syncUser(UserSyncRequest(email = guestId, name = "Usuario de Prueba"))
+                                // Inicia con 1 día exacto (86400 segundos)
+                                RetrofitInstance.api.manageUser(UserManageRequest(guestId, "setRole", "Invitado-Gold", 86400L))
+                                launch(Dispatchers.Main) {
+                                    Toast.makeText(context, "Modo Invitado-Gold Activado ⏳", Toast.LENGTH_LONG).show()
+                                    onLoginSuccess("Usuario de Prueba", guestId, "Invitado-Gold", 0L, 86400L)
+                                }
+                            } catch (e: Exception) {
+                                launch(Dispatchers.Main) {
+                                    Toast.makeText(context, "Modo Invitado-Gold Local (Sin conexión) ⏳", Toast.LENGTH_LONG).show()
+                                    onLoginSuccess("Usuario de Prueba", guestId, "Invitado-Gold", 0L, 86400L)
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(0.8f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)
+                ) {
+                    Text("Prueba 1 día gratis 🌟", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
                 TextButton(
                     onClick = {
@@ -1179,25 +1238,38 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var currentConsumed by remember { mutableStateOf(initialConsumedSeconds) }
     var currentPlanDuration by remember { mutableStateOf(initialPlanDuration) }
 
-    var showPlansDialog by remember { mutableStateOf(!isSuperAdmin && initialRole != "GOLD" && initialRole != "ADMIN") }
+    var showPlansDialog by remember { mutableStateOf(!isSuperAdmin && initialRole != "GOLD" && initialRole != "ADMIN" && initialRole != "PRUEBA" && initialRole != "Invitado-Gold") }
     var showRoleUpgradeDialog by remember { mutableStateOf<String?>(null) }
     var showRoleDowngradeDialog by remember { mutableStateOf(false) }
     var showWarningDialog by remember { mutableStateOf<String?>(null) }
+    var showTrialWarning by remember { mutableStateOf(false) }
+
+    // NUEVO: Estado para mostrar el modal de bienvenida al Invitado-Gold (Solo si lleva menos de 5 mins consumidos)
+    var showGoldWelcomeDialog by remember { mutableStateOf(initialRole == "Invitado-Gold" && initialConsumedSeconds < 300L) }
 
     var preselectedDateForEvent by remember { mutableStateOf<Long?>(null) }
     var showOptionsDialog by remember { mutableStateOf(false) }
     var isSyncingAccount by remember { mutableStateOf(false) }
 
+    val coroutineScope = rememberCoroutineScope()
+
     LaunchedEffect(Unit) {
         while(true) {
             delay(30000L)
+
+            // --- NUEVO: Sincronización bajo perfil cada 30 segundos ---
+            if (currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA") {
+                viewModel.silentBackup()
+            }
+            // -------------------------------------------------------------
+
             try {
                 val response = RetrofitInstance.api.addUserTime(UserTimeRequest(viewModel.userId, 30L))
                 if (response.isBanned && !isSuperAdmin) { Toast.makeText(context, "Tu tiempo ha culminado o has sido bloqueado.", Toast.LENGTH_LONG).show(); onLogout(); break }
 
                 val newRole = response.role ?: currentRole
                 if (newRole != currentRole && !isSuperAdmin) {
-                    if (newRole == "INVITADO") { showRoleDowngradeDialog = true } else { showRoleUpgradeDialog = newRole }
+                    if (newRole == "INVITADO" || newRole == "INVITADO_PRUEBA") { showRoleDowngradeDialog = true } else { showRoleUpgradeDialog = newRole }
                     currentRole = newRole
                     authPrefs.edit().putString("userRole", currentRole).putString("lastKnownRole", currentRole).apply()
                 }
@@ -1208,30 +1280,48 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     authPrefs.edit().putLong("consumedSeconds", currentConsumed).putLong("planDuration", currentPlanDuration).apply()
                 }
 
-                if (currentRole != "INVITADO" && !isSuperAdmin) {
+                if (currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA" && !isSuperAdmin) {
                     val timeLeftSecs = currentPlanDuration - currentConsumed
-                    if (timeLeftSecs <= 0) {
-                        showRoleDowngradeDialog = true
-                        currentRole = "INVITADO"
-                        authPrefs.edit().putString("userRole", "INVITADO").putString("lastKnownRole", "INVITADO").apply()
-                    } else {
-                        val daysLeft = timeLeftSecs / 86400L
-                        val lastWarning = authPrefs.getLong("lastWarning_$daysLeft", 0L)
-                        val now = System.currentTimeMillis()
-                        if (daysLeft in listOf(7L, 3L, 2L, 1L) && (now - lastWarning > 86400000L)) {
-                            showWarningDialog = "Tu plan expirará en $daysLeft días. Realiza el pago para mantener tus privilegios o pasarás a ser INVITADO."
-                            authPrefs.edit().putLong("lastWarning_$daysLeft", now).apply()
-                        }
+                    val daysLeft = timeLeftSecs / 86400L
+                    val lastWarning = authPrefs.getLong("lastWarning_$daysLeft", 0L)
+                    val now = System.currentTimeMillis()
+                    if (currentRole != "PRUEBA" && currentRole != "Invitado-Gold" && daysLeft in listOf(7L, 3L, 2L, 1L) && (now - lastWarning > 86400000L)) {
+                        showWarningDialog = "Tu plan expirará en $daysLeft días. Realiza el pago para mantener tus privilegios o pasarás a ser INVITADO."
+                        authPrefs.edit().putLong("lastWarning_$daysLeft", now).apply()
                     }
                 }
             } catch (_: Exception) {}
         }
     }
 
+    // TICKER EN VIVO DE 1 SEGUNDO Y CONTROL DE MODOS
     LaunchedEffect(Unit) {
+        val hasShownTrialWarning = authPrefs.getBoolean("hasShownTrialWarning_${viewModel.userId}", false)
         while (true) {
             delay(1000L)
-            if (!isSuperAdmin) currentConsumed++
+            if (!isSuperAdmin) {
+                currentConsumed++
+                val timeLeftSecs = currentPlanDuration - currentConsumed
+
+                // ADVERTENCIA 3 HORAS (10800 Segundos) DEL MODO PRUEBA
+                if ((currentRole == "PRUEBA" || currentRole == "Invitado-Gold") && timeLeftSecs in 1..10800 && !hasShownTrialWarning) {
+                    showTrialWarning = true
+                    authPrefs.edit().putBoolean("hasShownTrialWarning_${viewModel.userId}", true).apply()
+                }
+
+                // TRANSICIÓN AUTOMÁTICA AL CADUCAR EL TIEMPO
+                if (timeLeftSecs <= 0 && currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA") {
+                    if (currentRole == "PRUEBA" || currentRole == "Invitado-Gold") {
+                        currentRole = "INVITADO_PRUEBA"
+                        authPrefs.edit().putString("userRole", "INVITADO_PRUEBA").putString("lastKnownRole", "INVITADO_PRUEBA").apply()
+                        coroutineScope.launch(Dispatchers.IO) { try { RetrofitInstance.api.manageUser(UserManageRequest(viewModel.userId, "setRole", "INVITADO_PRUEBA", 2592000L)) } catch (e: Exception){} }
+                    } else {
+                        showRoleDowngradeDialog = true
+                        currentRole = "INVITADO"
+                        authPrefs.edit().putString("userRole", "INVITADO").putString("lastKnownRole", "INVITADO").apply()
+                    }
+                }
+            }
         }
     }
 
@@ -1332,13 +1422,12 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var isLoadingList by remember { mutableStateOf(false) }
     var showAdminPanelDialog by remember { mutableStateOf(false) }
 
-    val isLockedStore = currentRole == "BÁSICO" || currentRole == "INVITADO"
-    val isManualSyncAllowed = currentRole != "INVITADO"
-    val isResumenAllowed = currentRole == "PREMIUM" || currentRole == "GOLD" || currentRole == "ADMIN"
-    val isBorrarHistorialAllowed = true
+    val isLockedStore = currentRole == "BÁSICO" || currentRole == "INVITADO" || currentRole == "INVITADO_PRUEBA"
+    val isManualSyncAllowed = currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA"
+    val isResumenAllowed = currentRole == "PREMIUM" || currentRole == "GOLD" || currentRole == "ADMIN" || currentRole == "PRUEBA" || currentRole == "Invitado-Gold"
+    val isBorrarHistorialAllowed = currentRole != "INVITADO_PRUEBA"
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
     val totalIncome = remember(personalTransactions) { personalTransactions.filter { it.isIncome }.sumOf { it.amount } }
     val totalExpense = remember(personalTransactions) { personalTransactions.filter { !it.isIncome }.sumOf { it.amount } }
     val balance = totalIncome - totalExpense
@@ -1371,7 +1460,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
     }
 
-    val crownEmoji = when (currentRole) { "INVITADO" -> "🪵"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
+    val crownEmoji = when (currentRole) { "INVITADO", "INVITADO_PRUEBA" -> "🪵"; "PRUEBA", "Invitado-Gold" -> "⏳"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -1440,13 +1529,45 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         },
         floatingActionButton = {
             if (!showInventoryScreen && currentTab == 0) {
-                FloatingActionButton(onClick = { showAddDialog = true }, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary) {
+                FloatingActionButton(onClick = {
+                    if (currentRole == "INVITADO_PRUEBA") {
+                        Toast.makeText(context, "Modo Restringido: Solo puedes visualizar información.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        showAddDialog = true
+                    }
+                }, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary) {
                     Icon(Icons.Filled.Add, "Agregar")
                 }
             }
         }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
+
+            // NUEVO: ALERTA DE BIENVENIDA INVITADO GOLD
+            if (showGoldWelcomeDialog) {
+                val timeLeftSecs = currentPlanDuration - currentConsumed
+                val hours = timeLeftSecs / 3600
+                val mins = (timeLeftSecs % 3600) / 60
+                AlertDialog(
+                    onDismissRequest = { showGoldWelcomeDialog = false },
+                    title = { Text("¡Modo Invitado-Gold! 🌟", fontWeight = FontWeight.Bold) },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    text = { Text("Disfrutas de acceso total a todas las herramientas sin ninguna restricción. Te quedan $hours horas y $mins minutos de este privilegio.\n\nTus datos se estarán guardando y respaldando bajo perfil en la nube cada 30 segundos automáticamente.") },
+                    confirmButton = { Button(onClick = { showGoldWelcomeDialog = false }) { Text("¡Entendido!") } }
+                )
+            }
+
+            // ALERTAS DE PRUEBA Y TIEMPO
+            if (showTrialWarning) {
+                AlertDialog(
+                    onDismissRequest = { showTrialWarning = false },
+                    title = { Text("¡Tu Prueba está por terminar! ⏳", fontWeight = FontWeight.Bold) },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    text = { Text("Te quedan menos de 3 horas de tu Modo de Prueba. Una vez que el tiempo culmine, pasarás automáticamente al Modo Invitado, el cual tiene funciones restringidas de solo lectura. Contacta al administrador si deseas adquirir un plan completo.") },
+                    confirmButton = { Button(onClick = { showTrialWarning = false }) { Text("Entendido") } }
+                )
+            }
+
             if (showInventoryScreen) {
                 InventoryScreen(
                     products = products,
@@ -1545,7 +1666,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             onOpenCheckout = { showCheckoutDialog = true },
                             onResetProfitsClick = { showResetProfitsDialog = true },
                             onDeleteVentas = { list -> viewModel.deleteTransactionsList(list) },
-                            showPremiumToast = { showPremiumToastMsg(context) },
+                            showPremiumToast = {
+                                if (currentRole == "INVITADO_PRUEBA") Toast.makeText(context, "Modo Restringido: Solo puedes visualizar información.", Toast.LENGTH_SHORT).show()
+                                else showPremiumToastMsg(context)
+                            },
                             totalProfit = totalProfit,
                             activeFiadores = activeFiadores,
                             activeReminders = activeReminders,
@@ -1590,7 +1714,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                         launch(Dispatchers.Main) {
                                             val newRole = response.role ?: currentRole
                                             if (newRole != currentRole && !isSuperAdmin) {
-                                                if (newRole == "INVITADO") { showRoleDowngradeDialog = true } else { showRoleUpgradeDialog = newRole }
+                                                if (newRole == "INVITADO" || newRole == "INVITADO_PRUEBA") { showRoleDowngradeDialog = true } else { showRoleUpgradeDialog = newRole }
                                                 currentRole = newRole
                                                 authPrefs.edit().putString("userRole", currentRole).putString("lastKnownRole", currentRole).apply()
                                             }
@@ -1635,9 +1759,98 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             }
         }
 
-        // ==========================================
-        // VINCULACIÓN DE TODOS LOS DIÁLOGOS DE LA APP
-        // ==========================================
+        // BLOQUE PANEL DE ADMINISTRADOR
+        if (showAdminPanelDialog) {
+            var usersList by remember { mutableStateOf<Map<String, UserData>?>(null) }; var isLoadingUsers by remember { mutableStateOf(true) }
+            var roleToAssign by remember { mutableStateOf<String?>(null) }; var targetEmailToAssign by remember { mutableStateOf<String?>(null) }
+            val formatTimeLeft = { secs: Long, maxSecs: Long -> val left = maxSecs - secs; if (left <= 0) "0s" else { val days = left / 86400; val hours = (left % 86400) / 3600; "${days}d ${hours}h" } }
+            LaunchedEffect(Unit) { try { usersList = RetrofitInstance.api.getAllUsers() } catch (_: Exception) { customToastMessage = "Error cargando usuarios" }; isLoadingUsers = false }
+            fun manageUser(targetEmail: String, action: String, newRole: String? = null, pDuration: Long? = null) { coroutineScope.launch(Dispatchers.IO) { try { RetrofitInstance.api.manageUser(UserManageRequest(targetEmail, action, newRole, pDuration)); val updatedList = RetrofitInstance.api.getAllUsers(); launch(Dispatchers.Main) { usersList = updatedList; customToastMessage = "Acción completada" } } catch (_: Exception) { launch(Dispatchers.Main) { customToastMessage = "Fallo de conexión" } } } }
+
+            if (roleToAssign != null && targetEmailToAssign != null) {
+                var customHours by remember { mutableStateOf("") }
+                AlertDialog(
+                    onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
+                    title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Duración para $roleToAssign ⏱️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)); IconButton(onClick = { roleToAssign = null; targetEmailToAssign = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
+                    text = {
+                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                            if (roleToAssign == "PRUEBA" || roleToAssign == "INVITADO_PRUEBA" || roleToAssign == "Invitado-Gold") {
+                                Text("Configuración de Prueba/Invitado", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 86400L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Día (24 horas)") }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(value = customHours, onValueChange = { customHours = it.filter { c -> c.isDigit() } }, label = { Text("Asignar Horas exactas") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(onClick = { val h = customHours.toLongOrNull() ?: 0L; if (h > 0) { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, h * 3600L); roleToAssign = null } }, modifier = Modifier.fillMaxWidth(), enabled = customHours.isNotEmpty()) { Text("Guardar Horas") }
+
+                                if (roleToAssign == "INVITADO_PRUEBA") {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Nota: El Invitado de Prueba solo tiene permisos de visualización. No puede registrar datos.", fontSize = 12.sp, color = Color.Gray)
+                                }
+                            } else {
+                                Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 2592000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Mes (30 días)") }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 15552000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("6 Meses (180 días)") }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 31104000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Año (360 días)") }
+                            }
+                        }
+                    },
+                    confirmButton = {}, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
+                )
+            }
+
+            AlertDialog(
+                onDismissRequest = { }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Panel de Control 🛠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showAdminPanelDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
+                containerColor = MaterialTheme.colorScheme.surface,
+                text = {
+                    if (isLoadingUsers) { CircularProgressIndicator(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally)) }
+                    else if (usersList.isNullOrEmpty()) { Text("No hay usuarios registrados.", color = Color.Gray) }
+                    else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                            items(usersList!!.entries.toList()) { entry ->
+                                val email = entry.key; val userData = entry.value; var expandedRoleMenu by remember { mutableStateOf(false) }
+                                val isAdminAccount = email.lowercase(Locale.getDefault()) == "zonacami77777@gmail.com"
+
+                                val listCrown = when (userData.role ?: "INVITADO") { "INVITADO", "INVITADO_PRUEBA" -> "🪵"; "PRUEBA", "Invitado-Gold" -> "⏳"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
+
+                                Card(modifier = Modifier.fillMaxWidth().padding(vertical=4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.4f))) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text("${userData.name} $listCrown", fontWeight = FontWeight.Bold, fontSize = 16.sp); Text(email, fontSize = 12.sp, color = Color.Gray)
+                                        if (isAdminAccount) { Text("Administrador del Sistema ✅", color = Color(0xFF4CAF50), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top=4.dp)) }
+                                        else if (userData.isBanned) { Text("SUSPENDIDO 🚫", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top=4.dp)) }
+                                        else { Text("Tiempo restante (${userData.role}): ${formatTimeLeft(userData.consumedSeconds, userData.planDuration)}", color = Color(0xFFE65100), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top=4.dp)) }
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Box(modifier = Modifier.weight(1f)) {
+                                                OutlinedButton(onClick = { expandedRoleMenu = true }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) { Text("Rol") }
+                                                DropdownMenu(expanded = expandedRoleMenu, onDismissRequest = { expandedRoleMenu = false }) {
+                                                    listOf("INVITADO", "INVITADO_PRUEBA", "PRUEBA", "Invitado-Gold", "BÁSICO", "PREMIUM", "GOLD").forEach { newRole ->
+                                                        DropdownMenuItem(text = { Text(newRole) }, onClick = {
+                                                            expandedRoleMenu = false
+                                                            if (newRole == "INVITADO") { manageUser(email, "setRole", newRole, 2592000L) }
+                                                            else { roleToAssign = newRole; targetEmailToAssign = email }
+                                                        })
+                                                    }
+                                                }
+                                            }
+                                            OutlinedButton(onClick = { manageUser(email, "resetTime") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Reset") }
+
+                                            if (!isAdminAccount) {
+                                                if (userData.isBanned) { Button(onClick = { manageUser(email, "unban") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Desbloq.") } }
+                                                else { Button(onClick = { manageUser(email, "ban") }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)), contentPadding = PaddingValues(0.dp)) { Text("Bloquear") } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }, confirmButton = { }, dismissButton = { }
+            )
+        }
 
         // 1. Diálogo de Agregar Transacción (Personal)
         if (showAddDialog) {
@@ -1730,8 +1943,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 products = products,
                 totalStoreCash = totalStoreCash,
                 totalStoreDigital = totalStoreDigital,
-                selectedCountry = viewModel.selectedCountry, // <-- ESTO FALTABA
-                bcvRate = viewModel.bcvRate,                 // <-- ESTO FALTABA
+                selectedCountry = viewModel.selectedCountry,
+                bcvRate = viewModel.bcvRate,
                 onDismiss = { showCheckoutDialog = false },
                 onConfirmSale = { items, buyer, summary, netCash, netDigital, pocketDebtAmount ->
                     viewModel.processCartSale(
@@ -1816,8 +2029,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         if (productToInfo != null) {
             ProductInfoDialog(
                 product = productToInfo!!,
-                selectedCountry = viewModel.selectedCountry, // NUEVO
-                bcvRate = viewModel.bcvRate,                 // NUEVO
+                selectedCountry = viewModel.selectedCountry,
+                bcvRate = viewModel.bcvRate,
                 onDismiss = { productToInfo = null },
                 onDeleteCompletely = {
                     val restoredProduct = productToInfo!!
@@ -2017,6 +2230,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // SOLUCIÓN ERRORES 2 Y 3: Inyección de selectedCountry y bcvRate al llamar el FiadorDialog
         if (showFiadorDialog) {
             FiadorDialog(
                 initialFiador = fiadorToEdit,
@@ -2025,6 +2239,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 initialCash = checkoutToFiadorCash,
                 initialDigital = checkoutToFiadorDigital,
                 products = products,
+                selectedCountry = viewModel.selectedCountry, // NUEVO
+                bcvRate = viewModel.bcvRate,                 // NUEVO
                 preselectedDate = preselectedDateForEvent,
                 isStore = (currentTab == 1 || checkoutToFiadorCart.isNotEmpty()),
                 onDismiss = {
@@ -2242,86 +2458,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     Column {
                         Text("Mejora tu plan comunicándote con el Administrador para desbloquear todo el potencial de la aplicación.", fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(bottom = 12.dp))
                         Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            if (currentRole == "INVITADO") { PlanCardInfo("BÁSICO 🥉", "1, 6 o 12 meses.", listOf("Pestaña Personal", "Saldo crítico y Sonidos", "Gestión de Deudas", "Respaldo manual en nube", "Borrar Historial"), listOf("Control de Tienda y Ventas", "Inventario", "Sincronización Automática")) }
-                            if (currentRole == "INVITADO" || currentRole == "BÁSICO") { PlanCardInfo("PREMIUM 🥈", "1, 6 o 12 meses.", listOf("Todo lo del Básico", "Acceso total a Tienda", "Inventario y Fechas", "Resumen de Totales", "Sincronización Automática"), listOf("Prioridad de Soporte")) }
-                            if (currentRole == "INVITADO" || currentRole == "BÁSICO" || currentRole == "PREMIUM") { PlanCardInfo("GOLD 🥇", "1, 6 o 12 meses.", listOf("Uso de toda la aplicación sin ninguna restricción", "Borrado completo", "Prioridad y Soporte total"), emptyList(), isGold = true) }
+                            if (currentRole == "INVITADO" || currentRole == "INVITADO_PRUEBA") { PlanCardInfo("BÁSICO 🥉", "1, 6 o 12 meses.", listOf("Pestaña Personal", "Saldo crítico y Sonidos", "Gestión de Deudas", "Respaldo manual en nube", "Borrar Historial"), listOf("Control de Tienda y Ventas", "Inventario", "Sincronización Automática")) }
+                            if (currentRole == "INVITADO" || currentRole == "INVITADO_PRUEBA" || currentRole == "BÁSICO") { PlanCardInfo("PREMIUM 🥈", "1, 6 o 12 meses.", listOf("Todo lo del Básico", "Acceso total a Tienda", "Inventario y Fechas", "Resumen de Totales", "Sincronización Automática"), listOf("Prioridad de Soporte")) }
+                            if (currentRole == "INVITADO" || currentRole == "INVITADO_PRUEBA" || currentRole == "BÁSICO" || currentRole == "PREMIUM") { PlanCardInfo("GOLD 🥇", "1, 6 o 12 meses.", listOf("Uso de toda la aplicación sin ninguna restricción", "Borrado completo", "Prioridad y Soporte total"), emptyList(), isGold = true) }
                         }
                     }
                 },
                 confirmButton = { }, dismissButton = { }
-            )
-        }
-
-        if (showAdminPanelDialog) {
-            var usersList by remember { mutableStateOf<Map<String, UserData>?>(null) }; var isLoadingUsers by remember { mutableStateOf(true) }
-            var roleToAssign by remember { mutableStateOf<String?>(null) }; var targetEmailToAssign by remember { mutableStateOf<String?>(null) }
-            val formatTimeLeft = { secs: Long, maxSecs: Long -> val left = maxSecs - secs; if (left <= 0) "0s" else { val days = left / 86400; val hours = (left % 86400) / 3600; "${days}d ${hours}h" } }
-            LaunchedEffect(Unit) { try { usersList = RetrofitInstance.api.getAllUsers() } catch (_: Exception) { customToastMessage = "Error cargando usuarios" }; isLoadingUsers = false }
-            fun manageUser(targetEmail: String, action: String, newRole: String? = null, pDuration: Long? = null) { coroutineScope.launch(Dispatchers.IO) { try { RetrofitInstance.api.manageUser(UserManageRequest(targetEmail, action, newRole, pDuration)); val updatedList = RetrofitInstance.api.getAllUsers(); launch(Dispatchers.Main) { usersList = updatedList; customToastMessage = "Acción completada" } } catch (_: Exception) { launch(Dispatchers.Main) { customToastMessage = "Fallo de conexión" } } } }
-
-            if (roleToAssign != null && targetEmailToAssign != null) {
-                AlertDialog(
-                    onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-                    title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Duración para $roleToAssign ⏱️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)); IconButton(onClick = { roleToAssign = null; targetEmailToAssign = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-                    text = {
-                        Column {
-                            Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 2592000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Mes (30 días)") }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 15552000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("6 Meses (180 días)") }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 31104000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Año (360 días)") }
-                        }
-                    },
-                    confirmButton = {}, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
-                )
-            }
-
-            AlertDialog(
-                onDismissRequest = { }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
-                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Panel de Control 🛠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showAdminPanelDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-                containerColor = MaterialTheme.colorScheme.surface,
-                text = {
-                    if (isLoadingUsers) { CircularProgressIndicator(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally)) }
-                    else if (usersList.isNullOrEmpty()) { Text("No hay usuarios registrados.", color = Color.Gray) }
-                    else {
-                        LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
-                            items(usersList!!.entries.toList()) { entry ->
-                                val email = entry.key; val userData = entry.value; var expandedRoleMenu by remember { mutableStateOf(false) }
-                                val isAdminAccount = email.lowercase(Locale.getDefault()) == "zonacami77777@gmail.com"
-
-                                val listCrown = when (userData.role ?: "INVITADO") { "INVITADO" -> "🪵"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
-
-                                Card(modifier = Modifier.fillMaxWidth().padding(vertical=4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.4f))) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Text("${userData.name} $listCrown", fontWeight = FontWeight.Bold, fontSize = 16.sp); Text(email, fontSize = 12.sp, color = Color.Gray)
-                                        if (isAdminAccount) { Text("Administrador del Sistema ✅", color = Color(0xFF4CAF50), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top=4.dp)) }
-                                        else if (userData.isBanned) { Text("SUSPENDIDO 🚫", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top=4.dp)) }
-                                        else { Text("Tiempo restante (${userData.role}): ${formatTimeLeft(userData.consumedSeconds, userData.planDuration)}", color = Color(0xFFE65100), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top=4.dp)) }
-                                        Spacer(modifier = Modifier.height(8.dp))
-
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Box(modifier = Modifier.weight(1f)) {
-                                                OutlinedButton(onClick = { expandedRoleMenu = true }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) { Text("Rol") }
-                                                DropdownMenu(expanded = expandedRoleMenu, onDismissRequest = { expandedRoleMenu = false }) {
-                                                    listOf("INVITADO", "BÁSICO", "PREMIUM", "GOLD").forEach { newRole ->
-                                                        DropdownMenuItem(text = { Text(newRole) }, onClick = {
-                                                            expandedRoleMenu = false
-                                                            if (newRole == "INVITADO") { manageUser(email, "setRole", newRole, 2592000L) }
-                                                            else { roleToAssign = newRole; targetEmailToAssign = email }
-                                                        })
-                                                    }
-                                                }
-                                            }
-                                            OutlinedButton(onClick = { manageUser(email, "resetTime") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Reset") }
-                                            if (userData.isBanned) { Button(onClick = { manageUser(email, "unban") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Desbloquear") } }
-                                            else { Button(onClick = { manageUser(email, "ban") }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)), contentPadding = PaddingValues(0.dp)) { Text("Bloquear") } }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }, confirmButton = { }, dismissButton = { }
             )
         }
     }
@@ -2600,7 +2743,6 @@ fun ProductItem(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Text(text = product.name, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)); if (isExpired) { Spacer(modifier = Modifier.width(8.dp)); Surface(color = Color(0xFFD32F2F), shape = RoundedCornerShape(4.dp)) { Text("⚠️ VENCIDO", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) } }; if (isLowStock) { Spacer(modifier = Modifier.width(8.dp)); Surface(color = Color(0xFFE65100), shape = RoundedCornerShape(4.dp)) { Text("⚠️ POCO STOCK", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) } } }
 
-                    // MODIFICADO: Texto dinámico según unidad y se elimina el "Total en stock" para desaturar
                     val unitName = when(product.unit) { "Kg" -> "Kilo"; "L" -> "Litro"; else -> "Unidad" }
                     Text(text = "Precio por $unitName: ${formatMoneyMain(product.price, selectedCountry)} ${formatMoneySec(product.price, selectedCountry, bcvRate)}", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
@@ -2793,7 +2935,6 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
 
     val totalCOP = cartItems.sumOf { it.first.price * it.second }
 
-    // Control de moneda prioritaria al cobrar
     var checkoutCurrency by remember { mutableStateOf("USD") }
     LaunchedEffect(Unit) { if (selectedCountry == "Venezuela") checkoutCurrency = "BS" }
     val isBsInput = selectedCountry == "Venezuela" && checkoutCurrency == "BS"
@@ -2856,7 +2997,13 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
                     if (cartItems.isEmpty()) { Text("El carrito está vacío.", modifier = Modifier.padding(16.dp)) } else {
                         LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
                             itemsIndexed(cartItems) { index, item ->
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("${item.second}x ${item.first.name}", modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines=1, overflow = TextOverflow.Ellipsis); Text(formatCOP(item.first.price * item.second), fontWeight = FontWeight.Bold, fontSize = 14.sp); IconButton(onClick = { itemToEdit = Pair(index, item) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Edit, "Editar", tint = Color.Blue, modifier = Modifier.size(16.dp)) }; IconButton(onClick = { cartItems.removeAt(index) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Red, modifier = Modifier.size(16.dp)) } }
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                    Text("${item.second}x ${item.first.name}", modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines=1, overflow = TextOverflow.Ellipsis)
+                                    // MODIFICADO: Muestra siempre los decimales respetando el país
+                                    Text(formatMoneyMain(item.first.price * item.second, selectedCountry), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    IconButton(onClick = { itemToEdit = Pair(index, item) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Edit, "Editar", tint = Color.Blue, modifier = Modifier.size(16.dp)) }
+                                    IconButton(onClick = { cartItems.removeAt(index) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Red, modifier = Modifier.size(16.dp)) }
+                                }
                             }
                         }
                         TextButton(onClick = { showProductSearch = true }, modifier = Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp)) { Text("+ Agregar producto nuevo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
@@ -3619,13 +3766,15 @@ fun FiadorDialog(
     initialFiador: Fiador? = null,
     initialName: String = "",
     initialCart: List<Pair<Product, Int>> = emptyList(),
-    initialCash: Double = 0.0, // MODIFICADO
-    initialDigital: Double = 0.0, // MODIFICADO
+    initialCash: Double = 0.0,
+    initialDigital: Double = 0.0,
     products: List<Product>,
+    selectedCountry: String, // NUEVO
+    bcvRate: Double,         // NUEVO
     preselectedDate: Long? = null,
     isStore: Boolean,
     onDismiss: () -> Unit,
-    onConfirmNew: (String, String, List<Pair<Product, Int>>, Double, Long, Double, Double) -> Unit, // MODIFICADO
+    onConfirmNew: (String, String, List<Pair<Product, Int>>, Double, Long, Double, Double) -> Unit,
     onConfirmEdit: (Fiador, Long) -> Unit,
     onConfirmAbono: (Fiador, Double, String) -> Unit
 ) {
@@ -3645,7 +3794,6 @@ fun FiadorDialog(
     var qtyRaw by remember { mutableStateOf("1") }
     val calendar = remember { Calendar.getInstance().apply { timeInMillis = initialFiador?.targetDateInMillis ?: preselectedDate ?: System.currentTimeMillis() } }
 
-    // NUEVO: Cálculos para el historial inicial
     val initialPaidAmount = initialCash + initialDigital
     val initialMethod = when {
         initialCash > 0 && initialDigital == 0.0 -> "Efectivo"
@@ -3807,7 +3955,8 @@ fun FiadorDialog(
                                 cartItems.forEachIndexed { index, item ->
                                     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                         Text("• ${item.second}${item.first.unit} ${item.first.name}", fontSize = 13.sp, modifier = Modifier.weight(1f))
-                                        Text(formatCOP(item.first.price * item.second), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                        // MODIFICADO: Agregada la función formatMoneyMain
+                                        Text(formatMoneyMain(item.first.price * item.second, selectedCountry), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                                         if (initialCart.isEmpty()) {
                                             IconButton(onClick = { cartItems.removeAt(index) }, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, null, tint = Color.Red, modifier = Modifier.size(16.dp)) }
                                         }
@@ -3916,7 +4065,6 @@ fun FiadorDialog(
                             onConfirmEdit(initialFiador.copy(name = name, phone = phone), localCal.timeInMillis)
                         } else {
                             val pAmount = personalDebtAmountRaw.toDoubleOrNull() ?: 0.0
-                            // MODIFICADO: Pasa los montos divididos
                             onConfirmNew(name, phone, cartItems.toList(), pAmount, localCal.timeInMillis, initialCash, initialDigital)
                         }
                     }
