@@ -152,12 +152,14 @@ data class ChatSendRequest(val sender: String, val receiver: String, val text: S
 data class BcvResponse(val code: String, val tasa: Double)
 
 fun formatBs(amount: Double): String {
-    val format = DecimalFormat("#,###.##").apply { decimalFormatSymbols = decimalFormatSymbols.apply { groupingSeparator = '.'; decimalSeparator = ',' } }
+    // MODIFICADO: "#,##0.00" asegura que siempre se muestren dos decimales
+    val format = DecimalFormat("#,##0.00").apply { decimalFormatSymbols = decimalFormatSymbols.apply { groupingSeparator = '.'; decimalSeparator = ',' } }
     return "Bs ${format.format(amount)}"
 }
 
 fun formatUSD(amount: Double): String {
-    val format = DecimalFormat("#,###.##").apply { decimalFormatSymbols = decimalFormatSymbols.apply { groupingSeparator = ','; decimalSeparator = '.' } }
+    // MODIFICADO: "#,##0.00" asegura que siempre se muestren dos decimales
+    val format = DecimalFormat("#,##0.00").apply { decimalFormatSymbols = decimalFormatSymbols.apply { groupingSeparator = ','; decimalSeparator = '.' } }
     return "$${format.format(amount)}"
 }
 
@@ -494,9 +496,7 @@ abstract class AppDatabase : RoomDatabase() {
     }
 }
 
-// ==========================================
-// 3. VIEWMODEL Y LÓGICA
-// ==========================================
+
 // ==========================================
 // 3. VIEWMODEL Y LÓGICA
 // ==========================================
@@ -531,7 +531,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     var isVoiceAssistantEnabled by mutableStateOf(userPrefs.getBoolean("voiceEnabled", false)); private set
 
     var isSyncing by mutableStateOf(false); private set
-    var syncMessage by mutableStateOf(""); private set // <-- NUEVO: Para enviar mensajes a la pantalla
+    var syncMessage by mutableStateOf(""); private set
     var lastSyncDate by mutableStateOf(userPrefs.getLong("lastSync", 0L)); private set
     var autoSyncFrequency by mutableStateOf(userPrefs.getInt("syncFrequency", 0)); private set
     var autoSyncHour by mutableStateOf(userPrefs.getInt("syncHour", 2)); private set
@@ -829,6 +829,30 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
     fun deleteFiador(fiador: Fiador, context: Context) { viewModelScope.launch { dao.deleteFiador(fiador); cancelAlarm(context, fiador.id + 100000, "FIADOR_TRIGGER") } }
 
+    // NUEVA FUNCIÓN PARA RESTAURAR DEUDAS BORRADAS POR ERROR
+    fun restoreFiador(name: String, totalAmount: Double, paidAmount: Double, context: Context, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val f = Fiador(
+                name = name,
+                phone = "",
+                amount = totalAmount,
+                reason = "Deuda retomada manualmente",
+                targetDateInMillis = System.currentTimeMillis() + 86400000L, // Alerta para el día siguiente
+                paidAmount = paidAmount,
+                paymentHistory = "Restaurado tras cobro accidental",
+                isStore = true,
+                totalCost = 0.0,
+                country = selectedCountry
+            )
+            val id = dao.insertFiador(f).toInt()
+            val remaining = totalAmount - paidAmount
+            val voiceText = "$name te debe ${remaining.toLong()} pesos"
+            scheduleNotification(context, f.targetDateInMillis, "¡Cobrar a $name! 💰", "Monto: ${formatCOP(remaining)}", id + 100000, "FIADOR_TRIGGER", voiceText)
+            launch(Dispatchers.Main) { onResult("Deuda de $name restaurada correctamente ♻️") }
+        }
+        AppSounds.play(context, touchSoundUri)
+    }
+
     fun registerAbonoFiador(fiador: Fiador, abono: Double, method: String, context: Context, onResult: (String) -> Unit) {
         viewModelScope.launch {
             val oldPaidAmount = fiador.paidAmount
@@ -922,8 +946,24 @@ class ProductDraftState {
 
     fun loadFrom(product: Product) {
         name = product.name
-        purchasePriceRaw = if (product.purchasePrice > 0) product.purchasePrice.toLong().toString() else ""
-        priceRaw = product.price.toLong().toString()
+        val pCost = product.purchasePrice
+        // Modificación crucial: Usar alta precisión para no perder decimales
+        // al reconstruir los bolívares en el modo Venezuela.
+        purchasePriceRaw = if (pCost > 0) {
+            if (pCost % 1.0 == 0.0) pCost.toLong().toString() else {
+                val df = java.text.DecimalFormat("#.######", java.text.DecimalFormatSymbols(Locale.US))
+                df.format(pCost)
+            }
+        } else ""
+
+        val pPrice = product.price
+        priceRaw = if (pPrice > 0) {
+            if (pPrice % 1.0 == 0.0) pPrice.toLong().toString() else {
+                val df = java.text.DecimalFormat("#.######", java.text.DecimalFormatSymbols(Locale.US))
+                df.format(pPrice)
+            }
+        } else ""
+
         stockRaw = product.stock.toString()
         minStockRaw = if (product.minStock > 0) product.minStock.toString() else ""
         selectedUnit = product.unit
@@ -942,8 +982,13 @@ val CustomDarkColorScheme = darkColorScheme(
 )
 
 class MainActivity : ComponentActivity() {
+    @SuppressLint("SourceLockedOrientationActivity")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // BLOQUEAR ROTACIÓN DE PANTALLA EN TODA LA APP
+        requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
         AppSounds.init()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val windowInsetsController = WindowInsetsControllerCompat(window, window.decorView)
@@ -1017,12 +1062,6 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
     val credentialManager = remember { CredentialManager.create(context) }
     var isLoading by remember { mutableStateOf(false) }
 
-    // SOLUCIÓN: Extraemos el ID de Google aquí arriba usando remember, fuera de las corrutinas y botones
-    val webClientId = remember(context) {
-        val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-        if (resId != 0) context.getString(resId) else ""
-    }
-
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.AccountCircle, contentDescription = "Login", modifier = Modifier.size(100.dp), tint = MaterialTheme.colorScheme.primary)
@@ -1040,9 +1079,12 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
                         isLoading = true
                         coroutineScope.launch {
                             try {
+                                val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+                                val webClientId = if (resId != 0) context.getString(resId) else ""
+
                                 val googleIdOption = GetGoogleIdOption.Builder()
                                     .setFilterByAuthorizedAccounts(false)
-                                    .setServerClientId(webClientId) // Usamos la variable cacheada arriba
+                                    .setServerClientId(webClientId)
                                     .setAutoSelectEnabled(true)
                                     .build()
                                 val request = GetCredentialRequest.Builder().addCredentialOption(googleIdOption).build()
@@ -1101,6 +1143,20 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Añadir cuenta nueva", fontWeight = FontWeight.Bold)
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                TextButton(
+                    onClick = {
+                        try {
+                            val intent = Intent(Settings.ACTION_SYNC_SETTINGS)
+                            context.startActivity(intent)
+                        } catch (_: Exception) {
+                            Toast.makeText(context, "No se pudo abrir la configuración", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                ) {
+                    Text("Gestionar o Eliminar cuentas del dispositivo", color = Color.Gray, textDecoration = TextDecoration.Underline, textAlign = TextAlign.Center)
+                }
             }
         }
     }
@@ -1124,17 +1180,12 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var currentPlanDuration by remember { mutableStateOf(initialPlanDuration) }
 
     var showPlansDialog by remember { mutableStateOf(!isSuperAdmin && initialRole != "GOLD" && initialRole != "ADMIN") }
-
     var showRoleUpgradeDialog by remember { mutableStateOf<String?>(null) }
     var showRoleDowngradeDialog by remember { mutableStateOf(false) }
     var showWarningDialog by remember { mutableStateOf<String?>(null) }
 
     var preselectedDateForEvent by remember { mutableStateOf<Long?>(null) }
-    var showDayEventsDialog by remember { mutableStateOf(false) }
-
     var showOptionsDialog by remember { mutableStateOf(false) }
-
-    // NUEVO: Estado para sincronizar la cuenta
     var isSyncingAccount by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -1184,33 +1235,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
     }
 
-    if (showRoleUpgradeDialog != null) {
-        AlertDialog(
-            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("¡Felicidades! 🎉", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showRoleUpgradeDialog = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-            text = { Text("Tu plan ha sido actualizado a ${showRoleUpgradeDialog}. ¡Disfruta de tus nuevos privilegios!") },
-            confirmButton = { }, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
-        )
-    }
-
-    if (showRoleDowngradeDialog) {
-        AlertDialog(
-            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Plan Expirado ⚠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showRoleDowngradeDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-            text = { Text("El tiempo de tu plan ha culminado. Ahora eres INVITADO. Contacta al administrador para renovar.") },
-            confirmButton = { }, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
-        )
-    }
-
-    if (showWarningDialog != null) {
-        AlertDialog(
-            onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-            title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Aviso de Expiración ⏳", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showWarningDialog = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-            text = { Text(showWarningDialog!!) },
-            confirmButton = { }, dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
-        )
-    }
-
     var showChatDialog by remember { mutableStateOf(false) }
     var chatTargetEmail by remember { mutableStateOf("") }
     var showAdminChatList by remember { mutableStateOf(false) }
@@ -1225,13 +1249,12 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     }
 
     LaunchedEffect(Unit) {
-        var lastMsgTimestamp = System.currentTimeMillis()
         while (true) {
             delay(5000L)
             try {
                 val isChatOpen = showChatDialog || showAdminChatList
                 val lastRead = authPrefs.getLong("lastReadChat_${viewModel.userId}", 0L)
-                var lastNotified = authPrefs.getLong("lastNotified_${viewModel.userId}", System.currentTimeMillis())
+                val lastNotified = authPrefs.getLong("lastNotified_${viewModel.userId}", System.currentTimeMillis())
                 var currentUnread = 0; var latestMsgTimestamp = lastNotified; var notificationMsg: String? = null; var notificationSender: String? = null
 
                 if (currentRole == "ADMIN") {
@@ -1253,7 +1276,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     val products by viewModel.products.collectAsState(initial = emptyList())
 
     var currentTab by remember { mutableStateOf(0) }
-
     val currentTabReminders = remember(reminders, currentTab) { reminders.filter { it.isStore == (currentTab == 1) } }
     val currentTabFiadores = remember(fiadores, currentTab) { fiadores.filter { it.isStore == (currentTab == 1) } }
 
@@ -1285,7 +1307,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showSummaryDialog by remember { mutableStateOf(false) }
     var showDeleteHistoryConfirmDialog by remember { mutableStateOf(false) }
     var showResetProfitsDialog by remember { mutableStateOf(false) }
-    var showAddBaseDialog by remember { mutableStateOf(false) }
     var showSoundDialog by remember { mutableStateOf(false) }
     var showRemindersListDialog by remember { mutableStateOf(false) }
     var showReminderDialog by remember { mutableStateOf(false) }
@@ -1312,14 +1333,15 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showAdminPanelDialog by remember { mutableStateOf(false) }
 
     val isLockedStore = currentRole == "BÁSICO" || currentRole == "INVITADO"
-    val isAutoSyncAllowed = currentRole == "PREMIUM" || currentRole == "GOLD" || currentRole == "ADMIN"
     val isManualSyncAllowed = currentRole != "INVITADO"
     val isResumenAllowed = currentRole == "PREMIUM" || currentRole == "GOLD" || currentRole == "ADMIN"
     val isBorrarHistorialAllowed = true
-    val isDeudasAllowed = currentRole != "INVITADO"
 
-    val snackbarHostState = remember { SnackbarHostState() }; val coroutineScope = rememberCoroutineScope()
-    val totalIncome = remember(personalTransactions) { personalTransactions.filter { it.isIncome }.sumOf { it.amount } }; val totalExpense = remember(personalTransactions) { personalTransactions.filter { !it.isIncome }.sumOf { it.amount } }; val balance = totalIncome - totalExpense
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    val totalIncome = remember(personalTransactions) { personalTransactions.filter { it.isIncome }.sumOf { it.amount } }
+    val totalExpense = remember(personalTransactions) { personalTransactions.filter { !it.isIncome }.sumOf { it.amount } }
+    val balance = totalIncome - totalExpense
 
     val personalCashIncome = remember(personalTransactions) { personalTransactions.filter { it.isIncome }.sumOf { it.cashAmount } }
     val personalCashExpense = remember(personalTransactions) { personalTransactions.filter { !it.isIncome }.sumOf { it.cashAmount } }
@@ -1329,18 +1351,27 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     val personalDigitalBalance = personalDigitalIncome - personalDigitalExpense
 
     var currentUiTime by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(60000L); currentUiTime = System.currentTimeMillis() } }
 
-    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(60000L); currentUiTime = System.currentTimeMillis() } }
-
-    val activeReminders = remember(currentTabReminders, currentUiTime) { currentTabReminders.filter { it.targetDateInMillis <= currentUiTime } };
+    val activeReminders = remember(currentTabReminders, currentUiTime) { currentTabReminders.filter { it.targetDateInMillis <= currentUiTime } }
     val activeFiadores = remember(currentTabFiadores, currentUiTime) { currentTabFiadores.filter { it.targetDateInMillis <= currentUiTime } }
 
     LaunchedEffect(customToastMessage ?: "") { if (customToastMessage != null) { delay(3000L); customToastMessage = null } }
     LaunchedEffect(undoMessage ?: "") { if (undoMessage != null) { delay(5000L); undoMessage = null; undoAction = null } }
 
-    BackHandler { if (showInventoryScreen) { showInventoryScreen = false } else if (backPressedOnce) { (context as? ComponentActivity)?.finish() } else { backPressedOnce = true; Toast.makeText(context, "Presiona Atrás de nuevo para salir", Toast.LENGTH_SHORT).show(); coroutineScope.launch { delay(2000L); backPressedOnce = false } } }
+    BackHandler {
+        if (showInventoryScreen) {
+            showInventoryScreen = false
+        } else if (backPressedOnce) {
+            (context as? ComponentActivity)?.finish()
+        } else {
+            backPressedOnce = true
+            Toast.makeText(context, "Presiona Atrás de nuevo para salir", Toast.LENGTH_SHORT).show()
+            coroutineScope.launch { delay(2000L); backPressedOnce = false }
+        }
+    }
 
-    val crownEmoji = when (currentRole ?: "INVITADO") { "INVITADO" -> "🪵"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
+    val crownEmoji = when (currentRole) { "INVITADO" -> "🪵"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -1351,7 +1382,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         val firstName = userName.split(" ").first()
                         Column {
                             Text(text = if (currentTab == 0) "Hola, $firstName $crownEmoji" else "Tienda de $firstName 🏪", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                            // Mostrar Tasa BCV si está en Venezuela
                             if (viewModel.selectedCountry == "Venezuela" && viewModel.bcvRate > 0) {
                                 Text(text = "Tasa BCV: ${formatBs(viewModel.bcvRate)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f))
                             }
@@ -1383,37 +1413,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             if (isManualSyncAllowed) { DropdownMenuItem(text = { Text("☁️ Sincronización Nube") }, onClick = { showCloudSyncDialog = true; showMenu = false }) }
                             else { DropdownMenuItem(text = { Text("👑 Sincronización Nube", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }, onClick = { showPremiumToastMsg(context); showMenu = false }) }
 
-                            // NUEVO BOTÓN: Sincronizar Cuenta
-                            DropdownMenuItem(text = { Text("🔄 Sincronizar Cuenta") }, onClick = {
-                                showMenu = false
-                                isSyncingAccount = true
-                                coroutineScope.launch(Dispatchers.IO) {
-                                    try {
-                                        val response = RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, userName))
-                                        launch(Dispatchers.Main) {
-                                            val newRole = response.role ?: currentRole
-                                            if (newRole != currentRole && !isSuperAdmin) {
-                                                if (newRole == "INVITADO") { showRoleDowngradeDialog = true } else { showRoleUpgradeDialog = newRole }
-                                                currentRole = newRole
-                                                authPrefs.edit().putString("userRole", currentRole).putString("lastKnownRole", currentRole).apply()
-                                            }
-                                            if (response.planDuration > 0L) {
-                                                currentConsumed = response.consumedSeconds
-                                                currentPlanDuration = response.planDuration
-                                                authPrefs.edit().putLong("consumedSeconds", currentConsumed).putLong("planDuration", currentPlanDuration).apply()
-                                            }
-                                            customToastMessage = "Sincronización completada ✅"
-                                            isSyncingAccount = false
-                                        }
-                                    } catch (e: Exception) {
-                                        launch(Dispatchers.Main) {
-                                            customToastMessage = "Error al sincronizar cuenta"
-                                            isSyncingAccount = false
-                                        }
-                                    }
-                                }
-                            })
-
                             Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
 
                             if (currentTab == 0) {
@@ -1439,7 +1438,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 }
             }
         },
-        floatingActionButton = { if (!showInventoryScreen && currentTab == 0) { FloatingActionButton(onClick = { showAddDialog = true }, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary) { Icon(Icons.Filled.Add, "Agregar") } } }
+        floatingActionButton = {
+            if (!showInventoryScreen && currentTab == 0) {
+                FloatingActionButton(onClick = { showAddDialog = true }, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary) {
+                    Icon(Icons.Filled.Add, "Agregar")
+                }
+            }
+        }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
             if (showInventoryScreen) {
@@ -1451,6 +1456,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     onBack = { showInventoryScreen = false },
                     onAddProductClick = {
                         productToEdit = null
+                        productDraftState.clear()
                         showAddProductDialog = true
                     },
                     onAddToCartClick = { productToAddToCart = it },
@@ -1469,59 +1475,61 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     if (tab == 0) {
                         Column(modifier = Modifier.fillMaxSize()) {
                             DashboardCard(balance, totalIncome, totalExpense, personalCashBalance, personalDigitalBalance)
-                            AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) { Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) { Text("⚠️ ¡Alerta! Tu saldo está por debajo del límite crítico (${formatMoneyMain(viewModel.minBalanceThreshold, viewModel.selectedCountry)}).", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp) } }
+                            AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) {
+                                Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) {
+                                    Text("⚠️ ¡Alerta! Tu saldo está por debajo del límite crítico (${formatMoneyMain(viewModel.minBalanceThreshold, viewModel.selectedCountry)}).", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                }
+                            }
 
-                            activeFiadores.forEachIndexed { index, fiador ->
+                            activeFiadores.forEach { fiador ->
                                 val remaining = fiador.amount - fiador.paidAmount
-                                AnimatedVisibility(visible = true) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                                            .background(Color(0xFFFBC02D), RoundedCornerShape(8.dp))
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .clickable { fiadorToEdit = fiador; showFiadorDialog = true }
-                                            .padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            val phoneStr = if(fiador.phone.isNotBlank()) " \uD83D\uDCDE ${fiador.phone}" else ""
-                                            Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                            Text("Resta: ${formatMoneyMain(remaining, viewModel.selectedCountry)} de ${formatMoneyMain(fiador.amount, viewModel.selectedCountry)} - ${fiador.reason}", color = Color.Black.copy(alpha=0.8f), fontSize = 12.sp)
-                                        }
-                                        IconButton(onClick = { viewModel.deleteFiador(fiador, context) }, modifier = Modifier.size(24.dp)) {
-                                            Icon(Icons.Filled.Check, contentDescription = "Saldado", tint = Color.Black)
-                                        }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFFBC02D), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { fiadorToEdit = fiador; showFiadorDialog = true }.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        val phoneStr = if (fiador.phone.isNotBlank()) " 📞 ${fiador.phone}" else ""
+                                        Text("💰 Cobrar a ${fiador.name}$phoneStr", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        Text("Resta: ${formatMoneyMain(remaining, viewModel.selectedCountry)} de ${formatMoneyMain(fiador.amount, viewModel.selectedCountry)} - ${fiador.reason}", color = Color.Black.copy(alpha = 0.8f), fontSize = 12.sp)
+                                    }
+                                    IconButton(onClick = { viewModel.deleteFiador(fiador, context) }, modifier = Modifier.size(24.dp)) {
+                                        Icon(Icons.Filled.Check, contentDescription = "Saldado", tint = Color.Black)
                                     }
                                 }
                             }
 
-                            activeReminders.forEachIndexed { index, reminder ->
-                                AnimatedVisibility(visible = true) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                                            .background(Color(0xFF1976D2), RoundedCornerShape(8.dp))
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .clickable { reminderToEdit = reminder; showReminderDialog = true }
-                                            .padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text("📅 Pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                            if (reminder.amount > 0) {
-                                                Text("Monto: ${formatMoneyMain(reminder.amount, viewModel.selectedCountry)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
-                                            }
+                            activeReminders.forEach { reminder ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFF1976D2), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { reminderToEdit = reminder; showReminderDialog = true }.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("📅 Pagar: ${reminder.title}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        if (reminder.amount > 0) {
+                                            Text("Monto: ${formatMoneyMain(reminder.amount, viewModel.selectedCountry)}", color = Color.White.copy(alpha = 0.8f), fontSize = 12.sp)
                                         }
-                                        IconButton(onClick = { viewModel.deleteReminder(reminder, context) }, modifier = Modifier.size(24.dp)) {
-                                            Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White)
-                                        }
+                                    }
+                                    IconButton(onClick = { viewModel.deleteReminder(reminder, context) }, modifier = Modifier.size(24.dp)) {
+                                        Icon(Icons.Filled.Check, contentDescription = "Hecho", tint = Color.White)
                                     }
                                 }
                             }
-                            Spacer(modifier = Modifier.height(16.dp)); Text("Movimientos Recientes 📋", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(horizontal = 16.dp)); Spacer(modifier = Modifier.height(8.dp))
-                            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) { items(personalTransactions, key = { it.id }) { transaction -> Box(modifier = Modifier.animateItem(placementSpec = tween(400))) { TransactionItem(transaction = transaction, onDelete = { viewModel.deleteTransaction(transaction); coroutineScope.launch { val result = snackbarHostState.showSnackbar(message = "Registro eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short); if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(transaction) } }) } } }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Movimientos Recientes 📋", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onBackground, modifier = Modifier.padding(horizontal = 16.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
+                                items(personalTransactions, key = { it.id }) { transaction ->
+                                    Box(modifier = Modifier.animateItem(placementSpec = tween(400))) {
+                                        TransactionItem(transaction = transaction, onDelete = {
+                                            viewModel.deleteTransaction(transaction)
+                                            coroutineScope.launch {
+                                                val result = snackbarHostState.showSnackbar(message = "Registro eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short)
+                                                if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(transaction)
+                                            }
+                                        })
+                                    }
+                                }
+                            }
                         }
                     } else {
                         StoreScreen(
@@ -1544,26 +1552,79 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             onSettleFiador = { viewModel.deleteFiador(it, context) },
                             onEditFiador = { fiadorToEdit = it; showFiadorDialog = true },
                             onSettleReminder = { viewModel.deleteReminder(it, context) },
-                            onEditReminder = { reminderToEdit = it; showReminderDialog = true }
+                            onEditReminder = { reminderToEdit = it; showReminderDialog = true },
+                            onRestoreFiador = { nameToRestore, totalAmount, paidAmount ->
+                                viewModel.restoreFiador(nameToRestore, totalAmount, paidAmount, context) { msg ->
+                                    customToastMessage = msg
+                                }
+                            }
                         )
                     }
                 }
             }
 
-            AnimatedVisibility(visible = undoMessage != null, enter = slideInVertically(initialOffsetY = { 50 }) + fadeIn(tween(300)), exit = fadeOut(tween(500)), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp, start = 16.dp, end = 16.dp)) { Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF323232), RoundedCornerShape(8.dp)).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) { Text(text = undoMessage ?: "", color = Color.White, modifier = Modifier.weight(1f), fontSize = 14.sp); TextButton(onClick = { undoAction?.invoke(); undoMessage = null; undoAction = null }) { Text("DESHACER", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold) } } }
-            AnimatedVisibility(visible = customToastMessage != null, enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { 50 }), exit = fadeOut(tween(1500)), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)) { Box(modifier = Modifier.background(Color.DarkGray.copy(alpha = 0.9f), RoundedCornerShape(24.dp)).padding(horizontal = 24.dp, vertical = 12.dp)) { Text(text = customToastMessage ?: "", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp) } }
+            AnimatedVisibility(visible = undoMessage != null, enter = slideInVertically(initialOffsetY = { 50 }) + fadeIn(tween(300)), exit = fadeOut(tween(500)), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp, start = 16.dp, end = 16.dp)) {
+                Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF323232), RoundedCornerShape(8.dp)).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(text = undoMessage ?: "", color = Color.White, modifier = Modifier.weight(1f), fontSize = 14.sp)
+                    TextButton(onClick = { undoAction?.invoke(); undoMessage = null; undoAction = null }) {
+                        Text("DESHACER", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
 
-            // NUEVO: Cartel Visual Flotante para Respaldos y Sincronización
+            AnimatedVisibility(visible = customToastMessage != null, enter = fadeIn(tween(300)) + slideInVertically(initialOffsetY = { 50 }), exit = fadeOut(tween(1500)), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp)) {
+                Box(modifier = Modifier.background(Color.DarkGray.copy(alpha = 0.9f), RoundedCornerShape(24.dp)).padding(horizontal = 24.dp, vertical = 12.dp)) {
+                    Text(text = customToastMessage ?: "", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+            }
+
+            if (!showInventoryScreen && currentTab == 0) {
+                Box(modifier = Modifier.align(Alignment.BottomStart).padding(start = 16.dp, bottom = 16.dp)) {
+                    FloatingActionButton(
+                        onClick = {
+                            if (!isSyncingAccount) {
+                                isSyncingAccount = true
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        val response = RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, userName))
+                                        launch(Dispatchers.Main) {
+                                            val newRole = response.role ?: currentRole
+                                            if (newRole != currentRole && !isSuperAdmin) {
+                                                if (newRole == "INVITADO") { showRoleDowngradeDialog = true } else { showRoleUpgradeDialog = newRole }
+                                                currentRole = newRole
+                                                authPrefs.edit().putString("userRole", currentRole).putString("lastKnownRole", currentRole).apply()
+                                            }
+                                            if (response.planDuration > 0L) {
+                                                currentConsumed = response.consumedSeconds
+                                                currentPlanDuration = response.planDuration
+                                                authPrefs.edit().putLong("consumedSeconds", currentConsumed).putLong("planDuration", currentPlanDuration).apply()
+                                            }
+                                            customToastMessage = "Sincronización completada ✅"
+                                            isSyncingAccount = false
+                                        }
+                                    } catch (e: Exception) {
+                                        launch(Dispatchers.Main) {
+                                            customToastMessage = "Falla de sincronización"
+                                            isSyncingAccount = false
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        containerColor = Color.DarkGray.copy(alpha = 0.5f),
+                        contentColor = Color.White,
+                        modifier = Modifier.size(40.dp),
+                        elevation = FloatingActionButtonDefaults.elevation(0.dp)
+                    ) {
+                        Icon(Icons.Filled.Sync, contentDescription = "Sincronizar Cuenta", modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+
             if (isSyncingAccount || viewModel.isSyncing) {
                 val displayMessage = if (isSyncingAccount) "Sincronizando tu información..." else viewModel.syncMessage
                 Dialog(onDismissRequest = { }) {
-                    Box(
-                        modifier = Modifier
-                            .size(240.dp)
-                            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp))
-                            .padding(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                    Box(modifier = Modifier.size(240.dp).background(MaterialTheme.colorScheme.surface, RoundedCornerShape(16.dp)).padding(24.dp), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(60.dp), strokeWidth = 6.dp)
                             Spacer(modifier = Modifier.height(24.dp))
@@ -1574,7 +1635,565 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             }
         }
 
-        // DIÁLOGO NUEVO: OPCIONES GENERALES
+        // ==========================================
+        // VINCULACIÓN DE TODOS LOS DIÁLOGOS DE LA APP
+        // ==========================================
+
+        // 1. Diálogo de Agregar Transacción (Personal)
+        if (showAddDialog) {
+            AddTransactionDialog(
+                onDismiss = { showAddDialog = false },
+                onConfirm = { desc, amount, isIncome, note, method ->
+                    viewModel.addTransaction(desc, amount, isIncome, note, method)
+                    showAddDialog = false
+                }
+            )
+        }
+
+        // 2. Diálogo de Agregar / Editar Producto (Inventario)
+        if (showAddProductDialog) {
+            AddProductDialog(
+                isEditMode = productToEdit != null,
+                draftState = productDraftState,
+                selectedCountry = viewModel.selectedCountry,
+                bcvRate = viewModel.bcvRate,
+                onDismiss = {
+                    showAddProductDialog = false
+                    productDraftState.clear()
+                    productToEdit = null
+                },
+                onConfirm = { finalPurchase, finalPrice ->
+                    val stock = productDraftState.stockRaw.toIntOrNull() ?: 0
+                    val minStock = productDraftState.minStockRaw.toIntOrNull() ?: 0
+                    val expDate = if (productDraftState.hasExpiry) productDraftState.expiryDateMillis else null
+
+                    if (productToEdit == null) {
+                        viewModel.addProduct(
+                            name = productDraftState.name,
+                            purchasePrice = finalPurchase,
+                            price = finalPrice,
+                            stock = stock,
+                            unit = productDraftState.selectedUnit,
+                            expirationDateInMillis = expDate,
+                            minStock = minStock,
+                            imageUri = productDraftState.imageUri,
+                            context = context,
+                            onConfigured = { msg -> customToastMessage = msg }
+                        )
+                    } else {
+                        viewModel.editProduct(
+                            product = productToEdit!!.copy(
+                                name = productDraftState.name,
+                                purchasePrice = finalPurchase,
+                                price = finalPrice,
+                                stock = stock,
+                                unit = productDraftState.selectedUnit,
+                                expirationDateInMillis = expDate,
+                                minStock = minStock,
+                                imageUri = productDraftState.imageUri
+                            ),
+                            context = context,
+                            onConfigured = { msg -> customToastMessage = msg }
+                        )
+                    }
+                    showAddProductDialog = false
+                    productDraftState.clear()
+                    productToEdit = null
+                }
+            )
+        }
+
+        // 3. Diálogo para añadir al carrito desde el inventario
+        if (productToAddToCart != null) {
+            val currentInCart = shoppingCart.find { it.first.id == productToAddToCart!!.id }?.second ?: 0
+            AddToCartDialog(
+                product = productToAddToCart!!,
+                currentCartQty = currentInCart,
+                onDismiss = { productToAddToCart = null },
+                onConfirm = { qty ->
+                    val existing = shoppingCart.find { it.first.id == productToAddToCart!!.id }
+                    if (existing != null) {
+                        val idx = shoppingCart.indexOf(existing)
+                        shoppingCart[idx] = existing.copy(second = existing.second + qty)
+                    } else {
+                        shoppingCart.add(Pair(productToAddToCart!!, qty))
+                    }
+                    productToAddToCart = null
+                }
+            )
+        }
+
+        // 4. Diálogo de Checkout (Cobrar Carrito)
+        if (showCheckoutDialog) {
+            CheckoutDialog(
+                cartItems = shoppingCart,
+                products = products,
+                totalStoreCash = totalStoreCash,
+                totalStoreDigital = totalStoreDigital,
+                selectedCountry = viewModel.selectedCountry, // <-- ESTO FALTABA
+                bcvRate = viewModel.bcvRate,                 // <-- ESTO FALTABA
+                onDismiss = { showCheckoutDialog = false },
+                onConfirmSale = { items, buyer, summary, netCash, netDigital, pocketDebtAmount ->
+                    viewModel.processCartSale(
+                        cartItems = items,
+                        buyerName = buyer,
+                        paymentSummary = summary,
+                        netCash = netCash,
+                        netDigital = netDigital,
+                        context = context,
+                        onSold = { msg -> customToastMessage = msg }
+                    )
+                    if (pocketDebtAmount > 0) {
+                        viewModel.addPocketDebt(pocketDebtAmount)
+                    }
+                    shoppingCart.clear()
+                    showCheckoutDialog = false
+                },
+                onFiarVenta = { buyer, initialCash, initialDigital ->
+                    checkoutToFiadorName = buyer
+                    checkoutToFiadorCart = shoppingCart.toList()
+                    checkoutToFiadorCash = initialCash
+                    checkoutToFiadorDigital = initialDigital
+                    showCheckoutDialog = false
+                    showFiadorDialog = true
+                }
+            )
+        }
+
+        // 5. Diálogos para eliminar stock parcial y total
+        if (showDeleteQtyDialog && productToDelete != null) {
+            DeleteQuantityDialog(
+                product = productToDelete!!,
+                initialQty = qtyToDelete,
+                onDismiss = { showDeleteQtyDialog = false; productToDelete = null },
+                onConfirm = { qty ->
+                    qtyToDelete = qty.toString()
+                    showDeleteQtyDialog = false
+                    showRedWarningDialog = true
+                }
+            )
+        }
+
+        if (showRedWarningDialog && productToDelete != null) {
+            val q = qtyToDelete.toIntOrNull() ?: 1
+            RedWarningDialog(
+                productName = productToDelete!!.name,
+                qty = q,
+                onDismiss = { showRedWarningDialog = false; productToDelete = null },
+                onConfirm = {
+                    viewModel.reduceProductStock(productToDelete!!, q, context)
+                    showRedWarningDialog = false
+                    productToDelete = null
+                }
+            )
+        }
+
+        if (productToFullDelete != null) {
+            AlertDialog(
+                onDismissRequest = { productToFullDelete = null },
+                title = { Text("Eliminar Producto 🗑️", fontWeight = FontWeight.Bold) },
+                text = { Text("¿Deseas eliminar '${productToFullDelete!!.name}' completamente del inventario?") },
+                containerColor = MaterialTheme.colorScheme.surface,
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val restoredProduct = productToFullDelete!!
+                            viewModel.deleteProductEntirely(productToFullDelete!!, context)
+                            undoMessage = "Producto '${productToFullDelete!!.name}' eliminado"
+                            undoAction = { viewModel.restoreProductStock(restoredProduct, 0, context) }
+                            productToFullDelete = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                    ) { Text("Eliminar") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { productToFullDelete = null }) { Text("Cancelar") }
+                }
+            )
+        }
+
+        // 6. Detalle del Producto
+        if (productToInfo != null) {
+            ProductInfoDialog(
+                product = productToInfo!!,
+                selectedCountry = viewModel.selectedCountry, // NUEVO
+                bcvRate = viewModel.bcvRate,                 // NUEVO
+                onDismiss = { productToInfo = null },
+                onDeleteCompletely = {
+                    val restoredProduct = productToInfo!!
+                    viewModel.deleteProductEntirely(productToInfo!!, context)
+                    undoMessage = "Producto '${productToInfo!!.name}' eliminado"
+                    undoAction = { viewModel.restoreProductStock(restoredProduct, 0, context) }
+                    productToInfo = null
+                }
+            )
+        }
+
+        // 7. Límite de Saldo Crítico
+        if (showLimitDialog) {
+            LimitDialog(
+                currentLimit = viewModel.minBalanceThreshold,
+                onDismiss = { showLimitDialog = false },
+                onConfirm = { limit ->
+                    viewModel.updateMinBalance(limit)
+                    showLimitDialog = false
+                }
+            )
+        }
+
+        // 8. Resumen de Totales
+        if (showSummaryDialog) {
+            SummaryDialog(
+                totalIncome = totalIncome,
+                totalExpense = totalExpense,
+                balance = balance,
+                transactionCount = personalTransactions.size,
+                onDismiss = { showSummaryDialog = false }
+            )
+        }
+
+        // 9. Borrar Historial de Movimientos Personales
+        if (showDeleteHistoryConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteHistoryConfirmDialog = false },
+                title = { Text("Borrar Historial Personal ⚠️", fontWeight = FontWeight.Bold) },
+                text = { Text("¿Estás seguro de que deseas borrar todas las transacciones personales? Las ventas de la tienda no se borrarán.") },
+                containerColor = MaterialTheme.colorScheme.surface,
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deletePersonalTransactions()
+                            showDeleteHistoryConfirmDialog = false
+                            customToastMessage = "Historial personal borrado 🗑️"
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
+                    ) { Text("Borrar") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteHistoryConfirmDialog = false }) { Text("Cancelar") }
+                }
+            )
+        }
+
+        // 10. Reiniciar Ganancias de Tienda
+        if (showResetProfitsDialog) {
+            AlertDialog(
+                onDismissRequest = { showResetProfitsDialog = false },
+                title = { Text("Reiniciar Ganancias 🔄", fontWeight = FontWeight.Bold) },
+                text = { Text("¿Deseas reiniciar el contador de ganancias obtenidas a $0?") },
+                containerColor = MaterialTheme.colorScheme.surface,
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.resetAllProfits()
+                            showResetProfitsDialog = false
+                            customToastMessage = "Ganancias reiniciadas a $0"
+                        }
+                    ) { Text("Reiniciar") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetProfitsDialog = false }) { Text("Cancelar") }
+                }
+            )
+        }
+
+        // 11. Sonidos y Asistente
+        if (showSoundDialog) {
+            SoundSettingsDialog(
+                personalSoundUri = viewModel.personalSoundUri,
+                storeSoundUri = viewModel.storeSoundUri,
+                touchSoundUri = viewModel.touchSoundUri,
+                isVoiceEnabled = viewModel.isVoiceAssistantEnabled,
+                onDismiss = { showSoundDialog = false },
+                onSelectPersonal = { uri -> viewModel.updatePersonalSoundPreference(uri, context) },
+                onSelectStore = { uri -> viewModel.updateStoreSoundPreference(uri, context) },
+                onSelectTouch = { uri -> viewModel.updateTouchSoundPreference(uri, context) },
+                onVoiceToggle = { enabled -> viewModel.updateVoicePreference(enabled) }
+            )
+        }
+
+        // 12. Calendario y Agenda
+        if (showCalendarDialog) {
+            CalendarDialog(
+                currentTab = currentTab,
+                reminders = reminders,
+                fiadores = fiadores,
+                products = products,
+                onDismiss = { showCalendarDialog = false },
+                onDayClick = { dayMillis, _ ->
+                    preselectedDateForEvent = dayMillis
+                    showCalendarDialog = false
+                    if (currentTab == 0) {
+                        showReminderDialog = true
+                    } else {
+                        showFiadorDialog = true
+                    }
+                },
+                onViewReminders = {
+                    showCalendarDialog = false
+                    showRemindersListDialog = true
+                },
+                onViewFiadores = {
+                    showCalendarDialog = false
+                    showFiadoresListDialog = true
+                }
+            )
+        }
+
+        // 13. Recordatorios / Deudas Personales
+        if (showRemindersListDialog) {
+            ScheduledRemindersDialog(
+                reminders = currentTabReminders,
+                onDismiss = { showRemindersListDialog = false },
+                onDelete = { reminder -> viewModel.deleteReminder(reminder, context) },
+                onEdit = { reminder ->
+                    reminderToEdit = reminder
+                    showRemindersListDialog = false
+                    showReminderDialog = true
+                },
+                onCreateNew = {
+                    reminderToEdit = null
+                    preselectedDateForEvent = null
+                    showRemindersListDialog = false
+                    showReminderDialog = true
+                }
+            )
+        }
+
+        if (showReminderDialog) {
+            ReminderDialog(
+                initialReminder = reminderToEdit,
+                preselectedDate = preselectedDateForEvent,
+                onDismiss = {
+                    showReminderDialog = false
+                    reminderToEdit = null
+                    preselectedDateForEvent = null
+                },
+                onConfirm = { title, amount, dateMillis ->
+                    if (reminderToEdit == null) {
+                        viewModel.addReminder(
+                            title = title,
+                            amount = amount,
+                            dateInMillis = dateMillis,
+                            isStore = (currentTab == 1),
+                            context = context,
+                            onConfigured = { msg -> customToastMessage = msg }
+                        )
+                    } else {
+                        viewModel.updateExistingReminder(
+                            reminder = reminderToEdit!!.copy(title = title, amount = amount, targetDateInMillis = dateMillis),
+                            context = context,
+                            onConfigured = { msg -> customToastMessage = msg }
+                        )
+                    }
+                    showReminderDialog = false
+                    reminderToEdit = null
+                    preselectedDateForEvent = null
+                }
+            )
+        }
+
+        // 14. Fiadores / Deudores
+        if (showFiadoresListDialog) {
+            ScheduledFiadoresDialog(
+                fiadores = currentTabFiadores,
+                onDismiss = { showFiadoresListDialog = false },
+                onDelete = { fiador -> viewModel.deleteFiador(fiador, context) },
+                onEdit = { fiador ->
+                    fiadorToEdit = fiador
+                    showFiadoresListDialog = false
+                    showFiadorDialog = true
+                },
+                onCreateNew = {
+                    fiadorToEdit = null
+                    checkoutToFiadorName = ""
+                    checkoutToFiadorCart = emptyList()
+                    checkoutToFiadorCash = 0.0
+                    checkoutToFiadorDigital = 0.0
+                    preselectedDateForEvent = null
+                    showFiadoresListDialog = false
+                    showFiadorDialog = true
+                }
+            )
+        }
+
+        if (showFiadorDialog) {
+            FiadorDialog(
+                initialFiador = fiadorToEdit,
+                initialName = checkoutToFiadorName,
+                initialCart = checkoutToFiadorCart,
+                initialCash = checkoutToFiadorCash,
+                initialDigital = checkoutToFiadorDigital,
+                products = products,
+                preselectedDate = preselectedDateForEvent,
+                isStore = (currentTab == 1 || checkoutToFiadorCart.isNotEmpty()),
+                onDismiss = {
+                    showFiadorDialog = false
+                    fiadorToEdit = null
+                    checkoutToFiadorName = ""
+                    checkoutToFiadorCart = emptyList()
+                    checkoutToFiadorCash = 0.0
+                    checkoutToFiadorDigital = 0.0
+                    preselectedDateForEvent = null
+                },
+                onConfirmNew = { name, phone, cart, pAmount, dateMillis, initialCash, initialDigital ->
+                    viewModel.addFiador(
+                        name = name,
+                        phone = phone,
+                        cartItems = cart,
+                        personalDebtAmount = pAmount,
+                        dateInMillis = dateMillis,
+                        initialCash = initialCash,
+                        initialDigital = initialDigital,
+                        isStore = (currentTab == 1 || cart.isNotEmpty()),
+                        context = context,
+                        onConfigured = { msg -> customToastMessage = msg }
+                    )
+                    shoppingCart.clear()
+                    showFiadorDialog = false
+                    checkoutToFiadorName = ""
+                    checkoutToFiadorCart = emptyList()
+                    checkoutToFiadorCash = 0.0
+                    checkoutToFiadorDigital = 0.0
+                    preselectedDateForEvent = null
+                },
+                onConfirmEdit = { fiador, dateMillis ->
+                    viewModel.updateExistingFiador(
+                        fiador = fiador.copy(targetDateInMillis = dateMillis),
+                        context = context,
+                        onConfigured = { msg -> customToastMessage = msg }
+                    )
+                    showFiadorDialog = false
+                    fiadorToEdit = null
+                    preselectedDateForEvent = null
+                },
+                onConfirmAbono = { fiador, abono, method ->
+                    viewModel.registerAbonoFiador(
+                        fiador = fiador,
+                        abono = abono,
+                        method = method,
+                        context = context,
+                        onResult = { msg -> customToastMessage = msg }
+                    )
+                    showFiadorDialog = false
+                    fiadorToEdit = null
+                }
+            )
+        }
+
+        // 15. Sincronización Nube / Backups
+        if (showCloudSyncDialog) {
+            AlertDialog(
+                onDismissRequest = { showCloudSyncDialog = false },
+                title = { Text("Sincronización en la Nube ☁️", fontWeight = FontWeight.Bold) },
+                containerColor = MaterialTheme.colorScheme.surface,
+                text = {
+                    Column {
+                        Text("Guarda o restaura copias de seguridad de tus datos en la nube.", fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                showCloudSyncDialog = false
+                                backupNameInput = "Respaldo - " + SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date())
+                                showBackupNameDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("📤 Crear Nueva Copia de Seguridad") }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                showCloudSyncDialog = false
+                                isLoadingList = true
+                                showBackupListDialog = true
+                                viewModel.fetchBackupList { list ->
+                                    cloudBackupsList = list
+                                    isLoadingList = false
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("📥 Ver y Restaurar Copias") }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = { TextButton(onClick = { showCloudSyncDialog = false }) { Text("Cerrar") } }
+            )
+        }
+
+        if (showBackupNameDialog) {
+            AlertDialog(
+                onDismissRequest = { showBackupNameDialog = false },
+                title = { Text("Nombre del Respaldo ✍️", fontWeight = FontWeight.Bold) },
+                containerColor = MaterialTheme.colorScheme.surface,
+                text = {
+                    OutlinedTextField(
+                        value = backupNameInput,
+                        onValueChange = { backupNameInput = it },
+                        label = { Text("Nombre") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (backupNameInput.isNotBlank()) {
+                            viewModel.manualBackup(backupNameInput.trim()) { msg -> customToastMessage = msg }
+                            showBackupNameDialog = false
+                        }
+                    }) { Text("Guardar") }
+                },
+                dismissButton = { TextButton(onClick = { showBackupNameDialog = false }) { Text("Cancelar") } }
+            )
+        }
+
+        if (showBackupListDialog) {
+            AlertDialog(
+                onDismissRequest = { showBackupListDialog = false },
+                title = { Text("Copias Guardadas ☁️", fontWeight = FontWeight.Bold) },
+                containerColor = MaterialTheme.colorScheme.surface,
+                text = {
+                    if (isLoadingList) {
+                        CircularProgressIndicator(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally))
+                    } else if (cloudBackupsList.isNullOrEmpty()) {
+                        Text("No tienes copias de seguridad en la nube.", color = Color.Gray)
+                    } else {
+                        LazyColumn(modifier = Modifier.heightIn(max = 350.dp)) {
+                            items(cloudBackupsList!!) { record ->
+                                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(record.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                        Text(formatDate(record.timestamp), fontSize = 12.sp, color = Color.Gray)
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                            TextButton(onClick = {
+                                                viewModel.deleteBackupRecord(record.id) { msg ->
+                                                    customToastMessage = msg
+                                                    viewModel.fetchBackupList { list -> cloudBackupsList = list }
+                                                }
+                                            }, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) {
+                                                Text("Eliminar")
+                                            }
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Button(onClick = {
+                                                viewModel.restoreFromRecord(record) { msg ->
+                                                    customToastMessage = msg
+                                                    showBackupListDialog = false
+                                                }
+                                            }) {
+                                                Text("Restaurar")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = { TextButton(onClick = { showBackupListDialog = false }) { Text("Cerrar") } }
+            )
+        }
+
+        // 16. Opciones, Planes, Chats y Panel Admin
         if (showOptionsDialog) {
             AlertDialog(
                 onDismissRequest = { showOptionsDialog = false }, properties = DialogProperties(dismissOnClickOutside = false),
@@ -1705,286 +2324,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 }, confirmButton = { }, dismissButton = { }
             )
         }
-
-        if (showCloudSyncDialog) {
-            val autoTimePickerDialog = remember { android.app.TimePickerDialog(context, android.R.style.Theme_Holo_Dialog, { _, h, m -> viewModel.updateAutoSyncSchedule(viewModel.getApplication(), viewModel.autoSyncFrequency, h, m) }, viewModel.autoSyncHour, viewModel.autoSyncMinute, false) }
-            val isAutoEnabled = viewModel.autoSyncFrequency > 0
-
-            AlertDialog(
-                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Sincronización Nube ☁️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)); if (!viewModel.isSyncing) { IconButton(onClick = { showCloudSyncDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } } }, containerColor = MaterialTheme.colorScheme.surface,
-                text = {
-                    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Tus datos se guardan en el servidor de forma segura.", textAlign = TextAlign.Center, color = Color.Gray, fontSize = 13.sp); Spacer(modifier = Modifier.height(16.dp))
-                        if (viewModel.lastSyncDate > 0L) { Text("Último respaldo en este equipo:", fontSize = 13.sp); Text(formatDate(viewModel.lastSyncDate), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        Row(modifier = Modifier.fillMaxWidth().alpha(if (isAutoSyncAllowed) 1f else 0.5f).clickable { if (isAutoSyncAllowed) { val newFreq = if (isAutoEnabled) 0 else 1; viewModel.updateAutoSyncSchedule(viewModel.getApplication(), newFreq, viewModel.autoSyncHour, viewModel.autoSyncMinute) } else { showPremiumToastMsg(context) } }, verticalAlignment = Alignment.CenterVertically) {
-                            Switch(
-                                checked = isAutoEnabled && isAutoSyncAllowed,
-                                onCheckedChange = null,
-                                enabled = isAutoSyncAllowed,
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    uncheckedThumbColor = Color.White,
-                                    checkedTrackColor = MaterialTheme.colorScheme.primary,
-                                    uncheckedTrackColor = Color.Gray,
-                                    disabledCheckedThumbColor = Color.White,
-                                    disabledUncheckedThumbColor = Color.White,
-                                    disabledCheckedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                                    disabledUncheckedTrackColor = Color.Gray.copy(alpha = 0.5f),
-                                    uncheckedBorderColor = Color.Transparent
-                                )
-                            );
-                            Spacer(modifier = Modifier.width(12.dp));
-                            Text(if(isAutoSyncAllowed) "Modo Automático" else "👑 Modo Automático", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        }
-
-                        if (!isAutoSyncAllowed) { Text("La actualización automática es Premium.", color = Color.Gray, fontSize = 12.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top=4.dp)) }; Spacer(modifier = Modifier.height(16.dp))
-
-                        if (viewModel.isSyncing) { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary); Text("Procesando...", modifier = Modifier.padding(top = 8.dp)) } else {
-                            if (isAutoEnabled && isAutoSyncAllowed) {
-                                var expandedFreq by remember { mutableStateOf(false) }; val freqOptions = listOf(1 to "Diario", 7 to "Semanal", 30 to "Mensual"); val currentFreqText = freqOptions.find { it.first == viewModel.autoSyncFrequency }?.second ?: "Diario"
-                                Text("Configuración Automática ⏱️", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color.Gray); Spacer(modifier = Modifier.height(8.dp))
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) { OutlinedButton(onClick = { expandedFreq = true }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 4.dp)) { Text(currentFreqText, maxLines=1) }; DropdownMenu(expanded = expandedFreq, onDismissRequest = { expandedFreq = false }) { freqOptions.forEach { (days, text) -> DropdownMenuItem(text = { Text(text) }, onClick = { viewModel.updateAutoSyncSchedule(viewModel.getApplication(), days, viewModel.autoSyncHour, viewModel.autoSyncMinute); expandedFreq = false }) } } }; OutlinedButton(onClick = { autoTimePickerDialog.show() }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { val formatStr = String.format("%02d:%02d", if(viewModel.autoSyncHour == 0) 12 else if(viewModel.autoSyncHour > 12) viewModel.autoSyncHour - 12 else viewModel.autoSyncHour, viewModel.autoSyncMinute); val amPm = if(viewModel.autoSyncHour >= 12) "PM" else "AM"; Text("$formatStr $amPm ⏰", maxLines=1) } }
-                                Text("La app subirá tus datos automáticamente.", fontSize = 11.sp, color = Color.Gray, modifier = Modifier.padding(top = 4.dp), textAlign = TextAlign.Center)
-                            } else { Button(onClick = { if (isManualSyncAllowed) { backupNameInput = ""; showBackupNameDialog = true } else { showPremiumToastMsg(context) } }, modifier = Modifier.fillMaxWidth(), colors = if (isManualSyncAllowed) ButtonDefaults.buttonColors() else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) { Text(if (isManualSyncAllowed) "Crear Respaldo Manual ⬆️" else "👑 Crear Respaldo Manual ⬆️", color = if (isManualSyncAllowed) Color.White else Color.Gray) } }
-                            Spacer(modifier = Modifier.height(16.dp))
-                            OutlinedButton(onClick = { if (isManualSyncAllowed) { isLoadingList = true; viewModel.fetchBackupList { list -> isLoadingList = false; cloudBackupsList = list; showBackupListDialog = true } } else { showPremiumToastMsg(context) } }, modifier = Modifier.fillMaxWidth()) { if (isLoadingList) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = MaterialTheme.colorScheme.primary) else Text(if (isManualSyncAllowed) "Listas de Copias de Seguridad 🗂️" else "👑 Listas de Copias de Seguridad 🗂️", color = if (isManualSyncAllowed) MaterialTheme.colorScheme.primary else Color.Gray) }
-                        }
-                    }
-                }, confirmButton = {}, dismissButton = { }
-            )
-        }
-
-        if (showBackupNameDialog) {
-            AlertDialog(
-                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Nombre del Respaldo", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showBackupNameDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } }, containerColor = MaterialTheme.colorScheme.surface,
-                text = { OutlinedTextField(value = backupNameInput, onValueChange = { backupNameInput = it.replaceFirstChar { c -> if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString() } }, label = { Text("Ej: Antes de formatear") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences)) },
-                confirmButton = { Button(onClick = { if (backupNameInput.isNotBlank()) { viewModel.manualBackup(backupNameInput.trim()) { msg -> customToastMessage = msg; showBackupNameDialog = false; showCloudSyncDialog = false } } else { Toast.makeText(context, "Ingresa un nombre", Toast.LENGTH_SHORT).show() } }) { Text("Guardar Respaldo") } },
-                dismissButton = { }
-            )
-        }
-
-        if (showBackupListDialog) {
-            AlertDialog(
-                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Copias de Seguridad 🗂️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showBackupListDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-                containerColor = MaterialTheme.colorScheme.surface,
-                text = {
-                    if (cloudBackupsList.isNullOrEmpty()) {
-                        Text("No hay copias guardadas en la nube.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp))
-                    } else {
-                        LazyColumn(modifier = Modifier.heightIn(max = 350.dp)) {
-                            items(cloudBackupsList!!) { record ->
-                                Card(modifier = Modifier.fillMaxWidth().padding(vertical=4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.4f))) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(record.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                                if (record.timestamp > 0) { Text(formatDate(record.timestamp), fontSize = 12.sp, color = Color.Gray) }
-                                            }
-                                            IconButton(onClick = { viewModel.deleteBackupRecord(record.id) { msg -> customToastMessage = msg; cloudBackupsList = cloudBackupsList?.filter { it.id != record.id } } }) {
-                                                Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(alpha = 0.8f))
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Button(onClick = { viewModel.restoreFromRecord(record) { msg -> customToastMessage = msg; showBackupListDialog = false; showCloudSyncDialog = false } }, modifier = Modifier.fillMaxWidth()) {
-                                            Text("Restaurar esta copia")
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                confirmButton = { }, dismissButton = { }
-            )
-        }
-
-        if (showAddDialog) AddTransactionDialog(onDismiss = { showAddDialog = false }, onConfirm = { d, a, i, n, m -> viewModel.addTransaction(d, a, i, n, m); showAddDialog = false })
-        if (showLimitDialog) LimitDialog(currentLimit = viewModel.minBalanceThreshold, onDismiss = { showLimitDialog = false }, onConfirm = { viewModel.updateMinBalance(it); showLimitDialog = false })
-
-        if (showDayEventsDialog && preselectedDateForEvent != null) {
-            val dayReminders = currentTabReminders.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) }
-            val dayFiadores = currentTabFiadores.filter { isSameDay(it.targetDateInMillis, preselectedDateForEvent!!) }
-            val dayProducts = if(currentTab == 1) products.filter { it.expirationDateInMillis != null && isSameDay(it.expirationDateInMillis, preselectedDateForEvent!!) } else emptyList()
-
-            AlertDialog(
-                onDismissRequest = { }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
-                title = {
-                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Eventos del Día 📅", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-                        IconButton(onClick = { showDayEventsDialog = false; preselectedDateForEvent = null }) { Icon(Icons.Filled.Close, "Cerrar") }
-                    }
-                },
-                containerColor = MaterialTheme.colorScheme.surface,
-                text = {
-                    LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
-                        items(dayReminders) { r ->
-                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { showDayEventsDialog = false; reminderToEdit = r; showReminderDialog = true }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2).copy(alpha = 0.2f))) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🔵", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { Text("Pagar Deuda", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary); Text(r.title, fontWeight = FontWeight.Bold); if (r.amount > 0) { Text(formatMoneyMain(r.amount, viewModel.selectedCountry), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface) } } }
-                            }
-                        }
-                        items(dayFiadores) { f ->
-                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { showDayEventsDialog = false; fiadorToEdit = f; showFiadorDialog = true }, colors = CardDefaults.cardColors(containerColor = Color(0xFFFBC02D).copy(alpha = 0.2f))) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🟡", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { val remaining = f.amount - f.paidAmount; Text("Cobrar Dinero", fontSize = 12.sp, color = Color(0xFFFBC02D)); Text("${f.name} - Resta: ${formatMoneyMain(remaining, viewModel.selectedCountry)}", fontWeight = FontWeight.Bold) } }
-                            }
-                        }
-                        items(dayProducts) { p ->
-                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFD32F2F).copy(alpha = 0.2f))) {
-                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text("🔴", modifier = Modifier.padding(end = 8.dp)); Column(modifier = Modifier.weight(1f)) { Text("Vencimiento de Producto", fontSize = 12.sp, color = Color(0xFFD32F2F)); Text("${p.name} (${p.stock} ${p.unit})", fontWeight = FontWeight.Bold) } }
-                            }
-                        }
-                    }
-                },
-                confirmButton = { }, dismissButton = { }
-            )
-        }
-
-        if (showCalendarDialog) { CalendarDialog(currentTab = currentTab, reminders = currentTabReminders, fiadores = currentTabFiadores, products = products, onDismiss = { showCalendarDialog = false }, onDayClick = { dateMillis, hasEvents -> if (isDeudasAllowed) { preselectedDateForEvent = dateMillis; showDayEventsDialog = true } else { showPremiumToastMsg(context) } }, onViewReminders = { showRemindersListDialog = true; showCalendarDialog = false }, onViewFiadores = { showFiadoresListDialog = true; showCalendarDialog = false }) }
-        if (showSummaryDialog) SummaryDialog(totalIncome = totalIncome, totalExpense = totalExpense, balance = balance, transactionCount = personalTransactions.size, onDismiss = { showSummaryDialog = false })
-        if (showSoundDialog) { SoundSettingsDialog(personalSoundUri = viewModel.personalSoundUri, storeSoundUri = viewModel.storeSoundUri, touchSoundUri = viewModel.touchSoundUri, isVoiceEnabled = viewModel.isVoiceAssistantEnabled, onDismiss = { showSoundDialog = false }, onSelectPersonal = { viewModel.updatePersonalSoundPreference(it, context) }, onSelectStore = { viewModel.updateStoreSoundPreference(it, context) }, onSelectTouch = { viewModel.updateTouchSoundPreference(it, context) }, onVoiceToggle = { viewModel.updateVoicePreference(it) }) }
-
-        if (showDeleteHistoryConfirmDialog) {
-            AlertDialog(
-                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Borrar Historial Personal ⚠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showDeleteHistoryConfirmDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-                text = { Text("¿Estás seguro de que deseas borrar todo el historial personal de transacciones?") },
-                confirmButton = { Button(onClick = { viewModel.deletePersonalTransactions(); showDeleteHistoryConfirmDialog = false; customToastMessage = "Historial borrado 🗑️" }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F), contentColor = Color.White)) { Text("Sí, borrar", fontWeight = FontWeight.Bold) } },
-                dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
-            )
-        }
-
-        if (showResetProfitsDialog) {
-            AlertDialog(
-                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Opciones de Ganancias 💰", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showResetProfitsDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-                text = {
-                    Column {
-                        Text("Ganancias Totales: ${formatMoneyMain(totalProfit, viewModel.selectedCountry)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Divider(modifier = Modifier.padding(vertical = 12.dp))
-                        Text("Disponible en Efectivo (Caja):", fontSize = 14.sp, color = Color.Gray)
-                        Text(formatMoneyMain(totalStoreCash, viewModel.selectedCountry), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Disponible en Digital (Banco):", fontSize = 14.sp, color = Color.Gray)
-                        Text(formatMoneyMain(totalStoreDigital, viewModel.selectedCountry), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-                        if (viewModel.pocketDebt > 0) {
-                            Divider(modifier = Modifier.padding(vertical = 12.dp))
-                            Text("Deuda al Bolsillo (Vueltos):", fontSize = 14.sp, color = Color(0xFFE65100))
-                            Text(formatMoneyMain(viewModel.pocketDebt, viewModel.selectedCountry), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE65100))
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            if (totalStoreCash >= viewModel.pocketDebt) {
-                                Button(
-                                    onClick = { viewModel.reimbursePocketDebt(viewModel.pocketDebt); customToastMessage = "Deuda al bolsillo recuperada" },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)), modifier = Modifier.fillMaxWidth()
-                                ) { Text("Recuperar Vuelto a mi Bolsillo") }
-                            } else {
-                                Text("⚠️ Aún no hay suficiente efectivo en caja para recuperar el vuelto.", color = Color.Red, fontSize = 12.sp)
-                            }
-                        }
-
-                        Divider(modifier = Modifier.padding(vertical = 12.dp))
-                        Button(onClick = { showAddBaseDialog = true }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary), modifier = Modifier.fillMaxWidth()) { Text("➕ Ingresar Base a Caja (Menudo)") }
-                    }
-                },
-                confirmButton = { TextButton(onClick = { viewModel.resetAllProfits(); showResetProfitsDialog = false; customToastMessage = "Caja y Banco reiniciados a 0" }) { Text("Reiniciar a 0", color = Color.Red) } },
-                dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
-            )
-        }
-
-        if (showAddBaseDialog) {
-            var baseAmount by remember { mutableStateOf("") }
-            val focusRequester = remember { FocusRequester() }
-            LaunchedEffect(Unit) { delay(100); focusRequester.requestFocus() }
-            AlertDialog(
-                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Ingresar Base de Caja 💵", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showAddBaseDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-                containerColor = MaterialTheme.colorScheme.surface,
-                text = {
-                    Column {
-                        Text("Ingresa el monto de menudo para dar vueltos.", fontSize = 13.sp, color = Color.Gray)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = baseAmount, onValueChange = { baseAmount = cleanAmountInput(it) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth().focusRequester(focusRequester), leadingIcon = { Text(if (viewModel.selectedCountry == "Venezuela") "$" else "$", color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) }, placeholder = { Text("0") }, textStyle = LocalTextStyle.current.copy(fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(onClick = {
-                        val amount = baseAmount.toDoubleOrNull() ?: 0.0
-                        if (amount > 0) {
-                            viewModel.insertRawTransaction(Transaction(description = "Venta: Base de Caja", amount = 0.0, isIncome = true, note = "Dinero ingresado para dar vueltos", profit = 0.0, cashAmount = amount, digitalAmount = 0.0))
-                            customToastMessage = "Base de caja ingresada: ${formatMoneyMain(amount, viewModel.selectedCountry)}"
-                            showAddBaseDialog = false; showResetProfitsDialog = false
-                        }
-                    }) { Text("Añadir") }
-                },
-                dismissButton = { }
-            )
-        }
-
-        if (productToInfo != null) { ProductInfoDialog(product = productToInfo!!, onDismiss = { productToInfo = null }, onDeleteCompletely = { productToFullDelete = productToInfo; productToInfo = null }) }
-
-        if (productToFullDelete != null) {
-            AlertDialog(
-                onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
-                title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Eliminar Producto ⚠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { productToFullDelete = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
-                text = { Text("¿Estás seguro de que deseas eliminar completamente '${productToFullDelete!!.name}' de tu inventario?") },
-                confirmButton = { Button(onClick = { val restoredProduct = productToFullDelete!!; viewModel.deleteProductEntirely(productToFullDelete!!, context); undoMessage = "Producto '${productToFullDelete!!.name}' eliminado"; undoAction = { viewModel.restoreProductStock(restoredProduct, 0, context) }; productToFullDelete = null }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F), contentColor = Color.White)) { Text("Eliminar", fontWeight = FontWeight.Bold) } },
-                dismissButton = { }, containerColor = MaterialTheme.colorScheme.surface
-            )
-        }
-
-        if (showAddProductDialog) {
-            AddProductDialog(
-                isEditMode = productToEdit != null,
-                draftState = productDraftState,
-                selectedCountry = viewModel.selectedCountry,
-                bcvRate = viewModel.bcvRate,
-                onDismiss = { showAddProductDialog = false; if (productToEdit != null) { productDraftState.clear(); productToEdit = null } },
-                onConfirm = { finalPurchasePrice, finalSellPrice ->
-                    val s = productDraftState.stockRaw.toIntOrNull()
-                    val minS = productDraftState.minStockRaw.toIntOrNull() ?: 0
-                    if (productDraftState.name.isNotBlank() && finalSellPrice > 0 && s != null) {
-                        val capName = productDraftState.name.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
-                        val expiry = if (productDraftState.hasExpiry) productDraftState.expiryDateMillis else null
-                        if (productToEdit != null) {
-                            viewModel.editProduct(productToEdit!!.copy(name = capName, purchasePrice = finalPurchasePrice, price = finalSellPrice, stock = s, unit = productDraftState.selectedUnit, expirationDateInMillis = expiry, minStock = minS, imageUri = productDraftState.imageUri), context) { msg -> customToastMessage = msg }
-                        } else {
-                            viewModel.addProduct(capName, finalPurchasePrice, finalSellPrice, s, productDraftState.selectedUnit, expiry, minS, productDraftState.imageUri, context) { msg -> customToastMessage = msg }
-                        }
-                        productDraftState.clear()
-                        showAddProductDialog = false
-                        productToEdit = null
-                    } else {
-                        Toast.makeText(context, "Llena los campos correctamente", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
-        }
-
-        if (productToAddToCart != null) { AddToCartDialog(product = productToAddToCart!!, currentCartQty = shoppingCart.find { it.first.id == productToAddToCart!!.id }?.second ?: 0, onDismiss = { productToAddToCart = null }, onConfirm = { qty -> val existing = shoppingCart.find { it.first.id == productToAddToCart!!.id }; if (existing != null) { val idx = shoppingCart.indexOf(existing); shoppingCart[idx] = existing.copy(second = existing.second + qty) } else { shoppingCart.add(Pair(productToAddToCart!!, qty)) }; customToastMessage = "Añadido al carrito 🛒"; productToAddToCart = null }) }
-
-        if (showCheckoutDialog) {
-            CheckoutDialog(cartItems = shoppingCart, products = products, totalStoreCash = totalStoreCash, totalStoreDigital = totalStoreDigital, onDismiss = { showCheckoutDialog = false }, onConfirmSale = { items, buyer, summary, netCash, netDigital, pocketDebtAmount -> viewModel.processCartSale(items, buyer, summary, netCash, netDigital, context) { msg -> customToastMessage = msg }; if (pocketDebtAmount > 0) { viewModel.addPocketDebt(pocketDebtAmount) }; shoppingCart.clear(); showCheckoutDialog = false; showInventoryScreen = false }, onFiarVenta = { buyer, cashAmount, digitalAmount -> checkoutToFiadorName = buyer; checkoutToFiadorCart = shoppingCart.toList(); checkoutToFiadorCash = cashAmount; checkoutToFiadorDigital = digitalAmount; showCheckoutDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; showFiadorDialog = true })
-        }
-
-        if (showDeleteQtyDialog && productToDelete != null) { DeleteQuantityDialog(product = productToDelete!!, initialQty = qtyToDelete, onDismiss = { showDeleteQtyDialog = false; productToDelete = null }, onConfirm = { qty -> qtyToDelete = qty.toString(); showDeleteQtyDialog = false; showRedWarningDialog = true }) }
-        if (showRedWarningDialog && productToDelete != null) { RedWarningDialog(productName = productToDelete!!.name, qty = qtyToDelete.toIntOrNull() ?: 1, onDismiss = { showRedWarningDialog = false; productToDelete = null }, onConfirm = { val p = productToDelete!!; val q = qtyToDelete.toIntOrNull() ?: 1; viewModel.reduceProductStock(p, q, context); undoMessage = "Eliminados $q uds. de '${p.name}'"; undoAction = { viewModel.restoreProductStock(p, q, context) }; showRedWarningDialog = false; productToDelete = null }) }
-        if (showRemindersListDialog) { ScheduledRemindersDialog(reminders = currentTabReminders, onDismiss = { showRemindersListDialog = false }, onDelete = { viewModel.deleteReminder(it, context) }, onEdit = { reminderToEdit = it; showRemindersListDialog = false; showReminderDialog = true }, onCreateNew = { reminderToEdit = null; showRemindersListDialog = false; showReminderDialog = true }) }
-        if (showReminderDialog) { ReminderDialog(initialReminder = reminderToEdit, preselectedDate = preselectedDateForEvent, onDismiss = { showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }, onConfirm = { t, a, d -> if (reminderToEdit != null) { viewModel.updateExistingReminder(reminderToEdit!!.copy(title = t, amount = a, targetDateInMillis = d), context) { customToastMessage = it } } else { viewModel.addReminder(t, a, d, currentTab == 1, context) { customToastMessage = it } }; showReminderDialog = false; reminderToEdit = null; preselectedDateForEvent = null }) }
-        if (showFiadoresListDialog) { ScheduledFiadoresDialog(fiadores = currentTabFiadores, onDismiss = { showFiadoresListDialog = false }, onDelete = { viewModel.deleteFiador(it, context) }, onEdit = { fiadorToEdit = it; showFiadoresListDialog = false; showFiadorDialog = true }, onCreateNew = { fiadorToEdit = null; showFiadoresListDialog = false; showFiadorDialog = true }) }
-        if (showFiadorDialog) { FiadorDialog(initialFiador = fiadorToEdit, initialName = checkoutToFiadorName, initialCart = checkoutToFiadorCart, initialCash = checkoutToFiadorCash, initialDigital = checkoutToFiadorDigital, products = products, preselectedDate = preselectedDateForEvent, isStore = currentTab == 1, onDismiss = { showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0 }, onConfirmNew = { n, p, cartItemsFiado, pAmount, d, iCash, iDigital -> viewModel.addFiador(n, p, cartItemsFiado, pAmount, d, iCash, iDigital, currentTab == 1, context) { customToastMessage = it }; showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; if (checkoutToFiadorCart.isNotEmpty()) { shoppingCart.clear(); showInventoryScreen = false }; checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0 }, onConfirmEdit = { f, d -> viewModel.updateExistingFiador(f.copy(targetDateInMillis = d), context) { customToastMessage = it }; showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0 }, onConfirmAbono = { f, abono, method -> viewModel.registerAbonoFiador(f, abono, method, context) { customToastMessage = it }; showFiadorDialog = false; fiadorToEdit = null; preselectedDateForEvent = null; checkoutToFiadorName = ""; checkoutToFiadorCart = emptyList(); checkoutToFiadorCash = 0.0; checkoutToFiadorDigital = 0.0 }) }
     }
 }
 
-// ==========================================
-// 7. COMPONENTES DE LA TIENDA E INVENTARIO
-// ==========================================
 @Composable
 fun StoreScreen(
     products: List<Product>,
@@ -1993,8 +2335,8 @@ fun StoreScreen(
     isLockedStore: Boolean,
     totalStoreCash: Double,
     totalStoreDigital: Double,
-    selectedCountry: String, // SOLUCIÓN: Agregado
-    bcvRate: Double,         // SOLUCIÓN: Agregado
+    selectedCountry: String,
+    bcvRate: Double,
     onOpenInventory: () -> Unit,
     onOpenCheckout: () -> Unit,
     onResetProfitsClick: () -> Unit,
@@ -2006,7 +2348,8 @@ fun StoreScreen(
     onSettleFiador: (Fiador) -> Unit,
     onEditFiador: (Fiador) -> Unit,
     onSettleReminder: (Reminder) -> Unit,
-    onEditReminder: (Reminder) -> Unit
+    onEditReminder: (Reminder) -> Unit,
+    onRestoreFiador: (String, Double, Double) -> Unit
 ) {
     val totalInventoryValue = remember(products) { products.sumOf { it.price * it.stock } }
     val totalInversion = remember(products) { products.sumOf { it.purchasePrice * it.stock } }
@@ -2015,6 +2358,7 @@ fun StoreScreen(
     var showVendidosDialog by remember { mutableStateOf(false) }
     var showInversionDialog by remember { mutableStateOf(false) }
     var showGananciaFuturaDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     if (showInversionDialog) {
         AlertDialog(
@@ -2100,18 +2444,42 @@ fun StoreScreen(
 
         AnimatedVisibility(visible = shoppingCart.isNotEmpty()) {
             val totalCart = shoppingCart.sumOf { it.first.price * it.second }; val totalItems = shoppingCart.sumOf { it.second }
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) { Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White); Spacer(Modifier.width(12.dp)); Column(modifier = Modifier.weight(1f)) { Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White); Text("Total: ${formatMoneyMain(totalCart, selectedCountry)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f)) }; Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White) } }
+            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) {
+                Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White)
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Total: ${formatMoneyMain(totalCart, selectedCountry)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f))
+                            if (selectedCountry == "Venezuela" && bcvRate > 0) {
+                                Text(" ${formatMoneySec(totalCart, selectedCountry, bcvRate).replace("=", "-")}", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f), modifier = Modifier.padding(start = 4.dp))
+                            }
+                        }
+                    }
+                    Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White)
+                }
+            }
         }
     }
-    if (showVendidosDialog) ProductosVendidosDialog(transactions = transactions, activeFiadores = activeFiadores, onDismiss = { showVendidosDialog = false }, onDeleteVentas = onDeleteVentas)
+
+    if (showVendidosDialog) {
+        ProductosVendidosDialog(
+            transactions = transactions,
+            activeFiadores = activeFiadores,
+            onDismiss = { showVendidosDialog = false },
+            onDeleteVentas = onDeleteVentas,
+            onRestoreFiador = onRestoreFiador
+        )
+    }
 }
 
 @Composable
 fun InventoryScreen(
     products: List<Product>,
     shoppingCart: List<Pair<Product, Int>>,
-    selectedCountry: String, // SOLUCIÓN: Agregado
-    bcvRate: Double,         // SOLUCIÓN: Agregado
+    selectedCountry: String,
+    bcvRate: Double,
     onBack: () -> Unit,
     onAddProductClick: () -> Unit,
     onAddToCartClick: (Product) -> Unit,
@@ -2121,44 +2489,79 @@ fun InventoryScreen(
     onLongDeleteClick: (Product) -> Unit,
     onInfoClick: (Product) -> Unit
 ) {
-    var searchQuery by remember { mutableStateOf("") }; var sortBy by remember { mutableStateOf("A-Z") }
+    var searchQuery by remember { mutableStateOf("") }
+    var sortBy by remember { mutableStateOf("A-Z") }
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
+
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(Unit) { focusManager.clearFocus() }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-            Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Atrás", tint = MaterialTheme.colorScheme.onPrimary) }; Text("Inventario 📦", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.weight(1f)) }
+            Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { focusManager.clearFocus(); onBack() }) { Icon(Icons.Filled.ArrowBack, contentDescription = "Atrás", tint = MaterialTheme.colorScheme.onPrimary) }
+                Text("Inventario 📦", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.weight(1f))
+            }
             Spacer(modifier = Modifier.height(16.dp))
             OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("Buscar en el inventario...") }, leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Buscar") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true, shape = RoundedCornerShape(12.dp))
             Spacer(modifier = Modifier.height(12.dp))
-            ScrollableTabRow(selectedTabIndex = listOf("A-Z", "Poco Stock", "Vencimiento", "Precio", "Recientes").indexOf(sortBy), modifier = Modifier.fillMaxWidth(), edgePadding = 16.dp, containerColor = Color.Transparent, divider = {}, indicator = {}) { listOf("A-Z", "Poco Stock", "Vencimiento", "Precio", "Recientes").forEach { tab -> FilterChip(selected = sortBy == tab, onClick = { sortBy = tab }, label = { Text(tab) }, modifier = Modifier.padding(end = 8.dp)) } }
+            ScrollableTabRow(selectedTabIndex = listOf("A-Z", "Poco Stock", "Vencimiento", "Precio", "Recientes").indexOf(sortBy), modifier = Modifier.fillMaxWidth(), edgePadding = 16.dp, containerColor = Color.Transparent, divider = {}, indicator = {}) {
+                listOf("A-Z", "Poco Stock", "Vencimiento", "Precio", "Recientes").forEach { tab ->
+                    FilterChip(selected = sortBy == tab, onClick = { sortBy = tab; focusManager.clearFocus() }, label = { Text(tab) }, modifier = Modifier.padding(end = 8.dp))
+                }
+            }
             Spacer(modifier = Modifier.height(8.dp))
 
             AnimatedVisibility(visible = shoppingCart.isNotEmpty()) {
                 val totalCart = shoppingCart.sumOf { it.first.price * it.second }; val totalItems = shoppingCart.sumOf { it.second }
-                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) { Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White); Spacer(Modifier.width(12.dp)); Column(modifier = Modifier.weight(1f)) { Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White); Text("Total: ${formatMoneyMain(totalCart, selectedCountry)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f)) }; Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White) } }
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp).clickable { focusManager.clearFocus(); onOpenCheckout() }, colors = CardDefaults.cardColors(containerColor = Color(0xFF1976D2)), shape = RoundedCornerShape(12.dp)) {
+                    Row(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.ShoppingCart, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Carrito activo ($totalItems artículos)", fontWeight = FontWeight.Bold, color = Color.White)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Total: ${formatMoneyMain(totalCart, selectedCountry)}", fontSize = 14.sp, color = Color.White.copy(alpha = 0.9f))
+                                if (selectedCountry == "Venezuela" && bcvRate > 0) {
+                                    Text(" ${formatMoneySec(totalCart, selectedCountry, bcvRate).replace("=", "-")}", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f), modifier = Modifier.padding(start = 4.dp))
+                                }
+                            }
+                        }
+                        Icon(Icons.Filled.ArrowForward, contentDescription = "Cobrar", tint = Color.White)
+                    }
+                }
             }
+
             val sortedProducts = remember(products, searchQuery, sortBy) {
                 val filtered = products.filter { it.name.contains(searchQuery, ignoreCase = true) }
-                when (sortBy) { "A-Z" -> filtered.sortedBy { it.name.lowercase(Locale.getDefault()) }; "Precio" -> filtered.sortedByDescending { it.price }; "Vencimiento" -> filtered.sortedWith(compareBy<Product> { it.expirationDateInMillis == null }.thenBy { it.expirationDateInMillis }); "Recientes" -> filtered.sortedByDescending { it.entryDateInMillis }; "Poco Stock" -> filtered.filter { it.minStock > 0 && it.stock <= it.minStock }.sortedBy { it.stock }; else -> filtered }
+                when (sortBy) {
+                    "A-Z" -> filtered.sortedBy { it.name.lowercase(Locale.getDefault()) }
+                    "Precio" -> filtered.sortedByDescending { it.price }
+                    "Vencimiento" -> filtered.sortedWith(compareBy<Product> { it.expirationDateInMillis == null }.thenBy { it.expirationDateInMillis })
+                    "Recientes" -> filtered.sortedByDescending { it.entryDateInMillis }
+                    "Poco Stock" -> filtered.filter { it.minStock > 0 && it.stock <= it.minStock }.sortedBy { it.stock }
+                    else -> filtered
+                }
             }
+
             LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
                 if (sortedProducts.isEmpty()) { item { Text("No se encontraron productos.", color = Color.Gray, modifier = Modifier.padding(16.dp).fillMaxWidth(), textAlign = TextAlign.Center) } }
                 items(sortedProducts, key = { it.id }) { product ->
                     ProductItem(
                         product = product,
-                        selectedCountry = selectedCountry, // SOLUCIÓN: Agregado
-                        bcvRate = bcvRate,                 // SOLUCIÓN: Agregado
-                        onAddToCart = { onAddToCartClick(product) },
-                        onEdit = { onEditClick(product) },
-                        onDelete = { onDeleteClick(product) },
-                        onLongDelete = { onLongDeleteClick(product) },
-                        onInfo = { onInfoClick(product) },
-                        onImageClick = { expandedImageUri = product.imageUri }
+                        selectedCountry = selectedCountry,
+                        bcvRate = bcvRate,
+                        onAddToCart = { focusManager.clearFocus(); onAddToCartClick(product) },
+                        onEdit = { focusManager.clearFocus(); onEditClick(product) },
+                        onDelete = { focusManager.clearFocus(); onDeleteClick(product) },
+                        onLongDelete = { focusManager.clearFocus(); onLongDeleteClick(product) },
+                        onInfo = { focusManager.clearFocus(); onInfoClick(product) },
+                        onImageClick = { focusManager.clearFocus(); expandedImageUri = product.imageUri }
                     )
                 }
             }
         }
-        FloatingActionButton(onClick = onAddProductClick, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = 16.dp)) { Icon(Icons.Filled.Add, contentDescription = "Agregar Producto") }
+        FloatingActionButton(onClick = { focusManager.clearFocus(); onAddProductClick() }, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = 16.dp)) { Icon(Icons.Filled.Add, contentDescription = "Agregar Producto") }
 
         if (expandedImageUri != null) { ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null }) }
     }
@@ -2168,8 +2571,8 @@ fun InventoryScreen(
 @Composable
 fun ProductItem(
     product: Product,
-    selectedCountry: String, // SOLUCIÓN: Agregado
-    bcvRate: Double,         // SOLUCIÓN: Agregado
+    selectedCountry: String,
+    bcvRate: Double,
     onAddToCart: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -2196,10 +2599,12 @@ fun ProductItem(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) { Text(text = product.name, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)); if (isExpired) { Spacer(modifier = Modifier.width(8.dp)); Surface(color = Color(0xFFD32F2F), shape = RoundedCornerShape(4.dp)) { Text("⚠️ VENCIDO", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) } }; if (isLowStock) { Spacer(modifier = Modifier.width(8.dp)); Surface(color = Color(0xFFE65100), shape = RoundedCornerShape(4.dp)) { Text("⚠️ POCO STOCK", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) } } }
-                    // SOLUCIÓN: Cambiado formatCOP por formatMoneyMain
-                    Text(text = "Precio: ${formatMoneyMain(product.price, selectedCountry)}", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    val totalStockVal = product.price * product.stock; if (totalStockVal > 0) { Text(text = "Total en stock: ${formatMoneyMain(totalStockVal, selectedCountry)}", color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-                    Row(verticalAlignment = Alignment.CenterVertically) { Text(text = "Stock: ${product.stock} ${product.unit}", color = if (isOutOfStock) Color.Red else Color.Gray, fontSize = 14.sp, fontWeight = if (isOutOfStock) FontWeight.Bold else FontWeight.Normal); if (product.expirationDateInMillis != null) { Spacer(modifier = Modifier.width(8.dp)); Text(text = "Vence: ${formatDateOnly(product.expirationDateInMillis)}", color = if (isExpired) Color.Red else Color.Gray, fontSize = 12.sp) } }
+
+                    // MODIFICADO: Texto dinámico según unidad y se elimina el "Total en stock" para desaturar
+                    val unitName = when(product.unit) { "Kg" -> "Kilo"; "L" -> "Litro"; else -> "Unidad" }
+                    Text(text = "Precio por $unitName: ${formatMoneyMain(product.price, selectedCountry)} ${formatMoneySec(product.price, selectedCountry, bcvRate)}", color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) { Text(text = "Stock: ${product.stock} ${product.unit}", color = if (isOutOfStock) Color.Red else Color.Gray, fontSize = 14.sp, fontWeight = if (isOutOfStock) FontWeight.Bold else FontWeight.Normal); if (product.expirationDateInMillis != null) { Spacer(modifier = Modifier.width(8.dp)); Text(text = "Vence: ${formatDateOnly(product.expirationDateInMillis)}", color = if (isExpired) Color.Red else Color.Gray, fontSize = 12.sp) } }
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) { Button(onClick = onAddToCart, enabled = !isOutOfStock, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), modifier = Modifier.height(36.dp)) { Text("Añadir 🛒") }; Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.padding(top = 4.dp)) { IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Edit, "Editar", tint = Color.Blue, modifier = Modifier.size(20.dp)) }; IconButton(onClick = { if (product.stock <= 0) onLongDelete() else onDelete() }, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Borrar", tint = Color.Red, modifier = Modifier.size(20.dp)) } } }
             }
@@ -2353,13 +2758,24 @@ fun AddToCartDialog(product: Product, currentCartQty: Int, onDismiss: () -> Unit
 }
 
 @Composable
-fun PaymentInputRow(name: String, amountRaw: String, onAmountChange: (String) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text(name, modifier = Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold); OutlinedTextField(value = amountRaw, onValueChange = { onAmountChange(cleanAmountInput(it)) }, modifier = Modifier.weight(1.5f).height(54.dp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, visualTransformation = AmountVisualTransformation(), leadingIcon = { Text("$", color = Color.Gray, modifier = Modifier.padding(start=8.dp)) }) }
+fun PaymentInputRow(name: String, amountRaw: String, sym: String, visualTrans: VisualTransformation, selectedCountry: String, onAmountChange: (String) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Text(name, modifier = Modifier.weight(1f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        OutlinedTextField(
+            value = amountRaw,
+            onValueChange = { onAmountChange(if (selectedCountry == "Venezuela") cleanDecimalInput(it) else cleanAmountInput(it)) },
+            modifier = Modifier.weight(1.5f).height(54.dp),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            visualTransformation = visualTrans,
+            leadingIcon = { Text(sym, color = Color.Gray, modifier = Modifier.padding(start=8.dp)) }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Product>, totalStoreCash: Double, totalStoreDigital: Double, onDismiss: () -> Unit, onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double, Double) -> Unit, onFiarVenta: (String, Double, Double) -> Unit) {
+fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Product>, totalStoreCash: Double, totalStoreDigital: Double, selectedCountry: String, bcvRate: Double, onDismiss: () -> Unit, onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double, Double) -> Unit, onFiarVenta: (String, Double, Double) -> Unit) {
     var step by remember { mutableStateOf(1) }
     var buyerName by remember { mutableStateOf("") }
     var isDivided by remember { mutableStateOf(false) }
@@ -2376,6 +2792,14 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
     var pocketChange by remember { mutableStateOf(false) }
 
     val totalCOP = cartItems.sumOf { it.first.price * it.second }
+
+    // Control de moneda prioritaria al cobrar
+    var checkoutCurrency by remember { mutableStateOf("USD") }
+    LaunchedEffect(Unit) { if (selectedCountry == "Venezuela") checkoutCurrency = "BS" }
+    val isBsInput = selectedCountry == "Venezuela" && checkoutCurrency == "BS"
+    val inputMultiplier = if (isBsInput && bcvRate > 0) 1 / bcvRate else 1.0
+    val sym = if (isBsInput) "Bs" else "$"
+    val visualTrans = if (selectedCountry == "Venezuela") VisualTransformation.None else AmountVisualTransformation()
 
     if (itemToEdit != null) {
         var editQtyRaw by remember { mutableStateOf(itemToEdit!!.second.second.toString()) }
@@ -2438,41 +2862,66 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
                         TextButton(onClick = { showProductSearch = true }, modifier = Modifier.align(Alignment.CenterHorizontally).padding(vertical = 8.dp)) { Text("+ Agregar producto nuevo", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
                         Divider(modifier = Modifier.padding(vertical = 8.dp))
                         Text("Total a cobrar:", fontSize = 12.sp, color = Color.Gray)
-                        Text(formatCOP(totalCOP), fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = MaterialTheme.colorScheme.primary)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(formatMoneyMain(totalCOP, selectedCountry), fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = MaterialTheme.colorScheme.primary)
+                            if (selectedCountry == "Venezuela" && bcvRate > 0) {
+                                Text(" ${formatMoneySec(totalCOP, selectedCountry, bcvRate)}", fontSize = 16.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+                            }
+                        }
                         Spacer(modifier = Modifier.height(16.dp))
                         OutlinedTextField(value = buyerName, onValueChange = { buyerName = it.replaceFirstChar { c -> if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString() } }, label = { Text("Nombre del Cliente (Opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words))
                     }
                 } else {
                     Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.2f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) { Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("Caja (Efectivo)", fontSize=10.sp, color=Color.Gray); Text(formatCOP(totalStoreCash), fontSize=13.sp, fontWeight=FontWeight.Bold) }; Column(horizontalAlignment = Alignment.CenterHorizontally) { Text("Banco (Digital)", fontSize=10.sp, color=Color.Gray); Text(formatCOP(totalStoreDigital), fontSize=13.sp, fontWeight=FontWeight.Bold) } }
-                    Spacer(modifier = Modifier.height(12.dp)); Text("Total de la compra:", fontSize = 13.sp); Text(formatCOP(totalCOP), fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary); Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp)); Text("Total de la compra:", fontSize = 13.sp);
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(formatMoneyMain(totalCOP, selectedCountry), fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = MaterialTheme.colorScheme.primary)
+                        if (selectedCountry == "Venezuela" && bcvRate > 0) {
+                            Text(" ${formatMoneySec(totalCOP, selectedCountry, bcvRate)}", fontSize = 14.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp))
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (selectedCountry == "Venezuela") {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            FilterChip(selected = checkoutCurrency == "USD", onClick = { checkoutCurrency = "USD" }, label = { Text("Ingresar en $") })
+                            FilterChip(selected = checkoutCurrency == "BS", onClick = { checkoutCurrency = "BS" }, label = { Text("Ingresar en Bs") })
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { isDivided = !isDivided; pocketChange = false }) { Switch(checked = isDivided, onCheckedChange = { isDivided = it; pocketChange = false }, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, uncheckedThumbColor = Color.White, checkedTrackColor = MaterialTheme.colorScheme.primary, uncheckedTrackColor = Color.Gray, uncheckedBorderColor = Color.Transparent)); Spacer(modifier = Modifier.width(8.dp)); Text(if (isDivided) "Pago Dividido Múltiple" else "Pago Único", fontWeight = FontWeight.Bold) }
                     Spacer(modifier = Modifier.height(8.dp))
                     if (!isDivided) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) { FilterChip(selected = simpleMethod == "Efectivo", onClick = { simpleMethod = "Efectivo" }, label = { Text("Efectivo") }); FilterChip(selected = simpleMethod == "Digital", onClick = { simpleMethod = "Digital" }, label = { Text("Digital") }) }
-                        PaymentInputRow("Monto Recibido", simpleReceivedRaw, { simpleReceivedRaw = it })
-                        val rec = simpleReceivedRaw.toDoubleOrNull() ?: 0.0
+                        PaymentInputRow("Monto Recibido", simpleReceivedRaw, sym, visualTrans, selectedCountry) { simpleReceivedRaw = it }
+
+                        val rec = (simpleReceivedRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier
                         val change = rec - totalCOP
+
                         if (change > 0) {
-                            Text("Vuelto a devolver: ${formatCOP(change)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("Vuelto a devolver: ${formatMoneyMain(change, selectedCountry)} ${formatMoneySec(change, selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) { Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it }); Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
                             if (pocketChange) { Text("El vuelto se dará de tu bolsillo personal. La ganancia ingresará completa a la tienda y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) } else { val hasEnoughFunds = if (simpleMethod == "Efectivo") change <= totalStoreCash else change <= totalStoreDigital; if (!hasEnoughFunds) { Text("⚠️ Fondos insuficientes en ${if(simpleMethod == "Efectivo") "Caja" else "Banco"}. La caja quedará en negativo.", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp) } else { Text("El vuelto saldrá de: $simpleMethod", fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50), fontSize = 12.sp) } }
                         } else if (change < 0) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (rec > 0) { Text("Falta: ${formatCOP(abs(change))}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { val cash = if (simpleMethod == "Efectivo") rec else 0.0; val digital = if (simpleMethod == "Digital") rec else 0.0; onFiarVenta(buyerName, cash, digital) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (rec > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold) } }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (rec > 0) { Text("Falta: ${formatMoneyMain(abs(change), selectedCountry)} ${formatMoneySec(abs(change), selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { val cash = if (simpleMethod == "Efectivo") rec else 0.0; val digital = if (simpleMethod == "Digital") rec else 0.0; onFiarVenta(buyerName, cash, digital) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (rec > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold) } }
                         } else if (change == 0.0 && rec > 0) { Text("Pago exacto ✅", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold) }
                     } else {
-                        PaymentInputRow("Efectivo Recibido", cashRaw, { cashRaw = it }); PaymentInputRow("Digital Recibido", digitalRaw, { digitalRaw = it })
-                        val cV = cashRaw.toDoubleOrNull() ?: 0.0
-                        val qV = digitalRaw.toDoubleOrNull() ?: 0.0
+                        PaymentInputRow("Efectivo Recibido", cashRaw, sym, visualTrans, selectedCountry) { cashRaw = it }
+                        PaymentInputRow("Digital Recibido", digitalRaw, sym, visualTrans, selectedCountry) { digitalRaw = it }
+                        val cV = (cashRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier
+                        val qV = (digitalRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier
                         val receivedCOP = cV + qV
                         val changeCOP = receivedCOP - totalCOP
+
                         if (changeCOP > 0) {
-                            Text("Vuelto a devolver: ${formatCOP(changeCOP)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("Vuelto a devolver: ${formatMoneyMain(changeCOP, selectedCountry)} ${formatMoneySec(changeCOP, selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) { Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it }); Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
-                            if (pocketChange) { Text("El vuelto se dará de tu bolsillo. La ganancia ingresará intacta y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray) } else { Text("¿De dónde darás el vuelto?", fontSize = 12.sp, color = Color.Gray); PaymentInputRow("Vuelto Efectivo", cashChangeRaw, { cashChangeRaw = it }); PaymentInputRow("Vuelto Digital", digitalChangeRaw, { digitalChangeRaw = it }); val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0; val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0; if (cc + dc != changeCOP) { Text("La suma del vuelto no cuadra con ${formatCOP(changeCOP)}", color = Color.Red, fontSize = 11.sp) } else if (cc > totalStoreCash) { Text("⚠️ Caja quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else if (dc > totalStoreDigital) { Text("⚠️ Banco quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else { Text("Vuelto distribuido correctamente ✅", color = Color(0xFF4CAF50), fontSize = 11.sp, fontWeight = FontWeight.Bold) } }
+                            if (pocketChange) { Text("El vuelto se dará de tu bolsillo. La ganancia ingresará intacta y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray) } else { Text("¿De dónde darás el vuelto?", fontSize = 12.sp, color = Color.Gray); PaymentInputRow("Vuelto Efectivo", cashChangeRaw, sym, visualTrans, selectedCountry) { cashChangeRaw = it }; PaymentInputRow("Vuelto Digital", digitalChangeRaw, sym, visualTrans, selectedCountry) { digitalChangeRaw = it }; val cc = (cashChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dc = (digitalChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; if (cc + dc != changeCOP) { Text("La suma del vuelto no cuadra con ${formatMoneyMain(changeCOP, selectedCountry)}", color = Color.Red, fontSize = 11.sp) } else if (cc > totalStoreCash) { Text("⚠️ Caja quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else if (dc > totalStoreDigital) { Text("⚠️ Banco quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else { Text("Vuelto distribuido correctamente ✅", color = Color(0xFF4CAF50), fontSize = 11.sp, fontWeight = FontWeight.Bold) } }
                         } else if (changeCOP < 0) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (receivedCOP > 0) { Text("Falta dinero: ${formatCOP(abs(changeCOP))}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { onFiarVenta(buyerName, cV, qV) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (receivedCOP > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold) } }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (receivedCOP > 0) { Text("Falta dinero: ${formatMoneyMain(abs(changeCOP), selectedCountry)} ${formatMoneySec(abs(changeCOP), selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { onFiarVenta(buyerName, cV, qV) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (receivedCOP > 0) "Fiar el restante 🗓️" else "Fiar esta venta 🗓️", fontWeight = FontWeight.Bold) } }
                         } else if (changeCOP == 0.0 && receivedCOP > 0) { Text("Pago completo y exacto ✅", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold, fontSize = 14.sp) }
                     }
                 }
@@ -2483,8 +2932,8 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
                 Button(onClick = { step = 2 }, enabled = cartItems.isNotEmpty()) { Text("Siguiente") }
             } else if (step == 2) {
                 var isEnabled = false
-                if (!isDivided) { val rec = simpleReceivedRaw.toDoubleOrNull() ?: 0.0; if (rec >= totalCOP) { isEnabled = true } } else { val cV = cashRaw.toDoubleOrNull() ?: 0.0; val dV = digitalRaw.toDoubleOrNull() ?: 0.0; val changeCOP = (cV + dV) - totalCOP; if (changeCOP == 0.0) isEnabled = true; if (changeCOP > 0.0) { if (pocketChange) { isEnabled = true } else { val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0; val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0; if (cc + dc == changeCOP) isEnabled = true } } }
-                Button(onClick = { var netC = 0.0; var netD = 0.0; var summary = ""; var pocketDebtAmount = 0.0; if (!isDivided) { val rec = simpleReceivedRaw.toDoubleOrNull() ?: 0.0; val change = rec - totalCOP; if (simpleMethod == "Efectivo") { netC = totalCOP; summary = "Pago Efectivo: ${formatCOP(rec)}" + if(change>0) " | Vuelto: ${formatCOP(change)}" + if(pocketChange) " (De bolsillo)" else "" else "" } else { netD = totalCOP; summary = "Pago Digital: ${formatCOP(rec)}" + if(change>0) " | Vuelto: ${formatCOP(change)}" + if(pocketChange) " (De bolsillo)" else "" else "" }; if (pocketChange && change > 0) { pocketDebtAmount = change } } else { val cV = cashRaw.toDoubleOrNull() ?: 0.0; val dV = digitalRaw.toDoubleOrNull() ?: 0.0; val changeCOP = (cV + dV) - totalCOP; if (pocketChange) { netC = cV; netD = dV; summary = "Efectivo recibido: ${formatCOP(cV)} | Digital recibido: ${formatCOP(dV)}"; if (changeCOP > 0) { summary += "\nVuelto: ${formatCOP(changeCOP)} (De bolsillo)"; pocketDebtAmount = changeCOP } } else { val cc = cashChangeRaw.toDoubleOrNull() ?: 0.0; val dc = digitalChangeRaw.toDoubleOrNull() ?: 0.0; netC = cV - cc; netD = dV - dc; summary = "Efectivo recibido: ${formatCOP(cV)} | Digital recibido: ${formatCOP(dV)}"; if (cc > 0 || dc > 0) { summary += "\nVuelto Efectivo: ${formatCOP(cc)} | Vuelto Digital: ${formatCOP(dc)}" } } }; onConfirmSale(cartItems.toList(), buyerName.trim(), summary, netC, netD, pocketDebtAmount) }, enabled = isEnabled) { Text("Confirmar Venta") }
+                if (!isDivided) { val rec = (simpleReceivedRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; if (rec >= totalCOP) { isEnabled = true } } else { val cV = (cashRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dV = (digitalRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val changeCOP = (cV + dV) - totalCOP; if (changeCOP == 0.0) isEnabled = true; if (changeCOP > 0.0) { if (pocketChange) { isEnabled = true } else { val cc = (cashChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dc = (digitalChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; if (abs(cc + dc - changeCOP) < 0.01) isEnabled = true } } }
+                Button(onClick = { var netC = 0.0; var netD = 0.0; var summary = ""; var pocketDebtAmount = 0.0; if (!isDivided) { val rec = (simpleReceivedRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val change = rec - totalCOP; if (simpleMethod == "Efectivo") { netC = totalCOP; summary = "Pago Efectivo: ${formatMoneyMain(rec, selectedCountry)}" + if(change>0) " | Vuelto: ${formatMoneyMain(change, selectedCountry)}" + if(pocketChange) " (De bolsillo)" else "" else "" } else { netD = totalCOP; summary = "Pago Digital: ${formatMoneyMain(rec, selectedCountry)}" + if(change>0) " | Vuelto: ${formatMoneyMain(change, selectedCountry)}" + if(pocketChange) " (De bolsillo)" else "" else "" }; if (pocketChange && change > 0) { pocketDebtAmount = change } } else { val cV = (cashRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dV = (digitalRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val changeCOP = (cV + dV) - totalCOP; if (pocketChange) { netC = cV; netD = dV; summary = "Efectivo recibido: ${formatMoneyMain(cV, selectedCountry)} | Digital recibido: ${formatMoneyMain(dV, selectedCountry)}"; if (changeCOP > 0) { summary += "\nVuelto: ${formatMoneyMain(changeCOP, selectedCountry)} (De bolsillo)"; pocketDebtAmount = changeCOP } } else { val cc = (cashChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dc = (digitalChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; netC = cV - cc; netD = dV - dc; summary = "Efectivo recibido: ${formatMoneyMain(cV, selectedCountry)} | Digital recibido: ${formatMoneyMain(dV, selectedCountry)}"; if (cc > 0 || dc > 0) { summary += "\nVuelto Efectivo: ${formatMoneyMain(cc, selectedCountry)} | Vuelto Digital: ${formatMoneyMain(dc, selectedCountry)}" } } }; onConfirmSale(cartItems.toList(), buyerName.trim(), summary, netC, netD, pocketDebtAmount) }, enabled = isEnabled) { Text("Confirmar Venta") }
             }
         },
         dismissButton = {
@@ -2678,11 +3127,52 @@ fun CalendarDialog(currentTab: Int, reminders: List<Reminder>, fiadores: List<Fi
 fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selectedCountry: String, bcvRate: Double, onDismiss: () -> Unit, onConfirm: (Double, Double) -> Unit) {
     val context = LocalContext.current
     var showDatePicker by remember { mutableStateOf(false) }
-    var inputCurrency by remember { mutableStateOf("USD") } // Para modo Venezuela
+    var inputCurrency by remember { mutableStateOf("USD") }
     val isBsInput = selectedCountry == "Venezuela" && inputCurrency == "BS"
+
+    // NUEVAS VARIABLES: Mantienen la independencia y precisión de ambos valores
+    var bsPurchase by remember { mutableStateOf("") }
+    var bsPrice by remember { mutableStateOf("") }
+    var usdPurchase by remember { mutableStateOf("") }
+    var usdPrice by remember { mutableStateOf("") }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? -> if (uri != null) { try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) { e.printStackTrace() }; draftState.imageUri = uri.toString() } }
     if (showDatePicker) { CustomDatePickerDialog(initialDateMillis = draftState.expiryDateMillis ?: System.currentTimeMillis(), onDismiss = { showDatePicker = false }, onDateSelected = { selected -> draftState.expiryDateMillis = selected; showDatePicker = false }) }
+
+    // MODIFICADO: Lógica de carga sin pérdida por redondeo visual
+    LaunchedEffect(Unit) {
+        if (selectedCountry == "Venezuela") {
+            val rawP = draftState.purchasePriceRaw.toDoubleOrNull() ?: 0.0
+            val rawV = draftState.priceRaw.toDoubleOrNull() ?: 0.0
+            if (bcvRate > 0) {
+                // Al redondear la vista a 2 decimales, un 1699.999 se restaura visualmente a 1700
+                val dfBs = java.text.DecimalFormat("#.##", java.text.DecimalFormatSymbols(Locale.US))
+                val dfUsd = java.text.DecimalFormat("#.##", java.text.DecimalFormatSymbols(Locale.US))
+
+                bsPurchase = if (rawP > 0) dfBs.format(rawP * bcvRate) else ""
+                bsPrice = if (rawV > 0) dfBs.format(rawV * bcvRate) else ""
+
+                usdPurchase = if (rawP > 0) dfUsd.format(rawP) else ""
+                usdPrice = if (rawV > 0) dfUsd.format(rawV) else ""
+            }
+            inputCurrency = "BS"
+            draftState.purchasePriceRaw = bsPurchase
+            draftState.priceRaw = bsPrice
+        }
+    }
+
+    fun switchCurrency(toBs: Boolean) {
+        if (bcvRate <= 0) return
+        if (toBs) {
+            inputCurrency = "BS"
+            draftState.purchasePriceRaw = bsPurchase
+            draftState.priceRaw = bsPrice
+        } else {
+            inputCurrency = "USD"
+            draftState.purchasePriceRaw = usdPurchase
+            draftState.priceRaw = usdPrice
+        }
+    }
 
     AlertDialog(
         onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
@@ -2699,13 +3189,12 @@ fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selecte
                 OutlinedTextField(value = draftState.name, onValueChange = { input -> draftState.name = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nombre del Producto") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // SELECTOR DE MONEDA DE INGRESO (SOLO VENEZUELA)
                 if (selectedCountry == "Venezuela") {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        FilterChip(selected = inputCurrency == "USD", onClick = { inputCurrency = "USD" }, label = { Text("Dólares ($)") })
-                        FilterChip(selected = inputCurrency == "BS", onClick = { inputCurrency = "BS" }, label = { Text("Bolívares (Bs)") })
+                        FilterChip(selected = inputCurrency == "USD", onClick = { if (inputCurrency == "BS") switchCurrency(false) }, label = { Text("Dólares ($)") })
+                        FilterChip(selected = inputCurrency == "BS", onClick = { if (inputCurrency == "USD") switchCurrency(true) }, label = { Text("Bolívares (Bs)") })
                     }
-                    Text("Llénalo para calcular tu ganancia real al vender.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp, top = 4.dp))
+                    Text("Al cambiar de pestaña, el valor que hayas escrito se convertirá automáticamente.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(bottom = 8.dp, top = 4.dp), textAlign = TextAlign.Center)
                 }
 
                 val visualTrans = if (selectedCountry == "Venezuela") VisualTransformation.None else AmountVisualTransformation()
@@ -2715,7 +3204,21 @@ fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selecte
 
                 OutlinedTextField(
                     value = draftState.purchasePriceRaw,
-                    onValueChange = { draftState.purchasePriceRaw = cleaner(it) },
+                    onValueChange = { input ->
+                        val cleaned = cleaner(input)
+                        draftState.purchasePriceRaw = cleaned
+                        if (selectedCountry == "Venezuela" && bcvRate > 0) {
+                            val num = cleaned.toDoubleOrNull() ?: 0.0
+                            val df = java.text.DecimalFormat("#.##", java.text.DecimalFormatSymbols(Locale.US))
+                            if (isBsInput) {
+                                bsPurchase = cleaned
+                                usdPurchase = if (num > 0) df.format(num / bcvRate) else ""
+                            } else {
+                                usdPurchase = cleaned
+                                bsPurchase = if (num > 0) df.format(num * bcvRate) else ""
+                            }
+                        }
+                    },
                     label = { Text("Precio de Compra (Costo) $symbolText") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     visualTransformation = visualTrans,
@@ -2732,7 +3235,21 @@ fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selecte
 
                 OutlinedTextField(
                     value = draftState.priceRaw,
-                    onValueChange = { draftState.priceRaw = cleaner(it) },
+                    onValueChange = { input ->
+                        val cleaned = cleaner(input)
+                        draftState.priceRaw = cleaned
+                        if (selectedCountry == "Venezuela" && bcvRate > 0) {
+                            val num = cleaned.toDoubleOrNull() ?: 0.0
+                            val df = java.text.DecimalFormat("#.##", java.text.DecimalFormatSymbols(Locale.US))
+                            if (isBsInput) {
+                                bsPrice = cleaned
+                                usdPrice = if (num > 0) df.format(num / bcvRate) else ""
+                            } else {
+                                usdPrice = cleaned
+                                bsPrice = if (num > 0) df.format(num * bcvRate) else ""
+                            }
+                        }
+                    },
                     label = { Text("Precio de Venta al Público $symbolText") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     visualTransformation = visualTrans,
@@ -2759,12 +3276,20 @@ fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selecte
         },
         confirmButton = {
             Button(onClick = {
-                val parsedPurchaseRaw = draftState.purchasePriceRaw.toDoubleOrNull() ?: 0.0
-                val parsedPriceRaw = draftState.priceRaw.toDoubleOrNull() ?: 0.0
+                val finalPurchase: Double
+                val finalPrice: Double
 
-                // Normaliza siempre a USD internamente si está en Venezuela
-                val finalPurchase = if (selectedCountry == "Venezuela" && inputCurrency == "BS" && bcvRate > 0) parsedPurchaseRaw / bcvRate else parsedPurchaseRaw
-                val finalPrice = if (selectedCountry == "Venezuela" && inputCurrency == "BS" && bcvRate > 0) parsedPriceRaw / bcvRate else parsedPriceRaw
+                if (selectedCountry == "Venezuela" && bcvRate > 0) {
+                    // Siempre calcula el resultado final que se guarda en la DB priorizando el Bolívar,
+                    // sin importar en qué pestaña estés. Garantiza que el redondeo visual no afecte los datos reales.
+                    val pBs = bsPurchase.toDoubleOrNull() ?: 0.0
+                    val vBs = bsPrice.toDoubleOrNull() ?: 0.0
+                    finalPurchase = pBs / bcvRate
+                    finalPrice = vBs / bcvRate
+                } else {
+                    finalPurchase = draftState.purchasePriceRaw.toDoubleOrNull() ?: 0.0
+                    finalPrice = draftState.priceRaw.toDoubleOrNull() ?: 0.0
+                }
 
                 onConfirm(finalPurchase, finalPrice)
             }) { Text("Guardar ✔️") }
@@ -2796,12 +3321,17 @@ fun RedWarningDialog(productName: String, qty: Int, onDismiss: () -> Unit, onCon
 }
 
 @Composable
-fun ProductosVendidosDialog(transactions: List<Transaction>, activeFiadores: List<Fiador>, onDismiss: () -> Unit, onDeleteVentas: (List<Transaction>) -> Unit) {
+fun ProductosVendidosDialog(
+    transactions: List<Transaction>,
+    activeFiadores: List<Fiador>,
+    onDismiss: () -> Unit,
+    onDeleteVentas: (List<Transaction>) -> Unit,
+    onRestoreFiador: (String, Double, Double) -> Unit // NUEVO
+) {
     val context = LocalContext.current
     val ventas = remember(transactions) { transactions.filter { it.isIncome && it.description.startsWith("Venta") } }
     var searchQuery by remember { mutableStateOf("") }
 
-    // Agrupación de Abonos e historial general
     val processedItems = remember(ventas, searchQuery) {
         val filteredVentas = ventas.filter { sale -> sale.description.contains(searchQuery, ignoreCase = true) || sale.note.contains(searchQuery, ignoreCase = true) || formatDate(sale.timestamp).contains(searchQuery, ignoreCase = true) }
 
@@ -2841,7 +3371,47 @@ fun ProductosVendidosDialog(transactions: List<Transaction>, activeFiadores: Lis
     val totalGanancia = remember(ventas) { ventas.sumOf { it.profit } }
     var showConfirmDelete by remember { mutableStateOf(false) }
 
+    // NUEVO ESTADO PARA RESTAURAR FIADOR
+    var fiadorToRestoreName by remember { mutableStateOf<String?>(null) }
+    var fiadorToRestoreAbonado by remember { mutableStateOf(0.0) }
+
     if (showConfirmDelete) { AlertDialog(onDismissRequest = { showConfirmDelete = false }, title = { Text("Limpiar Historial ⚠️", fontWeight = FontWeight.Bold) }, text = { Text("¿Estás seguro de que deseas borrar este historial de ventas?\n\nEsta acción eliminará permanentemente todos los registros mostrados actualmente.") }, confirmButton = { Button(onClick = { onDeleteVentas(ventas); showConfirmDelete = false; onDismiss() }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))) { Text("Limpiar Todo", fontWeight = FontWeight.Bold) } }, dismissButton = { TextButton(onClick = { showConfirmDelete = false }) { Text("Cancelar") } }) }
+
+    // NUEVO DIÁLOGO DE RESTAURACIÓN
+    if (fiadorToRestoreName != null) {
+        var restoreAmountRaw by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { fiadorToRestoreName = null },
+            title = { Text("Retomar Deuda ♻️", fontWeight = FontWeight.Bold) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            text = {
+                Column {
+                    Text("Ingresa la deuda TOTAL original de ${fiadorToRestoreName}. (Debe ser mayor a lo que ya abonó: ${formatCOP(fiadorToRestoreAbonado)})", fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = restoreAmountRaw,
+                        onValueChange = { restoreAmountRaw = cleanAmountInput(it) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = { Text("Monto TOTAL de la deuda") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val totalAmount = restoreAmountRaw.toDoubleOrNull() ?: 0.0
+                    if (totalAmount > fiadorToRestoreAbonado) {
+                        onRestoreFiador(fiadorToRestoreName!!, totalAmount, fiadorToRestoreAbonado)
+                        fiadorToRestoreName = null
+                    } else {
+                        Toast.makeText(context, "Monto total inválido", Toast.LENGTH_SHORT).show()
+                    }
+                }) { Text("Restaurar") }
+            },
+            dismissButton = { TextButton(onClick = { fiadorToRestoreName = null }) { Text("Cancelar") } }
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2889,7 +3459,6 @@ fun ProductosVendidosDialog(transactions: List<Transaction>, activeFiadores: Lis
                                 val groupGanancia = txs.sumOf { it.profit }
                                 val latestDate = txs.firstOrNull()?.timestamp ?: 0L
 
-                                // LÓGICA DE INTERFAZ AGRUPADA (Como en el video)
                                 val isPaidComplete = activeFiador == null
                                 val badgeColor = if (isPaidComplete) Color(0xFF4CAF50) else Color.Red
                                 val statusText = if (isPaidComplete) "Pago completo ✅" else "Falta por pagar: ${formatCOP(activeFiador!!.amount - activeFiador.paidAmount)}"
@@ -2905,6 +3474,15 @@ fun ProductosVendidosDialog(transactions: List<Transaction>, activeFiadores: Lis
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text("Abonos de $name", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                                                 Text(statusText, fontSize = 13.sp, color = badgeColor, fontWeight = FontWeight.Bold)
+                                            }
+                                            // NUEVO BOTÓN: Solo aparece si fue marcado como pagado/completado
+                                            if (isPaidComplete) {
+                                                IconButton(onClick = {
+                                                    fiadorToRestoreName = name
+                                                    fiadorToRestoreAbonado = totalAbonado
+                                                }) {
+                                                    Icon(Icons.Filled.ErrorOutline, contentDescription = "Retomar deuda", tint = Color(0xFFFBC02D))
+                                                }
                                             }
                                             Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, tint = Color.Gray)
                                         }
@@ -3524,12 +4102,42 @@ fun PlanCardInfo(
     }
 }
 @Composable
-fun ProductInfoDialog(product: Product, onDismiss: () -> Unit, onDeleteCompletely: () -> Unit) {
+fun ProductInfoDialog(product: Product, selectedCountry: String, bcvRate: Double, onDismiss: () -> Unit, onDeleteCompletely: () -> Unit) {
     AlertDialog(
         onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
         title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Detalle del Producto ℹ️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
         containerColor = MaterialTheme.colorScheme.surface,
-        text = { Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Text(product.name, fontSize = 20.sp, fontWeight = FontWeight.Bold); Spacer(modifier = Modifier.height(16.dp)); Text("Precio Unitario: ${formatCOP(product.price)}", fontSize = 14.sp); Spacer(modifier = Modifier.height(8.dp)); Text("Stock Disponible: ${product.stock} ${product.unit}", fontSize = 14.sp); Spacer(modifier = Modifier.height(16.dp)); Divider(color = Color.Gray.copy(alpha = 0.2f)); Spacer(modifier = Modifier.height(16.dp)); val totalUsd = product.price * product.stock; Text("Valor Total en Inventario:", fontSize = 14.sp, color = Color.Gray); Text(formatCOP(totalUsd), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary) } },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(product.name, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // PRECIO UNITARIO
+                val unitName = when(product.unit) { "Kg" -> "Kilo"; "L" -> "Litro"; else -> "Unidad" }
+                Text("Precio por $unitName:", fontSize = 14.sp, color = Color.Gray)
+                Text(formatMoneyMain(product.price, selectedCountry), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                if (selectedCountry == "Venezuela" && bcvRate > 0) {
+                    // Muestra el equivalente en Bs abajo
+                    Text(formatMoneySec(product.price, selectedCountry, bcvRate).replace("= ", ""), fontSize = 14.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Stock Disponible: ${product.stock} ${product.unit}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = Color.Gray.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // VALOR TOTAL EN INVENTARIO
+                val totalValue = product.price * product.stock
+                Text("Valor Total en Inventario:", fontSize = 14.sp, color = Color.Gray)
+                Text(formatMoneyMain(totalValue, selectedCountry), fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                if (selectedCountry == "Venezuela" && bcvRate > 0) {
+                    // Muestra el equivalente en Bs abajo
+                    Text(formatMoneySec(totalValue, selectedCountry, bcvRate).replace("= ", ""), fontSize = 16.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        },
         confirmButton = { }, dismissButton = { TextButton(onClick = onDeleteCompletely, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) { Text("Eliminar del Inventario", fontWeight = FontWeight.Bold) } }
     )
 }
