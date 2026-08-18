@@ -1247,7 +1247,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     var showGoldWelcomeDialog by remember { mutableStateOf(initialRole == "Invitado-Gold" && initialConsumedSeconds < 300L) }
 
-    // Control del Perfil
+    // --- 6.1. CONTROL DE ESTADOS DEL PERFIL ---
     var showProfileDialog by remember { mutableStateOf(false) }
 
     var preselectedDateForEvent by remember { mutableStateOf<Long?>(null) }
@@ -1295,6 +1295,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
     }
 
+    // --- 6.2. TICKER EN VIVO DE 1 SEGUNDO Y CONTROL DE MODOS ---
     LaunchedEffect(Unit) {
         val hasShownTrialWarning = authPrefs.getBoolean("hasShownTrialWarning_${viewModel.userId}", false)
         while (true) {
@@ -1467,7 +1468,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 TopAppBar(
                     title = {
                         val firstName = localUserName.split(" ").first()
-                        // Perfil Clickable
                         Column(modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showProfileDialog = true }.padding(horizontal = 4.dp, vertical = 2.dp)) {
                             Text(text = if (currentTab == 0) "Hola, $firstName $crownEmoji" else "Tienda de $firstName 🏪", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                             if (viewModel.selectedCountry == "Venezuela" && viewModel.bcvRate > 0) {
@@ -1542,7 +1542,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
 
-            // ALERTA DE BIENVENIDA INVITADO GOLD
+            // --- 6.3. ALERTA DE BIENVENIDA INVITADO GOLD ---
             if (showGoldWelcomeDialog) {
                 val timeLeftSecs = currentPlanDuration - currentConsumed
                 val hours = timeLeftSecs / 3600
@@ -1556,7 +1556,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 )
             }
 
-            // MODAL DE PERFIL
+            // --- 6.4. MODAL DE PERFIL (LLAMADA) ---
             if (showProfileDialog) {
                 ProfileDialog(
                     currentName = localUserName,
@@ -1578,7 +1578,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 )
             }
 
-            // ALERTAS DE PRUEBA Y TIEMPO
+            // --- 6.5. ALERTAS DE PRUEBA Y TIEMPO ---
             if (showTrialWarning) {
                 AlertDialog(
                     onDismissRequest = { showTrialWarning = false },
@@ -1780,7 +1780,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             }
         }
 
-        // BLOQUE PANEL DE ADMINISTRADOR
+        // --- 6.6. BLOQUE PANEL DE ADMINISTRADOR ---
         if (showAdminPanelDialog) {
             var usersList by remember { mutableStateOf<Map<String, UserData>?>(null) }; var isLoadingUsers by remember { mutableStateOf(true) }
             var roleToAssign by remember { mutableStateOf<String?>(null) }; var targetEmailToAssign by remember { mutableStateOf<String?>(null) }
@@ -1873,9 +1873,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // ==========================================
-        // VINCULACIÓN DE TODOS LOS DIÁLOGOS DE LA APP
-        // ==========================================
+        // --- 6.7. DIÁLOGO DE AGREGAR TRANSACCIÓN (PERSONAL) ---
         if (showAddDialog) {
             AddTransactionDialog(
                 onDismiss = { showAddDialog = false },
@@ -1886,6 +1884,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.8. DIÁLOGO DE AGREGAR / EDITAR PRODUCTO (INVENTARIO) ---
         if (showAddProductDialog) {
             AddProductDialog(
                 isEditMode = productToEdit != null,
@@ -1938,6 +1937,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.9. DIÁLOGO PARA AÑADIR AL CARRITO DESDE EL INVENTARIO ---
         if (productToAddToCart != null) {
             val currentInCart = shoppingCart.find { it.first.id == productToAddToCart!!.id }?.second ?: 0
             AddToCartDialog(
@@ -1957,6 +1957,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.10. DIÁLOGO DE CHECKOUT (COBRAR CARRITO) ---
         if (showCheckoutDialog) {
             CheckoutDialog(
                 cartItems = shoppingCart,
@@ -1993,6 +1994,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.11. DIÁLOGOS PARA ELIMINAR STOCK PARCIAL Y TOTAL ---
         if (showDeleteQtyDialog && productToDelete != null) {
             DeleteQuantityDialog(
                 product = productToDelete!!,
@@ -2044,6 +2046,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.12. DETALLE DEL PRODUCTO ---
         if (productToInfo != null) {
             ProductInfoDialog(
                 product = productToInfo!!,
@@ -2060,6 +2063,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.13. LÍMITE DE SALDO CRÍTICO ---
         if (showLimitDialog) {
             LimitDialog(
                 currentLimit = viewModel.minBalanceThreshold,
@@ -2071,6 +2075,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.14. RESUMEN DE TOTALES ---
         if (showSummaryDialog) {
             SummaryDialog(
                 totalIncome = totalIncome,
@@ -2081,6 +2086,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.15. BORRAR HISTORIAL DE MOVIMIENTOS PERSONALES ---
         if (showDeleteHistoryConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showDeleteHistoryConfirmDialog = false },
@@ -2103,6 +2109,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.16. REINICIAR GANANCIAS DE TIENDA ---
         if (showResetProfitsDialog) {
             AlertDialog(
                 onDismissRequest = { showResetProfitsDialog = false },
@@ -2124,6 +2131,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.17. SONIDOS Y ASISTENTE ---
         if (showSoundDialog) {
             SoundSettingsDialog(
                 personalSoundUri = viewModel.personalSoundUri,
@@ -2138,6 +2146,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.18. CALENDARIO Y AGENDA ---
         if (showCalendarDialog) {
             CalendarDialog(
                 currentTab = currentTab,
@@ -2165,6 +2174,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.19. RECORDATORIOS / DEUDAS PERSONALES ---
         if (showRemindersListDialog) {
             ScheduledRemindersDialog(
                 reminders = currentTabReminders,
@@ -2217,6 +2227,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.20. FIADORES / DEUDORES ---
         if (showFiadoresListDialog) {
             ScheduledFiadoresDialog(
                 fiadores = currentTabFiadores,
@@ -2306,6 +2317,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.21. SINCRONIZACIÓN NUBE / BACKUPS ---
         if (showCloudSyncDialog) {
             AlertDialog(
                 onDismissRequest = { showCloudSyncDialog = false },
@@ -2417,6 +2429,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        // --- 6.22. OPCIONES, PLANES, CHATS Y PANEL ADMIN ---
         if (showOptionsDialog) {
             AlertDialog(
                 onDismissRequest = { showOptionsDialog = false }, properties = DialogProperties(dismissOnClickOutside = false),
@@ -2477,6 +2490,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     }
 }
 
+// --- 6.23. PANTALLA DE TIENDA (StoreScreen) ---
 @Composable
 fun StoreScreen(
     products: List<Product>,
@@ -2624,6 +2638,7 @@ fun StoreScreen(
     }
 }
 
+// --- 6.24. PANTALLA DE INVENTARIO (InventoryScreen) ---
 @Composable
 fun InventoryScreen(
     products: List<Product>,
@@ -2717,6 +2732,7 @@ fun InventoryScreen(
     }
 }
 
+// --- 6.25. ITEM DE PRODUCTO (ProductItem) ---
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ProductItem(
@@ -2761,7 +2777,7 @@ fun ProductItem(
     }
 }
 
-// NUEVO: COMPONENTE DE PERFIL
+// --- 6.26. DIÁLOGO DE PERFIL (ProfileDialog) ---
 @Composable
 fun ProfileDialog(
     currentName: String,
