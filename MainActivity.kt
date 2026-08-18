@@ -1234,6 +1234,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     val isSuperAdmin = viewModel.userId.lowercase(Locale.getDefault()) == "zonacami77777@gmail.com"
 
+    var localUserName by remember { mutableStateOf(userName) }
     var currentRole by remember { mutableStateOf(if (isSuperAdmin) "ADMIN" else initialRole) }
     var currentConsumed by remember { mutableStateOf(initialConsumedSeconds) }
     var currentPlanDuration by remember { mutableStateOf(initialPlanDuration) }
@@ -1244,8 +1245,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showWarningDialog by remember { mutableStateOf<String?>(null) }
     var showTrialWarning by remember { mutableStateOf(false) }
 
-    // NUEVO: Estado para mostrar el modal de bienvenida al Invitado-Gold (Solo si lleva menos de 5 mins consumidos)
     var showGoldWelcomeDialog by remember { mutableStateOf(initialRole == "Invitado-Gold" && initialConsumedSeconds < 300L) }
+
+    // Control del Perfil
+    var showProfileDialog by remember { mutableStateOf(false) }
 
     var preselectedDateForEvent by remember { mutableStateOf<Long?>(null) }
     var showOptionsDialog by remember { mutableStateOf(false) }
@@ -1257,11 +1260,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         while(true) {
             delay(30000L)
 
-            // --- NUEVO: Sincronización bajo perfil cada 30 segundos ---
             if (currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA") {
                 viewModel.silentBackup()
             }
-            // -------------------------------------------------------------
 
             try {
                 val response = RetrofitInstance.api.addUserTime(UserTimeRequest(viewModel.userId, 30L))
@@ -1294,7 +1295,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
     }
 
-    // TICKER EN VIVO DE 1 SEGUNDO Y CONTROL DE MODOS
     LaunchedEffect(Unit) {
         val hasShownTrialWarning = authPrefs.getBoolean("hasShownTrialWarning_${viewModel.userId}", false)
         while (true) {
@@ -1303,13 +1303,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 currentConsumed++
                 val timeLeftSecs = currentPlanDuration - currentConsumed
 
-                // ADVERTENCIA 3 HORAS (10800 Segundos) DEL MODO PRUEBA
                 if ((currentRole == "PRUEBA" || currentRole == "Invitado-Gold") && timeLeftSecs in 1..10800 && !hasShownTrialWarning) {
                     showTrialWarning = true
                     authPrefs.edit().putBoolean("hasShownTrialWarning_${viewModel.userId}", true).apply()
                 }
 
-                // TRANSICIÓN AUTOMÁTICA AL CADUCAR EL TIEMPO
                 if (timeLeftSecs <= 0 && currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA") {
                     if (currentRole == "PRUEBA" || currentRole == "Invitado-Gold") {
                         currentRole = "INVITADO_PRUEBA"
@@ -1468,8 +1466,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             if (!showInventoryScreen) {
                 TopAppBar(
                     title = {
-                        val firstName = userName.split(" ").first()
-                        Column {
+                        val firstName = localUserName.split(" ").first()
+                        // Perfil Clickable
+                        Column(modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showProfileDialog = true }.padding(horizontal = 4.dp, vertical = 2.dp)) {
                             Text(text = if (currentTab == 0) "Hola, $firstName $crownEmoji" else "Tienda de $firstName 🏪", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                             if (viewModel.selectedCountry == "Venezuela" && viewModel.bcvRate > 0) {
                                 Text(text = "Tasa BCV: ${formatBs(viewModel.bcvRate)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f))
@@ -1543,7 +1542,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
 
-            // NUEVO: ALERTA DE BIENVENIDA INVITADO GOLD
+            // ALERTA DE BIENVENIDA INVITADO GOLD
             if (showGoldWelcomeDialog) {
                 val timeLeftSecs = currentPlanDuration - currentConsumed
                 val hours = timeLeftSecs / 3600
@@ -1554,6 +1553,28 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     containerColor = MaterialTheme.colorScheme.surface,
                     text = { Text("Disfrutas de acceso total a todas las herramientas sin ninguna restricción. Te quedan $hours horas y $mins minutos de este privilegio.\n\nTus datos se estarán guardando y respaldando bajo perfil en la nube cada 30 segundos automáticamente.") },
                     confirmButton = { Button(onClick = { showGoldWelcomeDialog = false }) { Text("¡Entendido!") } }
+                )
+            }
+
+            // MODAL DE PERFIL
+            if (showProfileDialog) {
+                ProfileDialog(
+                    currentName = localUserName,
+                    currentRole = currentRole,
+                    consumedSecs = currentConsumed,
+                    planDurationSecs = currentPlanDuration,
+                    onDismiss = { showProfileDialog = false },
+                    onNameChange = { newName ->
+                        localUserName = newName
+                        authPrefs.edit().putString("userName", newName).apply()
+                        coroutineScope.launch(Dispatchers.IO) {
+                            try { RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, newName)) } catch(e: Exception){}
+                        }
+                    },
+                    onUpgradeClick = {
+                        showProfileDialog = false
+                        showPlansDialog = true
+                    }
                 )
             }
 
@@ -1710,7 +1731,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 isSyncingAccount = true
                                 coroutineScope.launch(Dispatchers.IO) {
                                     try {
-                                        val response = RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, userName))
+                                        val response = RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, localUserName))
                                         launch(Dispatchers.Main) {
                                             val newRole = response.role ?: currentRole
                                             if (newRole != currentRole && !isSuperAdmin) {
@@ -1852,7 +1873,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 1. Diálogo de Agregar Transacción (Personal)
+        // ==========================================
+        // VINCULACIÓN DE TODOS LOS DIÁLOGOS DE LA APP
+        // ==========================================
         if (showAddDialog) {
             AddTransactionDialog(
                 onDismiss = { showAddDialog = false },
@@ -1863,7 +1886,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 2. Diálogo de Agregar / Editar Producto (Inventario)
         if (showAddProductDialog) {
             AddProductDialog(
                 isEditMode = productToEdit != null,
@@ -1916,7 +1938,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 3. Diálogo para añadir al carrito desde el inventario
         if (productToAddToCart != null) {
             val currentInCart = shoppingCart.find { it.first.id == productToAddToCart!!.id }?.second ?: 0
             AddToCartDialog(
@@ -1936,7 +1957,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 4. Diálogo de Checkout (Cobrar Carrito)
         if (showCheckoutDialog) {
             CheckoutDialog(
                 cartItems = shoppingCart,
@@ -1973,7 +1993,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 5. Diálogos para eliminar stock parcial y total
         if (showDeleteQtyDialog && productToDelete != null) {
             DeleteQuantityDialog(
                 product = productToDelete!!,
@@ -2025,7 +2044,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 6. Detalle del Producto
         if (productToInfo != null) {
             ProductInfoDialog(
                 product = productToInfo!!,
@@ -2042,7 +2060,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 7. Límite de Saldo Crítico
         if (showLimitDialog) {
             LimitDialog(
                 currentLimit = viewModel.minBalanceThreshold,
@@ -2054,7 +2071,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 8. Resumen de Totales
         if (showSummaryDialog) {
             SummaryDialog(
                 totalIncome = totalIncome,
@@ -2065,7 +2081,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 9. Borrar Historial de Movimientos Personales
         if (showDeleteHistoryConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showDeleteHistoryConfirmDialog = false },
@@ -2088,7 +2103,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 10. Reiniciar Ganancias de Tienda
         if (showResetProfitsDialog) {
             AlertDialog(
                 onDismissRequest = { showResetProfitsDialog = false },
@@ -2110,7 +2124,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 11. Sonidos y Asistente
         if (showSoundDialog) {
             SoundSettingsDialog(
                 personalSoundUri = viewModel.personalSoundUri,
@@ -2125,7 +2138,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 12. Calendario y Agenda
         if (showCalendarDialog) {
             CalendarDialog(
                 currentTab = currentTab,
@@ -2153,7 +2165,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 13. Recordatorios / Deudas Personales
         if (showRemindersListDialog) {
             ScheduledRemindersDialog(
                 reminders = currentTabReminders,
@@ -2206,7 +2217,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 14. Fiadores / Deudores
         if (showFiadoresListDialog) {
             ScheduledFiadoresDialog(
                 fiadores = currentTabFiadores,
@@ -2230,7 +2240,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // SOLUCIÓN ERRORES 2 Y 3: Inyección de selectedCountry y bcvRate al llamar el FiadorDialog
         if (showFiadorDialog) {
             FiadorDialog(
                 initialFiador = fiadorToEdit,
@@ -2239,8 +2248,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 initialCash = checkoutToFiadorCash,
                 initialDigital = checkoutToFiadorDigital,
                 products = products,
-                selectedCountry = viewModel.selectedCountry, // NUEVO
-                bcvRate = viewModel.bcvRate,                 // NUEVO
+                selectedCountry = viewModel.selectedCountry,
+                bcvRate = viewModel.bcvRate,
                 preselectedDate = preselectedDateForEvent,
                 isStore = (currentTab == 1 || checkoutToFiadorCart.isNotEmpty()),
                 onDismiss = {
@@ -2297,7 +2306,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 15. Sincronización Nube / Backups
         if (showCloudSyncDialog) {
             AlertDialog(
                 onDismissRequest = { showCloudSyncDialog = false },
@@ -2409,7 +2417,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
-        // 16. Opciones, Planes, Chats y Panel Admin
         if (showOptionsDialog) {
             AlertDialog(
                 onDismissRequest = { showOptionsDialog = false }, properties = DialogProperties(dismissOnClickOutside = false),
@@ -2752,6 +2759,107 @@ fun ProductItem(
             }
         }
     }
+}
+
+// NUEVO: COMPONENTE DE PERFIL
+@Composable
+fun ProfileDialog(
+    currentName: String,
+    currentRole: String,
+    consumedSecs: Long,
+    planDurationSecs: Long,
+    onDismiss: () -> Unit,
+    onNameChange: (String) -> Unit,
+    onUpgradeClick: () -> Unit
+) {
+    var editingName by remember { mutableStateOf(false) }
+    var nameInput by remember { mutableStateOf(currentName) }
+
+    val crownEmoji = when (currentRole) { "INVITADO", "INVITADO_PRUEBA" -> "🪵"; "PRUEBA", "Invitado-Gold" -> "⏳"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
+
+    val startMillis = System.currentTimeMillis() - (consumedSecs * 1000L)
+    val endMillis = System.currentTimeMillis() + ((planDurationSecs - consumedSecs) * 1000L)
+
+    val days = consumedSecs / 86400
+    val hours = (consumedSecs % 86400) / 3600
+    val mins = (consumedSecs % 3600) / 60
+    val secs = consumedSecs % 60
+
+    val timeActiveStr = "${days}d ${hours}h ${mins}m ${secs}s"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Mi Perfil 👤", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "Cerrar") }
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (editingName) {
+                    OutlinedTextField(
+                        value = nameInput,
+                        onValueChange = { nameInput = it },
+                        label = { Text("Nombre") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                editingName = false
+                                if (nameInput.isNotBlank()) onNameChange(nameInput.trim())
+                            }) { Icon(Icons.Filled.Check, "Guardar", tint = Color(0xFF4CAF50)) }
+                        }
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { editingName = true }.padding(vertical = 8.dp)) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Nombre", fontSize = 12.sp, color = Color.Gray)
+                            Text(currentName, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                        Icon(Icons.Filled.Edit, "Editar", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    }
+                }
+
+                Divider(modifier = Modifier.padding(vertical = 12.dp), color = Color.Gray.copy(alpha = 0.2f))
+
+                Text("Membresía Actual", fontSize = 12.sp, color = Color.Gray)
+                Text("$currentRole $crownEmoji", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                    Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
+                        Text("Activada el:", fontSize = 12.sp, color = Color.Gray)
+                        Text(formatDate(startMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Finaliza el:", fontSize = 12.sp, color = Color.Gray)
+                        Text(formatDate(endMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text("Tiempo en uso (Activo):", fontSize = 12.sp, color = Color.Gray)
+                Text(timeActiveStr, fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = Color(0xFFE65100))
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (currentRole != "GOLD" && currentRole != "ADMIN") {
+                    Button(
+                        onClick = onUpgradeClick,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)
+                    ) {
+                        Text("⭐ Mejorar Membresía", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        },
+        confirmButton = {}
+    )
 }
 
 // ==========================================
