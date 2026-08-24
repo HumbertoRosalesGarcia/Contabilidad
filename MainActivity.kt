@@ -2391,9 +2391,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
 
         // --- 6.21. SINCRONIZACIÓN NUBE / BACKUPS ---
+        var showAutoSyncDialog by remember { mutableStateOf(false) }
+
         if (showCloudSyncDialog) {
             AlertDialog(
                 onDismissRequest = { showCloudSyncDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+                modifier = Modifier.fillMaxWidth(0.95f).padding(16.dp),
                 title = { Text("Sincronización en la Nube ☁️", fontWeight = FontWeight.Bold) },
                 containerColor = MaterialTheme.colorScheme.surface,
                 text = {
@@ -2421,6 +2425,25 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("📥 Ver y Restaurar Copias") }
+
+                        Divider(modifier = Modifier.padding(vertical = 16.dp))
+
+                        Text("Sincronización Automática", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        val syncHour = if (viewModel.autoSyncHour > 12) viewModel.autoSyncHour - 12 else if (viewModel.autoSyncHour == 0) 12 else viewModel.autoSyncHour
+                        val syncPm = if (viewModel.autoSyncHour >= 12) "PM" else "AM"
+                        val syncMin = viewModel.autoSyncMinute.toString().padStart(2, '0')
+                        val syncText = if (viewModel.autoSyncFrequency > 0) "Diaria a las $syncHour:$syncMin $syncPm" else "Desactivada"
+
+                        Text("Estado: $syncText", fontSize = 13.sp, color = Color.Gray)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = {
+                                showCloudSyncDialog = false
+                                showAutoSyncDialog = true
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+                        ) { Text("⏰ Configurar Auto-Sincronización") }
                     }
                 },
                 confirmButton = {},
@@ -2428,9 +2451,25 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             )
         }
 
+        if (showAutoSyncDialog) {
+            AutoSyncSetupDialog(
+                initialFrequency = viewModel.autoSyncFrequency,
+                initialHour = viewModel.autoSyncHour,
+                initialMinute = viewModel.autoSyncMinute,
+                onDismiss = { showAutoSyncDialog = false },
+                onSave = { freq, h, m ->
+                    viewModel.updateAutoSyncSchedule(application = context.applicationContext as Application, frequencyDays = freq, hour = h, minute = m)
+                    customToastMessage = if (freq > 0) "Auto-Sincronización activada ✅" else "Auto-Sincronización desactivada ❌"
+                    showAutoSyncDialog = false
+                }
+            )
+        }
+
         if (showBackupNameDialog) {
             AlertDialog(
                 onDismissRequest = { showBackupNameDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+                modifier = Modifier.fillMaxWidth(0.95f).padding(16.dp),
                 title = { Text("Nombre del Respaldo ✍️", fontWeight = FontWeight.Bold) },
                 containerColor = MaterialTheme.colorScheme.surface,
                 text = {
@@ -2457,6 +2496,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         if (showBackupListDialog) {
             AlertDialog(
                 onDismissRequest = { showBackupListDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false),
+                modifier = Modifier.fillMaxWidth(0.95f).padding(16.dp),
                 title = { Text("Copias Guardadas ☁️", fontWeight = FontWeight.Bold) },
                 containerColor = MaterialTheme.colorScheme.surface,
                 text = {
@@ -4733,6 +4774,8 @@ fun ExpenseBreakdownDialog(title: String, expenses: List<Transaction>, onDismiss
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false), // <-- ESTO QUITA EL LÍMITE DE ANCHO
+        modifier = Modifier.fillMaxWidth(0.95f).padding(16.dp), // <-- ESTO LO EXPANDE POR COMPLETO
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(title, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -4769,6 +4812,69 @@ fun ExpenseBreakdownDialog(title: String, expenses: List<Transaction>, onDismiss
         },
         confirmButton = {},
         containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AutoSyncSetupDialog(initialFrequency: Int, initialHour: Int, initialMinute: Int, onDismiss: () -> Unit, onSave: (Int, Int, Int) -> Unit) {
+    var isEnabled by remember { mutableStateOf(initialFrequency > 0) }
+    val currentHourInt = if (initialHour == 0) 12 else if (initialHour > 12) initialHour - 12 else initialHour
+    var customHour by remember { mutableStateOf(currentHourInt.toString()) }
+    var customMinute by remember { mutableStateOf(initialMinute.toString().padStart(2, '0')) }
+    var isPm by remember { mutableStateOf(initialHour >= 12) }
+    val minuteFocusRequester = remember { FocusRequester() }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        properties = DialogProperties(usePlatformDefaultWidth = false), // <-- EXPANDE EL MODAL
+        modifier = Modifier.fillMaxWidth(0.95f).padding(16.dp),
+        title = { Text("Auto-Sincronización ⏰", textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), fontWeight = FontWeight.Bold) },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                Text("Configura una hora para guardar tu información en la nube automáticamente todos los días (Requiere Internet).", fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center)
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { isEnabled = !isEnabled }.padding(8.dp)) {
+                    Switch(checked = isEnabled, onCheckedChange = { isEnabled = it })
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text("Activar copia de seguridad diaria", fontWeight = FontWeight.Bold)
+                }
+
+                AnimatedVisibility(visible = isEnabled) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("¿A qué hora se hará la copia?", fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedTextField(value = customHour, onValueChange = { input -> if (input.isEmpty()) { customHour = input } else if (input.length <= 2 && input.all { char -> char.isDigit() }) { val h = input.toIntOrNull(); if (h != null) { if (input.length == 1 && h == 0) { customHour = input } else if (h in 1..12) { customHour = input; if (input.length == 2) minuteFocusRequester.requestFocus() } } } }, placeholder = { Text("12", color = Color.Gray.copy(alpha=0.4f), fontSize = 28.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, modifier = Modifier.width(80.dp), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                            Text(" : ", fontSize = 32.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp))
+                            OutlinedTextField(value = customMinute, onValueChange = { input -> if (input.isEmpty()) { customMinute = input } else if (input.length <= 2 && input.all { it.isDigit() }) { val m = input.toIntOrNull(); if (m != null && m in 0..59) { customMinute = input } } }, placeholder = { Text("00", color = Color.Gray.copy(alpha=0.4f), fontSize = 28.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) }, modifier = Modifier.width(80.dp).focusRequester(minuteFocusRequester), textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, fontSize = 28.sp), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                FilterChip(selected = !isPm, onClick = { isPm = false }, label = { Text("AM") })
+                                FilterChip(selected = isPm, onClick = { isPm = true }, label = { Text("PM") })
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                if (!isEnabled) {
+                    onSave(0, 0, 0)
+                } else {
+                    val finalH = customHour.toIntOrNull() ?: currentHourInt
+                    val finalM = customMinute.toIntOrNull() ?: initialMinute
+                    var hour24 = finalH
+                    if (isPm && hour24 < 12) hour24 += 12
+                    if (!isPm && hour24 == 12) hour24 = 0
+                    onSave(1, hour24, finalM)
+                }
+            }) { Text("Guardar") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
     )
 }
 
