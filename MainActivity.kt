@@ -368,7 +368,9 @@ data class Transaction(
     val profit: Double = 0.0,
     val cashAmount: Double = 0.0,
     val digitalAmount: Double = 0.0,
-    val country: String = "Colombia" // <-- AGREGADO
+    val country: String = "Colombia",
+    val category: String? = null, // <-- NUEVO
+    val imageUri: String? = null  // <-- NUEVO
 )
 
 @Entity(tableName = "reminders")
@@ -378,7 +380,7 @@ data class Reminder(
     val amount: Double = 0.0,
     val targetDateInMillis: Long,
     val isStore: Boolean = false,
-    val country: String = "Colombia" // <-- AGREGADO
+    val country: String = "Colombia"
 )
 
 @Entity(tableName = "fiadores")
@@ -393,7 +395,7 @@ data class Fiador(
     val paymentHistory: String = "",
     val isStore: Boolean = true,
     val totalCost: Double = 0.0,
-    val country: String = "Colombia" // <-- AGREGADO
+    val country: String = "Colombia"
 )
 
 @Entity(tableName = "products")
@@ -408,7 +410,7 @@ data class Product(
     val entryDateInMillis: Long = System.currentTimeMillis(),
     val minStock: Int = 0,
     val imageUri: String? = null,
-    val country: String = "Colombia" // <-- AGREGADO
+    val country: String = "Colombia"
 )
 
 @Dao
@@ -450,7 +452,6 @@ interface FinanceDao {
     @Delete suspend fun deleteProduct(product: Product)
     @Query("DELETE FROM products") suspend fun deleteAllProducts()
 
-    // --- NUEVO: Métodos exclusivos para Backups en la nube (Obtienen datos de TODOS los países) ---
     @Query("SELECT * FROM transactions ORDER BY timestamp DESC") suspend fun getBackupTransactions(): List<Transaction>
     @Query("SELECT * FROM reminders ORDER BY targetDateInMillis ASC") suspend fun getBackupReminders(): List<Reminder>
     @Query("SELECT * FROM fiadores ORDER BY targetDateInMillis ASC") suspend fun getBackupFiadores(): List<Fiador>
@@ -469,16 +470,10 @@ val MIGRATION_12_13 = object : Migration(12, 13) { override fun migrate(db: Supp
 val MIGRATION_13_14 = object : Migration(13, 14) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `reminders` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 0"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `isStore` INTEGER NOT NULL DEFAULT 1") } }
 val MIGRATION_14_15 = object : Migration(14, 15) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `reminders` ADD COLUMN `amount` REAL NOT NULL DEFAULT 0.0") } }
 val MIGRATION_15_16 = object : Migration(15, 16) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `totalCost` REAL NOT NULL DEFAULT 0.0") } }
-val MIGRATION_16_17 = object : Migration(16, 17) {
-    override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE `transactions` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'")
-        db.execSQL("ALTER TABLE `reminders` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'")
-        db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'")
-        db.execSQL("ALTER TABLE `products` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'")
-    }
-}
+val MIGRATION_16_17 = object : Migration(16, 17) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `transactions` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'"); db.execSQL("ALTER TABLE `reminders` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'"); db.execSQL("ALTER TABLE `fiadores` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'"); db.execSQL("ALTER TABLE `products` ADD COLUMN `country` TEXT NOT NULL DEFAULT 'Colombia'") } }
+val MIGRATION_17_18 = object : Migration(17, 18) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("ALTER TABLE `transactions` ADD COLUMN `category` TEXT DEFAULT NULL"); db.execSQL("ALTER TABLE `transactions` ADD COLUMN `imageUri` TEXT DEFAULT NULL") } }
 
-@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 17, exportSchema = false)
+@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class], version = 18, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun financeDao(): FinanceDao
     companion object {
@@ -487,7 +482,7 @@ abstract class AppDatabase : RoomDatabase() {
             return INSTANCES[userId] ?: synchronized(this) {
                 val dbName = "finance_database_$userId"
                 val instance = Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, dbName)
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18)
                     .build()
                 INSTANCES[userId] = instance
                 instance
@@ -520,6 +515,22 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val products: Flow<List<Product>> = _selectedCountryFlow.flatMapLatest { dao.getAllProducts(it) }
+
+    // --- NUEVO: Gestión de Categorías ---
+    var customCategories by mutableStateOf(userPrefs.getStringSet("customCategories", setOf("Comida", "Transporte", "Deuda", "Servicios"))!!.toList())
+        private set
+
+    fun addCategory(cat: String) {
+        val updated = (customCategories + cat).distinct()
+        customCategories = updated
+        userPrefs.edit().putStringSet("customCategories", updated.toSet()).apply()
+    }
+    fun removeCategory(cat: String) {
+        val updated = customCategories - cat
+        customCategories = updated
+        userPrefs.edit().putStringSet("customCategories", updated.toSet()).apply()
+    }
+    // ------------------------------------
 
     var bcvRate by mutableStateOf(userPrefs.getFloat("bcvRate", 0f).toDouble())
         private set
@@ -560,8 +571,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     bcvRate = response.tasa
                     userPrefs.edit().putFloat("bcvRate", response.tasa.toFloat()).apply()
                 }
-            } catch (e: Exception) {
-            }
+            } catch (e: Exception) {}
         }
     }
 
@@ -609,7 +619,6 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
-    // NUEVO MÉTODO PARA SINCRONIZACIÓN BAJO PERFIL CADA 30 SEGUNDOS
     fun silentBackup() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -618,16 +627,11 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 val newRecord = BackupRecord(UUID.randomUUID().toString(), "AutoSync 30s", System.currentTimeMillis(), currentData)
                 val remotePayload = RetrofitInstance.api.getBackup(userId)
                 val existingBackups = mutableListOf<BackupRecord>()
-                if (remotePayload != null) {
-                    if (remotePayload.backups != null) { existingBackups.addAll(remotePayload.backups) }
-                }
+                if (remotePayload != null && remotePayload.backups != null) { existingBackups.addAll(remotePayload.backups) }
                 existingBackups.add(0, newRecord)
-                // Mantiene solo los últimos 10 respaldos en la nube para no saturar
                 if (existingBackups.size > 10) { existingBackups.removeAt(existingBackups.size - 1) }
                 RetrofitInstance.api.uploadBackup(userId, CloudPayload(backups = existingBackups))
-            } catch (e: Exception) {
-                // Falla silenciosamente si no hay internet
-            }
+            } catch (e: Exception) {}
         }
     }
 
@@ -696,11 +700,11 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
-    fun addTransaction(description: String, amount: Double, isIncome: Boolean, note: String, method: String) {
+    fun addTransaction(description: String, amount: Double, isIncome: Boolean, note: String, method: String, category: String? = null, imageUri: String? = null) {
         viewModelScope.launch {
             val cash = if (method == "Efectivo") amount else 0.0
             val digital = if (method == "Digital") amount else 0.0
-            dao.insertTransaction(Transaction(description = description, amount = amount, isIncome = isIncome, note = note, cashAmount = cash, digitalAmount = digital, country = selectedCountry))
+            dao.insertTransaction(Transaction(description = description, amount = amount, isIncome = isIncome, note = note, cashAmount = cash, digitalAmount = digital, country = selectedCountry, category = category, imageUri = imageUri))
         }
         AppSounds.play(getApplication<Application>(), touchSoundUri)
     }
@@ -968,8 +972,6 @@ class ProductDraftState {
     fun loadFrom(product: Product) {
         name = product.name
         val pCost = product.purchasePrice
-        // Modificación crucial: Usar alta precisión para no perder decimales
-        // al reconstruir los bolívares en el modo Venezuela.
         purchasePriceRaw = if (pCost > 0) {
             if (pCost % 1.0 == 0.0) pCost.toLong().toString() else {
                 val df = java.text.DecimalFormat("#.######", java.text.DecimalFormatSymbols(Locale.US))
@@ -1249,10 +1251,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     // --- 6.1. CONTROL DE ESTADOS DEL PERFIL ---
     var showProfileDialog by remember { mutableStateOf(false) }
-
     var preselectedDateForEvent by remember { mutableStateOf<Long?>(null) }
     var showOptionsDialog by remember { mutableStateOf(false) }
     var isSyncingAccount by remember { mutableStateOf(false) }
+
+    // --- NUEVO: ESTADO CATEGORÍAS Y FOTO ---
+    var showManageCategoriesDialog by remember { mutableStateOf(false) }
+    var expandedImageUri by remember { mutableStateOf<String?>(null) }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -1503,14 +1508,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
                             Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
 
+                            // --- NUEVO: BOTÓN DE CATEGORÍAS ---
                             if (currentTab == 0) {
-                                if (isResumenAllowed) { DropdownMenuItem(text = { Text("📊 Resumen de Totales") }, onClick = { showSummaryDialog = true; showMenu = false }) } else { DropdownMenuItem(text = { Text("👑 📊 Resumen de Totales", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }, onClick = { showPremiumToastMsg(context); showMenu = false }) }
-                                DropdownMenuItem(text = { Text("🔔 Saldo Crítico") }, onClick = { showLimitDialog = true; showMenu = false })
+                                DropdownMenuItem(text = { Text("🏷️ Gestionar Categorías") }, onClick = { showManageCategoriesDialog = true; showMenu = false })
+                                Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
                             }
 
-                            DropdownMenuItem(text = { Text("⚙️ Opciones") }, onClick = { showOptionsDialog = true; showMenu = false })
-
-                            if (currentTab == 0 && isBorrarHistorialAllowed) { DropdownMenuItem(text = { Text("⚠️ Borrar Historial", color = Color(0xFFE53935)) }, onClick = { showDeleteHistoryConfirmDialog = true; showMenu = false }) }
+                            if (currentTab == 0) { DropdownMenuItem(text = { Text("⚠️ Borrar Historial", color = Color(0xFFE53935)) }, onClick = { showDeleteHistoryConfirmDialog = true; showMenu = false }) }
 
                             DropdownMenuItem(text = { Text("🚪 Cerrar Sesión", color = Color(0xFFE53935)) }, onClick = { onLogout(); showMenu = false })
                         }
@@ -1616,7 +1620,15 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 Crossfade(targetState = currentTab, label = "TabSwitch") { tab ->
                     if (tab == 0) {
                         Column(modifier = Modifier.fillMaxSize()) {
-                            DashboardCard(balance, totalIncome, totalExpense, personalCashBalance, personalDigitalBalance)
+                            DashboardCard(
+                                balance = balance,
+                                income = totalIncome,
+                                expense = totalExpense,
+                                cashBalance = personalCashBalance,
+                                digitalBalance = personalDigitalBalance,
+                                cashExpense = personalCashExpense,
+                                digitalExpense = personalDigitalExpense
+                            )
                             AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) {
                                 Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) {
                                     Text("⚠️ ¡Alerta! Tu saldo está por debajo del límite crítico (${formatMoneyMain(viewModel.minBalanceThreshold, viewModel.selectedCountry)}).", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -1662,13 +1674,17 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 80.dp)) {
                                 items(personalTransactions, key = { it.id }) { transaction ->
                                     Box(modifier = Modifier.animateItem(placementSpec = tween(400))) {
-                                        TransactionItem(transaction = transaction, onDelete = {
-                                            viewModel.deleteTransaction(transaction)
-                                            coroutineScope.launch {
-                                                val result = snackbarHostState.showSnackbar(message = "Registro eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short)
-                                                if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(transaction)
-                                            }
-                                        })
+                                        TransactionItem(
+                                            transaction = transaction,
+                                            onDelete = {
+                                                viewModel.deleteTransaction(transaction)
+                                                coroutineScope.launch {
+                                                    val result = snackbarHostState.showSnackbar(message = "Registro eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short)
+                                                    if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(transaction)
+                                                }
+                                            },
+                                            onImageClick = { uri -> expandedImageUri = uri }
+                                        )
                                     }
                                 }
                             }
@@ -1876,12 +1892,28 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         // --- 6.7. DIÁLOGO DE AGREGAR TRANSACCIÓN (PERSONAL) ---
         if (showAddDialog) {
             AddTransactionDialog(
+                categories = viewModel.customCategories,
                 onDismiss = { showAddDialog = false },
-                onConfirm = { desc, amount, isIncome, note, method ->
-                    viewModel.addTransaction(desc, amount, isIncome, note, method)
+                onConfirm = { desc, amount, isIncome, note, method, category, imageUri ->
+                    viewModel.addTransaction(desc, amount, isIncome, note, method, category, imageUri)
                     showAddDialog = false
                 }
             )
+        }
+
+        // --- NUEVO: MODAL PARA GESTIONAR LAS CATEGORÍAS ---
+        if (showManageCategoriesDialog) {
+            ManageCategoriesDialog(
+                categories = viewModel.customCategories,
+                onDismiss = { showManageCategoriesDialog = false },
+                onAdd = { viewModel.addCategory(it) },
+                onRemove = { viewModel.removeCategory(it) }
+            )
+        }
+
+        // --- NUEVO: VISTA EXPANDIDA DEL RECIBO/FOTO DE UN GASTO ---
+        if (expandedImageUri != null) {
+            ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null })
         }
 
         // --- 6.8. DIÁLOGO DE AGREGAR / EDITAR PRODUCTO (INVENTARIO) ---
@@ -3213,8 +3245,9 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Boolean, String, String) -> Unit) {
+fun AddTransactionDialog(categories: List<String>, onDismiss: () -> Unit, onConfirm: (String, Double, Boolean, String, String, String?, String?) -> Unit) {
     var isIncome by remember { mutableStateOf(true) }
     var descIncome by remember { mutableStateOf("") }
     var amountIncome by remember { mutableStateOf("") }
@@ -3222,6 +3255,32 @@ fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Bool
     var amountExpense by remember { mutableStateOf("") }
     var noteExpense by remember { mutableStateOf("") }
     var method by remember { mutableStateOf("Efectivo") }
+
+    // Nuevas variables
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
+    var expandedCategory by remember { mutableStateOf(false) }
+    var imageUri by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+
+    // Lanzador para Galería
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) {}
+            imageUri = uri.toString()
+        }
+    }
+
+    // Lanzador directo a Cámara (Guarda temporalmente para no pedir permisos extra)
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) {
+            try {
+                val file = java.io.File(context.cacheDir, "gasto_${System.currentTimeMillis()}.png")
+                file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                imageUri = Uri.fromFile(file).toString()
+            } catch (e: Exception) {}
+        }
+    }
 
     AlertDialog(
         onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
@@ -3233,7 +3292,7 @@ fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Bool
         },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
-            Column {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp)).padding(4.dp)) {
                     Button(onClick = { isIncome = true }, colors = ButtonDefaults.buttonColors(containerColor = if (isIncome) Color(0xFF4CAF50) else Color.Transparent, contentColor = if (isIncome) Color.White else MaterialTheme.colorScheme.onSurface), shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f), elevation = null) { Text("Ingresos 👝", fontWeight = FontWeight.Bold) }
                     Button(onClick = { isIncome = false }, colors = ButtonDefaults.buttonColors(containerColor = if (!isIncome) Color(0xFFF44336) else Color.Transparent, contentColor = if (!isIncome) Color.White else MaterialTheme.colorScheme.onSurface), shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f), elevation = null) { Text("Gastos 👛", fontWeight = FontWeight.Bold) }
@@ -3245,7 +3304,7 @@ fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Bool
                     FilterChip(selected = method == "Efectivo", onClick = { method = "Efectivo" }, label = { Text("Efectivo") })
                     FilterChip(selected = method == "Digital", onClick = { method = "Digital" }, label = { Text("Digital") })
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Crossfade(targetState = isIncome, label = "") { showIncome ->
                     Column {
@@ -3257,8 +3316,68 @@ fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Bool
                             OutlinedTextField(value = descExpense, onValueChange = { input -> descExpense = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Título") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedTextField(value = amountExpense, onValueChange = { amountExpense = cleanAmountInput(it) }, label = { Text("Monto") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Seleccionar Categoría
+                            Box {
+                                OutlinedButton(onClick = { expandedCategory = true }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(selectedCategory ?: "🔽 Categoría (Opcional)", color = MaterialTheme.colorScheme.onSurface)
+                                }
+                                DropdownMenu(expanded = expandedCategory, onDismissRequest = { expandedCategory = false }) {
+                                    categories.forEach { cat ->
+                                        DropdownMenuItem(text = { Text(cat) }, onClick = { selectedCategory = cat; expandedCategory = false })
+                                    }
+                                    if(categories.isEmpty()) {
+                                        DropdownMenuItem(text = { Text("Sin categorías creadas", color = Color.Gray) }, onClick = { expandedCategory = false })
+                                    }
+                                    Divider()
+                                    DropdownMenuItem(text = { Text("❌ Ninguna") }, onClick = { selectedCategory = null; expandedCategory = false })
+                                }
+                            }
                             Spacer(modifier = Modifier.height(8.dp))
+
                             OutlinedTextField(value = noteExpense, onValueChange = { input -> noteExpense = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nota (Opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Subir o tomar foto
+                            Text("Adjuntar Recibo (Opcional)", fontSize = 12.sp, color = Color.Gray)
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            if (imageUri != null) {
+                                Box(modifier = Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(8.dp)).background(Color.Gray.copy(alpha=0.1f))) {
+                                    var bitmap by remember(imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                                    LaunchedEffect(imageUri) {
+                                        if (imageUri != null) {
+                                            val loaded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                try {
+                                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                                        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(imageUri!!)))
+                                                    } else {
+                                                        @Suppress("DEPRECATION")
+                                                        android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(imageUri!!))
+                                                    }
+                                                } catch (e: Exception) { null }
+                                            }
+                                            bitmap = loaded
+                                        }
+                                    }
+
+                                    if (bitmap != null) {
+                                        Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Recibo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                    } else {
+                                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center), color = MaterialTheme.colorScheme.primary)
+                                    }
+
+                                    IconButton(onClick = { imageUri = null }, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).background(Color.Black.copy(alpha=0.6f), CircleShape).size(24.dp)) {
+                                        Icon(Icons.Filled.Close, "Quitar", tint = Color.White, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            } else {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                                    OutlinedButton(onClick = { cameraLauncher.launch(null) }) { Icon(Icons.Filled.CameraAlt, "Cámara"); Spacer(Modifier.width(4.dp)); Text("Cámara") }
+                                    OutlinedButton(onClick = { galleryLauncher.launch(arrayOf("image/*")) }) { Icon(Icons.Filled.Image, "Galería"); Spacer(Modifier.width(4.dp)); Text("Galería") }
+                                }
+                            }
                         }
                     }
                 }
@@ -3266,7 +3385,17 @@ fun AddTransactionDialog(onDismiss: () -> Unit, onConfirm: (String, Double, Bool
         },
         confirmButton = {
             Button(onClick = {
-                if (isIncome) { val a = amountIncome.toDoubleOrNull(); if (descIncome.isNotBlank() && a != null) { onConfirm(descIncome.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, a, true, "", method) } } else { val a = amountExpense.toDoubleOrNull(); if (descExpense.isNotBlank() && a != null) { onConfirm(descExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, a, false, noteExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, method) } }
+                if (isIncome) {
+                    val a = amountIncome.toDoubleOrNull();
+                    if (descIncome.isNotBlank() && a != null) {
+                        onConfirm(descIncome.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, a, true, "", method, null, null)
+                    }
+                } else {
+                    val a = amountExpense.toDoubleOrNull();
+                    if (descExpense.isNotBlank() && a != null) {
+                        onConfirm(descExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, a, false, noteExpense.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }, method, selectedCategory, imageUri)
+                    }
+                }
             }) { Text("Guardar ✔️") }
         },
         dismissButton = { }
@@ -4415,13 +4544,14 @@ fun ProductInfoDialog(product: Product, selectedCountry: String, bcvRate: Double
 }
 
 @Composable
-fun DashboardCard(balance: Double, income: Double, expense: Double, cashBalance: Double, digitalBalance: Double) {
+fun DashboardCard(balance: Double, income: Double, expense: Double, cashBalance: Double, digitalBalance: Double, cashExpense: Double, digitalExpense: Double) {
     Card(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Saldo Total", color = Color.Gray, fontSize = 16.sp)
             Text(text = formatCOP(balance), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = if (balance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
+            Text("Saldos Disponibles", fontSize=12.sp, color=Color.Gray, modifier = Modifier.align(Alignment.Start).padding(start = 8.dp))
             Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.1f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Efectivo", fontSize=12.sp, color=Color.Gray)
@@ -4430,6 +4560,20 @@ fun DashboardCard(balance: Double, income: Double, expense: Double, cashBalance:
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Digital", fontSize=12.sp, color=Color.Gray)
                     Text(formatCOP(digitalBalance), fontSize=14.sp, fontWeight=FontWeight.Bold, color = if (digitalBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text("Desglose de Gastos", fontSize=12.sp, color=Color.Gray, modifier = Modifier.align(Alignment.Start).padding(start = 8.dp))
+            Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.1f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Efectivo", fontSize=12.sp, color=Color.Gray)
+                    Text("-${formatCOP(cashExpense)}", fontSize=14.sp, fontWeight=FontWeight.Bold, color = Color(0xFFE53935))
+                }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Digital", fontSize=12.sp, color=Color.Gray)
+                    Text("-${formatCOP(digitalExpense)}", fontSize=14.sp, fontWeight=FontWeight.Bold, color = Color(0xFFE53935))
                 }
             }
 
@@ -4443,7 +4587,7 @@ fun DashboardCard(balance: Double, income: Double, expense: Double, cashBalance:
 }
 
 @Composable
-fun TransactionItem(transaction: Transaction, onDelete: () -> Unit) {
+fun TransactionItem(transaction: Transaction, onDelete: () -> Unit, onImageClick: (String) -> Unit) {
     val isIncome = transaction.isIncome
     val color = if (isIncome) Color(0xFF4CAF50) else Color(0xFFF44336)
     val emoji = getSmartEmoji(transaction.description, isIncome)
@@ -4460,7 +4604,16 @@ fun TransactionItem(transaction: Transaction, onDelete: () -> Unit) {
             Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(color.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Text(text = emoji, fontSize = 24.sp) }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-                Text(text = transaction.description, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = transaction.description, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill=false))
+                    if (transaction.category != null) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(color = MaterialTheme.colorScheme.primary.copy(alpha=0.15f), shape = RoundedCornerShape(4.dp)) {
+                            Text(transaction.category, fontSize = 9.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
 
                 val noteAndMethod = buildString {
                     if (transaction.note.isNotBlank()) append(transaction.note)
@@ -4473,13 +4626,69 @@ fun TransactionItem(transaction: Transaction, onDelete: () -> Unit) {
                     Text(text = noteAndMethod, color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 2.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
 
-                Text(text = formatDate(transaction.timestamp), color = Color.Gray.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(text = formatDate(transaction.timestamp), color = Color.Gray.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1)
+                    if (transaction.imageUri != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(Icons.Filled.Image, "Ver Recibo", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp).clickable { onImageClick(transaction.imageUri) })
+                    }
+                }
             }
             Column(horizontalAlignment = Alignment.End) { Text(text = "${if (isIncome) "+" else "-"}${formatCOP(transaction.amount)}", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = color, maxLines = 1) }
             IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Gray, modifier = Modifier.size(20.dp)) }
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ManageCategoriesDialog(categories: List<String>, onDismiss: () -> Unit, onAdd: (String) -> Unit, onRemove: (String) -> Unit) {
+    var newCat by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Categorías 🏷️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "Cerrar") }
+            }
+        },
+        text = {
+            Column {
+                Text("Gestiona las categorías de tus gastos:", color = Color.Gray, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = newCat, onValueChange = { newCat = it }, label = { Text("Nueva Categoría") }, modifier = Modifier.weight(1f), singleLine = true)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = {
+                        if (newCat.isNotBlank()) {
+                            onAdd(newCat.trim().replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() })
+                            newCat = ""
+                        }
+                    }) { Text("Añadir") }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (categories.isEmpty()) {
+                    Text("Aún no tienes categorías creadas.", color = Color.Gray, fontSize = 14.sp)
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 250.dp)) {
+                        items(categories) { cat ->
+                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(cat, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                IconButton(onClick = { onRemove(cat) }) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Red) }
+                            }
+                            Divider(color = Color.Gray.copy(alpha=0.2f))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
 // ==========================================
 // 9. FUNCIONES DE FORMATO Y UTILIDADES
 // ==========================================
