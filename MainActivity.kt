@@ -1259,6 +1259,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showManageCategoriesDialog by remember { mutableStateOf(false) }
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
 
+    // --- NUEVO: MODALES DE DESGLOSE DE GASTOS ---
+    var showCashExpensesDialog by remember { mutableStateOf(false) }
+    var showDigitalExpensesDialog by remember { mutableStateOf(false) }
+
     val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -1624,10 +1628,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 balance = balance,
                                 income = totalIncome,
                                 expense = totalExpense,
-                                cashBalance = personalCashBalance,
-                                digitalBalance = personalDigitalBalance,
                                 cashExpense = personalCashExpense,
-                                digitalExpense = personalDigitalExpense
+                                digitalExpense = personalDigitalExpense,
+                                onCashClick = { showCashExpensesDialog = true },
+                                onDigitalClick = { showDigitalExpensesDialog = true }
                             )
                             AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) {
                                 Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) {
@@ -1912,8 +1916,45 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
 
         // --- NUEVO: VISTA EXPANDIDA DEL RECIBO/FOTO DE UN GASTO ---
+        // --- NUEVO: VISTA EXPANDIDA DEL RECIBO/FOTO DE UN GASTO ---
         if (expandedImageUri != null) {
             ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null })
+        }
+
+        // --- NUEVO: MODALES DE DESGLOSE DE GASTOS ---
+        val cashExpensesList = remember(personalTransactions) { personalTransactions.filter { !it.isIncome && it.cashAmount > 0 } }
+        val digitalExpensesList = remember(personalTransactions) { personalTransactions.filter { !it.isIncome && it.digitalAmount > 0 } }
+
+        if (showCashExpensesDialog) {
+            ExpenseBreakdownDialog(
+                title = "Gastos en Efectivo 💵",
+                expenses = cashExpensesList,
+                onDismiss = { showCashExpensesDialog = false },
+                onDelete = {
+                    viewModel.deleteTransaction(it)
+                    coroutineScope.launch {
+                        val result = snackbarHostState.showSnackbar(message = "Gasto eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short)
+                        if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(it)
+                    }
+                },
+                onImageClick = { uri -> expandedImageUri = uri }
+            )
+        }
+
+        if (showDigitalExpensesDialog) {
+            ExpenseBreakdownDialog(
+                title = "Gastos en Digital 💳",
+                expenses = digitalExpensesList,
+                onDismiss = { showDigitalExpensesDialog = false },
+                onDelete = {
+                    viewModel.deleteTransaction(it)
+                    coroutineScope.launch {
+                        val result = snackbarHostState.showSnackbar(message = "Gasto eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short)
+                        if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(it)
+                    }
+                },
+                onImageClick = { uri -> expandedImageUri = uri }
+            )
         }
 
         // --- 6.8. DIÁLOGO DE AGREGAR / EDITAR PRODUCTO (INVENTARIO) ---
@@ -4544,34 +4585,20 @@ fun ProductInfoDialog(product: Product, selectedCountry: String, bcvRate: Double
 }
 
 @Composable
-fun DashboardCard(balance: Double, income: Double, expense: Double, cashBalance: Double, digitalBalance: Double, cashExpense: Double, digitalExpense: Double) {
+fun DashboardCard(balance: Double, income: Double, expense: Double, cashExpense: Double, digitalExpense: Double, onCashClick: () -> Unit, onDigitalClick: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Saldo Total", color = Color.Gray, fontSize = 16.sp)
             Text(text = formatCOP(balance), fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = if (balance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text("Saldos Disponibles", fontSize=12.sp, color=Color.Gray, modifier = Modifier.align(Alignment.Start).padding(start = 8.dp))
-            Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.1f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Efectivo", fontSize=12.sp, color=Color.Gray)
-                    Text(formatCOP(cashBalance), fontSize=14.sp, fontWeight=FontWeight.Bold, color = if (cashBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Digital", fontSize=12.sp, color=Color.Gray)
-                    Text(formatCOP(digitalBalance), fontSize=14.sp, fontWeight=FontWeight.Bold, color = if (digitalBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935))
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
             Text("Desglose de Gastos", fontSize=12.sp, color=Color.Gray, modifier = Modifier.align(Alignment.Start).padding(start = 8.dp))
             Row(modifier = Modifier.fillMaxWidth().background(Color.DarkGray.copy(alpha=0.1f), RoundedCornerShape(8.dp)).padding(8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onCashClick() }.padding(8.dp)) {
                     Text("Efectivo", fontSize=12.sp, color=Color.Gray)
                     Text("-${formatCOP(cashExpense)}", fontSize=14.sp, fontWeight=FontWeight.Bold, color = Color(0xFFE53935))
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onDigitalClick() }.padding(8.dp)) {
                     Text("Digital", fontSize=12.sp, color=Color.Gray)
                     Text("-${formatCOP(digitalExpense)}", fontSize=14.sp, fontWeight=FontWeight.Bold, color = Color(0xFFE53935))
                 }
@@ -4679,6 +4706,62 @@ fun ManageCategoriesDialog(categories: List<String>, onDismiss: () -> Unit, onAd
                                 IconButton(onClick = { onRemove(cat) }) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Red) }
                             }
                             Divider(color = Color.Gray.copy(alpha=0.2f))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        containerColor = MaterialTheme.colorScheme.surface
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ExpenseBreakdownDialog(title: String, expenses: List<Transaction>, onDismiss: () -> Unit, onDelete: (Transaction) -> Unit, onImageClick: (String) -> Unit) {
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredExpenses = remember(expenses, searchQuery) {
+        val query = searchQuery.lowercase(Locale.getDefault())
+        expenses.filter {
+            it.description.lowercase(Locale.getDefault()).contains(query) ||
+                    it.note.lowercase(Locale.getDefault()).contains(query) ||
+                    (it.category?.lowercase(Locale.getDefault()) ?: "").contains(query) ||
+                    it.amount.toLong().toString().contains(query)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "Cerrar") }
+            }
+        },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Buscar por título, categoría, monto...") },
+                    leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Buscar") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (filteredExpenses.isEmpty()) {
+                    Text("No se encontraron gastos con esa búsqueda.", color = Color.Gray, modifier = Modifier.padding(16.dp).fillMaxWidth(), textAlign = TextAlign.Center)
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                        items(filteredExpenses, key = { it.id }) { tx ->
+                            TransactionItem(
+                                transaction = tx,
+                                onDelete = { onDelete(tx) },
+                                onImageClick = onImageClick
+                            )
                         }
                     }
                 }
