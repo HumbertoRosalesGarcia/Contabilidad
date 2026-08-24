@@ -2999,22 +2999,27 @@ fun ProfileDialog(
 fun ExpandedImageDialog(imageUri: String, onDismiss: () -> Unit) {
     val context = LocalContext.current
     Dialog(
-        onDismissRequest = { }, // Bloqueado al botón de retroceso/fuera
+        onDismissRequest = { },
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)), // Quitamos el clickable de fondo
-            contentAlignment = Alignment.Center
-        ) {
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
             var bitmap by remember(imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+
             LaunchedEffect(imageUri) {
                 val loadedBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(imageUri)))
+                        if (imageUri.startsWith("data:image") || imageUri.length > 1000) {
+                            val b64 = imageUri.substringAfter(",")
+                            val decoded = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
                         } else {
-                            @Suppress("DEPRECATION")
-                            android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(imageUri))
+                            val uri = Uri.parse(imageUri)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
+                            } else {
+                                @Suppress("DEPRECATION")
+                                android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+                            }
                         }
                     } catch (e: Exception) { null }
                 }
@@ -3022,12 +3027,7 @@ fun ExpandedImageDialog(imageUri: String, onDismiss: () -> Unit) {
             }
 
             if (bitmap != null) {
-                Image(
-                    bitmap = bitmap!!.asImageBitmap(),
-                    contentDescription = "Imagen Expandida",
-                    modifier = Modifier.fillMaxWidth(0.9f).clip(RoundedCornerShape(16.dp)),
-                    contentScale = ContentScale.Fit
-                )
+                Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Imagen Expandida", modifier = Modifier.fillMaxWidth(0.9f).clip(RoundedCornerShape(16.dp)), contentScale = ContentScale.Fit)
             } else {
                 CircularProgressIndicator(color = Color.White)
             }
@@ -3338,29 +3338,48 @@ fun AddTransactionDialog(categories: List<String>, onDismiss: () -> Unit, onConf
     var noteExpense by remember { mutableStateOf("") }
     var method by remember { mutableStateOf("Efectivo") }
 
-    // Nuevas variables
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var expandedCategory by remember { mutableStateOf(false) }
     var imageUri by remember { mutableStateOf<String?>(null) }
+    var isProcessingImage by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
-    // Lanzador para Galería
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) {}
-            imageUri = uri.toString()
+            isProcessingImage = true
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+                    if (bitmap != null) {
+                        val scale = kotlin.math.min(800f / bitmap.width, 800f / bitmap.height)
+                        val resized = android.graphics.Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+                        val outputStream = java.io.ByteArrayOutputStream()
+                        resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
+                        val b64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.DEFAULT)
+                        launch(Dispatchers.Main) { imageUri = "data:image/jpeg;base64,$b64" }
+                    }
+                } catch (e: Exception) {}
+                launch(Dispatchers.Main) { isProcessingImage = false }
+            }
         }
     }
 
-    // Lanzador directo a Cámara (Guarda temporalmente para no pedir permisos extra)
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
         if (bitmap != null) {
-            try {
-                val file = java.io.File(context.cacheDir, "gasto_${System.currentTimeMillis()}.png")
-                file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-                imageUri = Uri.fromFile(file).toString()
-            } catch (e: Exception) {}
+            isProcessingImage = true
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val outputStream = java.io.ByteArrayOutputStream()
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
+                    val b64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.DEFAULT)
+                    launch(Dispatchers.Main) { imageUri = "data:image/jpeg;base64,$b64" }
+                } catch (e: Exception) {}
+                launch(Dispatchers.Main) { isProcessingImage = false }
+            }
         }
     }
 
@@ -3400,7 +3419,6 @@ fun AddTransactionDialog(categories: List<String>, onDismiss: () -> Unit, onConf
                             OutlinedTextField(value = amountExpense, onValueChange = { amountExpense = cleanAmountInput(it) }, label = { Text("Monto") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), visualTransformation = AmountVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
                             Spacer(modifier = Modifier.height(12.dp))
 
-                            // Seleccionar Categoría
                             Box {
                                 OutlinedButton(onClick = { expandedCategory = true }, modifier = Modifier.fillMaxWidth()) {
                                     Text(selectedCategory ?: "🔽 Categoría (Opcional)", color = MaterialTheme.colorScheme.onSurface)
@@ -3421,26 +3439,21 @@ fun AddTransactionDialog(categories: List<String>, onDismiss: () -> Unit, onConf
                             OutlinedTextField(value = noteExpense, onValueChange = { input -> noteExpense = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nota (Opcional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            // Subir o tomar foto
                             Text("Adjuntar Recibo (Opcional)", fontSize = 12.sp, color = Color.Gray)
                             Spacer(modifier = Modifier.height(4.dp))
 
-                            if (imageUri != null) {
+                            if (isProcessingImage) {
+                                Box(modifier = Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                            } else if (imageUri != null) {
                                 Box(modifier = Modifier.fillMaxWidth().height(120.dp).clip(RoundedCornerShape(8.dp)).background(Color.Gray.copy(alpha=0.1f))) {
                                     var bitmap by remember(imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
                                     LaunchedEffect(imageUri) {
-                                        if (imageUri != null) {
-                                            val loaded = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                try {
-                                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                                        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(imageUri!!)))
-                                                    } else {
-                                                        @Suppress("DEPRECATION")
-                                                        android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(imageUri!!))
-                                                    }
-                                                } catch (e: Exception) { null }
-                                            }
-                                            bitmap = loaded
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            try {
+                                                val b64 = if (imageUri!!.contains(",")) imageUri!!.split(",")[1] else imageUri!!
+                                                val decoded = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                                bitmap = android.graphics.BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+                                            } catch (e: Exception) {}
                                         }
                                     }
 
@@ -4659,6 +4672,7 @@ fun TransactionItem(transaction: Transaction, onDelete: () -> Unit, onImageClick
     val isIncome = transaction.isIncome
     val color = if (isIncome) Color(0xFF4CAF50) else Color(0xFFF44336)
     val emoji = getSmartEmoji(transaction.description, isIncome)
+    val context = LocalContext.current
 
     val methodText = when {
         transaction.cashAmount > 0 && transaction.digitalAmount == 0.0 -> "Efectivo"
@@ -4669,17 +4683,51 @@ fun TransactionItem(transaction: Transaction, onDelete: () -> Unit, onImageClick
 
     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Row(modifier = Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(color.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) { Text(text = emoji, fontSize = 24.sp) }
+
+            // --- THUMBNAIL O EMOJI ---
+            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(color.copy(alpha = 0.1f)).clickable { if (transaction.imageUri != null) onImageClick(transaction.imageUri) }, contentAlignment = Alignment.Center) {
+                if (transaction.imageUri != null) {
+                    var bitmap by remember(transaction.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                    LaunchedEffect(transaction.imageUri) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            try {
+                                val uriStr = transaction.imageUri
+                                if (uriStr.startsWith("data:image") || uriStr.length > 1000) {
+                                    val b64 = uriStr.substringAfter(",")
+                                    val decoded = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                    bitmap = android.graphics.BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+                                } else {
+                                    val uri = Uri.parse(uriStr)
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                        bitmap = android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
+                                    } else {
+                                        @Suppress("DEPRECATION")
+                                        bitmap = android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+                                    }
+                                }
+                            } catch (e: Exception) {}
+                        }
+                    }
+                    if (bitmap != null) {
+                        Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Recibo", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    } else {
+                        Text(text = "🖼️", fontSize = 20.sp)
+                    }
+                } else {
+                    Text(text = emoji, fontSize = 24.sp)
+                }
+            }
+
             Spacer(modifier = Modifier.width(16.dp))
+
+            // --- COLUMNA DE TEXTOS (Sin límites para no recortar información) ---
             Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = transaction.description, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill=false))
-                    if (transaction.category != null) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Surface(color = MaterialTheme.colorScheme.primary.copy(alpha=0.15f), shape = RoundedCornerShape(4.dp)) {
-                            Text(transaction.category, fontSize = 9.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp), fontWeight = FontWeight.Bold)
-                        }
+                Text(text = transaction.description, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurface)
+
+                if (transaction.category != null) {
+                    Surface(color = MaterialTheme.colorScheme.primary.copy(alpha=0.15f), shape = RoundedCornerShape(4.dp), modifier = Modifier.padding(top = 4.dp)) {
+                        Text(transaction.category, fontSize = 10.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -4691,19 +4739,25 @@ fun TransactionItem(transaction: Transaction, onDelete: () -> Unit, onImageClick
                     }
                 }
                 if (noteAndMethod.isNotEmpty()) {
-                    Text(text = noteAndMethod, color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 2.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(text = noteAndMethod, color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(text = formatDate(transaction.timestamp), color = Color.Gray.copy(alpha = 0.7f), fontSize = 12.sp, maxLines = 1)
+                    Text(text = formatDate(transaction.timestamp), color = Color.Gray.copy(alpha = 0.7f), fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
                     if (transaction.imageUri != null) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(Icons.Filled.Image, "Ver Recibo", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp).clickable { onImageClick(transaction.imageUri) })
                     }
                 }
             }
-            Column(horizontalAlignment = Alignment.End) { Text(text = "${if (isIncome) "+" else "-"}${formatCOP(transaction.amount)}", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = color, maxLines = 1) }
-            IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) { Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Gray, modifier = Modifier.size(20.dp)) }
+
+            // --- COLUMNA DEL MONTO Y BOTÓN ELIMINAR ---
+            Column(horizontalAlignment = Alignment.End) {
+                Text(text = "${if (isIncome) "+" else "-"}${formatCOP(transaction.amount)}", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = color)
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp).padding(top = 8.dp)) {
+                    Icon(Icons.Filled.Delete, "Eliminar", tint = Color.Gray, modifier = Modifier.size(20.dp))
+                }
+            }
         }
     }
 }
@@ -4772,18 +4826,23 @@ fun ExpenseBreakdownDialog(title: String, expenses: List<Transaction>, onDismiss
         }
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false), // <-- ESTO QUITA EL LÍMITE DE ANCHO
-        modifier = Modifier.fillMaxWidth(0.95f).padding(16.dp), // <-- ESTO LO EXPANDE POR COMPLETO
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(title, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "Cerrar") }
-            }
-        },
-        text = {
-            Column {
+        properties = DialogProperties(usePlatformDefaultWidth = false) // Quita el límite estricto
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.95f), // Obliga a la ventana a ocupar el 95% de la pantalla
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                    Text(title, fontWeight = FontWeight.Bold, fontSize = 20.sp, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) { Icon(Icons.Filled.Close, "Cerrar") }
+                }
+
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -4798,7 +4857,7 @@ fun ExpenseBreakdownDialog(title: String, expenses: List<Transaction>, onDismiss
                 if (filteredExpenses.isEmpty()) {
                     Text("No se encontraron gastos con esa búsqueda.", color = Color.Gray, modifier = Modifier.padding(16.dp).fillMaxWidth(), textAlign = TextAlign.Center)
                 } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                    LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)) {
                         items(filteredExpenses, key = { it.id }) { tx ->
                             TransactionItem(
                                 transaction = tx,
@@ -4809,10 +4868,8 @@ fun ExpenseBreakdownDialog(title: String, expenses: List<Transaction>, onDismiss
                     }
                 }
             }
-        },
-        confirmButton = {},
-        containerColor = MaterialTheme.colorScheme.surface
-    )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
