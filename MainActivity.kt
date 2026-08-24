@@ -1831,9 +1831,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             } else {
                                 Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 2592000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Mes (30 días)") }
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 15552000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("6 Meses (180 días)") }
+                                Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 15724800L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("6 Meses (182 días)") }
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 31104000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Año (360 días)") }
+                                Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 31536000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Año (365 días)") }
                             }
                         }
                     },
@@ -2902,33 +2902,148 @@ fun ProfileDialog(
     onNameChange: (String) -> Unit,
     onUpgradeClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
+
     var editingName by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf(currentName) }
+    var profileImageUri by remember { mutableStateOf(prefs.getString("profilePic_$currentName", null)) }
+    var showImageSourceDialog by remember { mutableStateOf(false) }
+
+    val coroutineScope = rememberCoroutineScope()
+
+    // Lanzador para Explorador de archivos / Galería
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) {}
+            profileImageUri = uri.toString()
+            prefs.edit().putString("profilePic_$currentName", uri.toString()).apply()
+        }
+    }
+
+    // Lanzador directo para Cámara (Comprimido en Base64 para almacenamiento seguro)
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) {
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val outputStream = java.io.ByteArrayOutputStream()
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
+                    val b64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.DEFAULT)
+                    val uriStr = "data:image/jpeg;base64,$b64"
+                    prefs.edit().putString("profilePic_$currentName", uriStr).apply()
+                    launch(Dispatchers.Main) { profileImageUri = uriStr }
+                } catch (e: Exception) {}
+            }
+        }
+    }
 
     val crownEmoji = when (currentRole) { "INVITADO", "INVITADO_PRUEBA" -> "🪵"; "PRUEBA", "Invitado-Gold" -> "⏳"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
 
     val startMillis = System.currentTimeMillis() - (consumedSecs * 1000L)
-    val endMillis = System.currentTimeMillis() + ((planDurationSecs - consumedSecs) * 1000L)
+    val endMillis = startMillis + (planDurationSecs * 1000L)
 
-    val days = consumedSecs / 86400
-    val hours = (consumedSecs % 86400) / 3600
-    val mins = (consumedSecs % 3600) / 60
-    val secs = consumedSecs % 60
+    val remainingSecs = maxOf(0L, planDurationSecs - consumedSecs)
+    val rDays = remainingSecs / 86400
+    val rHours = (remainingSecs % 86400) / 3600
+    val rMins = (remainingSecs % 3600) / 60
+    val rSecs = remainingSecs % 60
+    val timeRemainingStr = "${rDays}d ${rHours}h ${rMins}m ${rSecs}s"
 
-    val timeActiveStr = "${days}d ${hours}h ${mins}m ${secs}s"
+    // Modal para elegir entre Cámara y Explorador
+    if (showImageSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showImageSourceDialog = false },
+            title = { Text("Elegir Foto de Perfil 📸", fontWeight = FontWeight.Bold) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = {
+                            showImageSourceDialog = false
+                            cameraLauncher.launch(null)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Filled.CameraAlt, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Tomar con la Cámara")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            showImageSourceDialog = false
+                            galleryLauncher.launch(arrayOf("image/*"))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Explorador de Archivos")
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showImageSourceDialog = false }) { Text("Cancelar") }
+            }
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(dismissOnClickOutside = false),
         title = {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Mi Perfil 👤", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                IconButton(onClick = onDismiss) { Icon(Icons.Filled.Close, "Cerrar") }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") }
             }
         },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+
+                // Círculo para la foto (Abre el selector de opciones al tocarlo)
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { showImageSourceDialog = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    var bitmap by remember(profileImageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+
+                    LaunchedEffect(profileImageUri) {
+                        if (profileImageUri != null) {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                try {
+                                    val uriStr = profileImageUri!!
+                                    if (uriStr.startsWith("data:image") || uriStr.length > 1000) {
+                                        val b64 = uriStr.substringAfter(",")
+                                        val decoded = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                        bitmap = android.graphics.BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+                                    } else {
+                                        val uri = Uri.parse(uriStr)
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                            bitmap = android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
+                                        } else {
+                                            @Suppress("DEPRECATION")
+                                            bitmap = android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+                                        }
+                                    }
+                                } catch (e: Exception) { null }
+                            }
+                        }
+                    }
+
+                    if (bitmap != null) {
+                        Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Foto de perfil", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    } else {
+                        Icon(Icons.Filled.Add, "Añadir foto", modifier = Modifier.size(40.dp), tint = Color.Gray)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
                 if (editingName) {
                     OutlinedTextField(
                         value = nameInput,
@@ -2944,46 +3059,48 @@ fun ProfileDialog(
                         }
                     )
                 } else {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { editingName = true }.padding(vertical = 8.dp)) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Nombre", fontSize = 12.sp, color = Color.Gray)
-                            Text(currentName, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { editingName = true }) {
+                        Text(currentName, fontWeight = FontWeight.Bold, fontSize = 22.sp, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.width(8.dp))
                         Icon(Icons.Filled.Edit, "Editar", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     }
                 }
 
-                Divider(modifier = Modifier.padding(vertical = 12.dp), color = Color.Gray.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(24.dp))
+                Divider(color = Color.Gray.copy(alpha = 0.2f))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                Text("Membresía Actual", fontSize = 12.sp, color = Color.Gray)
-                Text("$currentRole $crownEmoji", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
+                Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                    Text("Membresía Actual", fontSize = 12.sp, color = Color.Gray)
+                    Text("$currentRole $crownEmoji", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = MaterialTheme.colorScheme.primary)
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                    Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
-                        Text("Activada el:", fontSize = 12.sp, color = Color.Gray)
-                        Text(formatDate(startMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Finaliza el:", fontSize = 12.sp, color = Color.Gray)
-                        Text(formatDate(endMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                        Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
+                            Text("Activada el:", fontSize = 12.sp, color = Color.Gray)
+                            Text(formatDate(startMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Finaliza el:", fontSize = 12.sp, color = Color.Gray)
+                            Text(formatDate(endMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                Text("Tiempo en uso (Activo):", fontSize = 12.sp, color = Color.Gray)
-                Text(timeActiveStr, fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = Color(0xFFE65100))
+                    Text("Tiempo Restante:", fontSize = 12.sp, color = Color.Gray)
+                    Text(timeRemainingStr, fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = Color(0xFFE65100))
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                if (currentRole != "GOLD" && currentRole != "ADMIN") {
-                    Button(
-                        onClick = onUpgradeClick,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)
-                    ) {
-                        Text("⭐ Mejorar Membresía", fontWeight = FontWeight.Bold)
+                    if (currentRole != "GOLD" && currentRole != "ADMIN") {
+                        Button(
+                            onClick = onUpgradeClick,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)
+                        ) {
+                            Text("⭐ Mejorar Membresía", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
