@@ -138,15 +138,15 @@ data class BackupRecord(val id: String, val name: String, val timestamp: Long, v
 data class CloudPayload(val backups: List<BackupRecord>? = null, val transactions: List<Transaction>? = null, val reminders: List<Reminder>? = null, val fiadores: List<Fiador>? = null, val products: List<Product>? = null)
 data class SyncResponse(val code: String, val message: String)
 
-data class UserSyncRequest(val email: String, val name: String)
+data class UserSyncRequest(val email: String, val name: String, val profileImage: String? = null)
 data class UserSyncResponse(val role: String?, val isBanned: Boolean, val consumedSeconds: Long, val planDuration: Long)
 data class UserTimeResponse(val code: String?, val role: String?, val consumedSeconds: Long, val planDuration: Long, val isBanned: Boolean)
-data class UserData(val name: String = "Usuario", val role: String = "INVITADO", val registeredAt: Long = 0L, val consumedSeconds: Long = 0L, val isBanned: Boolean = false, val planDuration: Long = 2592000L)
+data class UserData(val name: String = "Usuario", val role: String = "INVITADO", val registeredAt: Long = 0L, val consumedSeconds: Long = 0L, val isBanned: Boolean = false, val planDuration: Long = 2592000L, val profileImage: String? = null)
 data class UserTimeRequest(val email: String, val seconds: Long)
 data class UserManageRequest(val email: String, val action: String, val role: String? = null, val planDuration: Long? = null)
 
-data class ChatMessage(val sender: String, val text: String, val timestamp: Long)
-data class ChatSendRequest(val sender: String, val receiver: String, val text: String)
+data class ChatMessage(val sender: String, val text: String, val imageUrl: String? = null, val timestamp: Long)
+data class ChatSendRequest(val sender: String, val receiver: String, val text: String, val imageUrl: String? = null)
 
 // --- NUEVOS MODELOS Y FUNCIONES PARA MONEDA ---
 data class BcvResponse(val code: String, val tasa: Double)
@@ -1564,21 +1564,30 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 )
             }
 
-            // --- 6.4. MODAL DE PERFIL (LLAMADA) ---
+// --- 6.4. MODAL DE PERFIL (LLAMADA) ---
             if (showProfileDialog) {
                 ProfileDialog(
                     currentName = localUserName,
                     currentRole = currentRole,
                     consumedSecs = currentConsumed,
                     planDurationSecs = currentPlanDuration,
+                    userId = viewModel.userId, // Identificador real
                     onDismiss = { showProfileDialog = false },
                     onNameChange = { newName ->
                         localUserName = newName
                         authPrefs.edit().putString("userName", newName).apply()
                         coroutineScope.launch(Dispatchers.IO) {
-                            try { RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, newName)) } catch(e: Exception){}
+                            val currentPic = authPrefs.getString("profilePic_${viewModel.userId}", null)
+                            try { RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, newName, currentPic)) } catch(e: Exception){}
                         }
                     },
+                    onImageChange = { newPic ->
+                        // Sincroniza la foto en la nube en segundo plano
+                        coroutineScope.launch(Dispatchers.IO) {
+                            try { RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, localUserName, newPic)) } catch(e: Exception){}
+                        }
+                    },
+                    onViewImage = { uri -> expandedImageUri = uri }, // <--- NUEVO: PERMITE VER LA FOTO
                     onUpgradeClick = {
                         showProfileDialog = false
                         showPlansDialog = true
@@ -1751,7 +1760,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 isSyncingAccount = true
                                 coroutineScope.launch(Dispatchers.IO) {
                                     try {
-                                        val response = RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, localUserName))
+                                        val currentPic = authPrefs.getString("profilePic_${viewModel.userId}", null)
+                                        val response = RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, localUserName, currentPic))
                                         launch(Dispatchers.Main) {
                                             val newRole = response.role ?: currentRole
                                             if (newRole != currentRole && !isSuperAdmin) {
@@ -1804,9 +1814,18 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         if (showAdminPanelDialog) {
             var usersList by remember { mutableStateOf<Map<String, UserData>?>(null) }; var isLoadingUsers by remember { mutableStateOf(true) }
             var roleToAssign by remember { mutableStateOf<String?>(null) }; var targetEmailToAssign by remember { mutableStateOf<String?>(null) }
-            val formatTimeLeft = { secs: Long, maxSecs: Long -> val left = maxSecs - secs; if (left <= 0) "0s" else { val days = left / 86400; val hours = (left % 86400) / 3600; "${days}d ${hours}h" } }
+
+            // --- NUEVO: TICKER PARA TIEMPO REAL ---
+            var adminTick by remember { mutableStateOf(0) }
+            LaunchedEffect(Unit) {
+                while(true) {
+                    delay(1000L)
+                    adminTick++
+                }
+            }
+
             LaunchedEffect(Unit) { try { usersList = RetrofitInstance.api.getAllUsers() } catch (_: Exception) { customToastMessage = "Error cargando usuarios" }; isLoadingUsers = false }
-            fun manageUser(targetEmail: String, action: String, newRole: String? = null, pDuration: Long? = null) { coroutineScope.launch(Dispatchers.IO) { try { RetrofitInstance.api.manageUser(UserManageRequest(targetEmail, action, newRole, pDuration)); val updatedList = RetrofitInstance.api.getAllUsers(); launch(Dispatchers.Main) { usersList = updatedList; customToastMessage = "Acción completada" } } catch (_: Exception) { launch(Dispatchers.Main) { customToastMessage = "Fallo de conexión" } } } }
+            fun manageUser(targetEmail: String, action: String, newRole: String? = null, pDuration: Long? = null) { coroutineScope.launch(Dispatchers.IO) { try { RetrofitInstance.api.manageUser(UserManageRequest(targetEmail, action, newRole, pDuration)); val updatedList = RetrofitInstance.api.getAllUsers(); launch(Dispatchers.Main) { usersList = updatedList; adminTick = 0; customToastMessage = "Acción completada" } } catch (_: Exception) { launch(Dispatchers.Main) { customToastMessage = "Fallo de conexión" } } } }
 
             if (roleToAssign != null && targetEmailToAssign != null) {
                 var customHours by remember { mutableStateOf("") }
@@ -1815,19 +1834,14 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Duración para $roleToAssign ⏱️", fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)); IconButton(onClick = { roleToAssign = null; targetEmailToAssign = null }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                     text = {
                         Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                            if (roleToAssign == "PRUEBA" || roleToAssign == "INVITADO_PRUEBA" || roleToAssign == "Invitado-Gold") {
-                                Text("Configuración de Prueba/Invitado", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            if (roleToAssign == "Invitado-Gold") {
+                                Text("Configuración de Invitado-Gold", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 86400L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Día (24 horas)") }
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedTextField(value = customHours, onValueChange = { customHours = it.filter { c -> c.isDigit() } }, label = { Text("Asignar Horas exactas") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth())
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Button(onClick = { val h = customHours.toLongOrNull() ?: 0L; if (h > 0) { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, h * 3600L); roleToAssign = null } }, modifier = Modifier.fillMaxWidth(), enabled = customHours.isNotEmpty()) { Text("Guardar Horas") }
-
-                                if (roleToAssign == "INVITADO_PRUEBA") {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text("Nota: El Invitado de Prueba solo tiene permisos de visualización. No puede registrar datos.", fontSize = 12.sp, color = Color.Gray)
-                                }
                             } else {
                                 Button(onClick = { manageUser(targetEmailToAssign!!, "setRole", roleToAssign, 2592000L); roleToAssign = null }, modifier = Modifier.fillMaxWidth()) { Text("1 Mes (30 días)") }
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -1843,45 +1857,96 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
             AlertDialog(
                 onDismissRequest = { }, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false),
+                modifier = Modifier.fillMaxWidth(0.95f),
                 title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Panel de Control 🛠️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showAdminPanelDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                 containerColor = MaterialTheme.colorScheme.surface,
                 text = {
                     if (isLoadingUsers) { CircularProgressIndicator(modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally)) }
                     else if (usersList.isNullOrEmpty()) { Text("No hay usuarios registrados.", color = Color.Gray) }
                     else {
-                        LazyColumn(modifier = Modifier.heightIn(max = 400.dp)) {
+                        LazyColumn(modifier = Modifier.heightIn(max = 500.dp)) {
                             items(usersList!!.entries.toList()) { entry ->
                                 val email = entry.key; val userData = entry.value; var expandedRoleMenu by remember { mutableStateOf(false) }
                                 val isAdminAccount = email.lowercase(Locale.getDefault()) == "zonacami77777@gmail.com"
 
-                                val listCrown = when (userData.role ?: "INVITADO") { "INVITADO", "INVITADO_PRUEBA" -> "🪵"; "PRUEBA", "Invitado-Gold" -> "⏳"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
+                                // ROLES FILTRADOS
+                                val listCrown = when (userData.role ?: "INVITADO") { "INVITADO" -> "🪵"; "Invitado-Gold" -> "⏳"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
+
+                                // --- CÁLCULO DEL TIEMPO EN VIVO ---
+                                val currentConsumed = userData.consumedSeconds + if (!isAdminAccount && !userData.isBanned && userData.role != "INVITADO") adminTick else 0
+                                val remainingSecs = maxOf(0L, userData.planDuration - currentConsumed)
+                                val rDays = remainingSecs / 86400
+                                val rHours = (remainingSecs % 86400) / 3600
+                                val rMins = (remainingSecs % 3600) / 60
+                                val rSecs = remainingSecs % 60
+                                val timeRemainingStr = "${rDays}d ${rHours}h ${rMins}m ${rSecs}s"
 
                                 Card(modifier = Modifier.fillMaxWidth().padding(vertical=4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.4f))) {
                                     Column(modifier = Modifier.padding(12.dp)) {
-                                        Text("${userData.name} $listCrown", fontWeight = FontWeight.Bold, fontSize = 16.sp); Text(email, fontSize = 12.sp, color = Color.Gray)
-                                        if (isAdminAccount) { Text("Administrador del Sistema ✅", color = Color(0xFF4CAF50), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top=4.dp)) }
-                                        else if (userData.isBanned) { Text("SUSPENDIDO 🚫", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top=4.dp)) }
-                                        else { Text("Tiempo restante (${userData.role}): ${formatTimeLeft(userData.consumedSeconds, userData.planDuration)}", color = Color(0xFFE65100), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top=4.dp)) }
-                                        Spacer(modifier = Modifier.height(8.dp))
 
-                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Box(modifier = Modifier.weight(1f)) {
-                                                OutlinedButton(onClick = { expandedRoleMenu = true }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) { Text("Rol") }
-                                                DropdownMenu(expanded = expandedRoleMenu, onDismissRequest = { expandedRoleMenu = false }) {
-                                                    listOf("INVITADO", "INVITADO_PRUEBA", "PRUEBA", "Invitado-Gold", "BÁSICO", "PREMIUM", "GOLD").forEach { newRole ->
-                                                        DropdownMenuItem(text = { Text(newRole) }, onClick = {
-                                                            expandedRoleMenu = false
-                                                            if (newRole == "INVITADO") { manageUser(email, "setRole", newRole, 2592000L) }
-                                                            else { roleToAssign = newRole; targetEmailToAssign = email }
-                                                        })
+                                        // --- FOTO, NOMBRE Y EMAIL ---
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant).clickable { if (!userData.profileImage.isNullOrEmpty()) expandedImageUri = userData.profileImage }, contentAlignment = Alignment.Center) {
+                                                if (!userData.profileImage.isNullOrEmpty()) {
+                                                    var bitmap by remember(userData.profileImage) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                                                    LaunchedEffect(userData.profileImage) {
+                                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                            try {
+                                                                val b64 = if (userData.profileImage!!.contains(",")) userData.profileImage!!.split(",")[1] else userData.profileImage!!
+                                                                val decoded = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                                                bitmap = android.graphics.BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+                                                            } catch(e: Exception){}
+                                                        }
                                                     }
+                                                    if (bitmap != null) {
+                                                        Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                                    } else {
+                                                        Icon(Icons.Filled.Person, contentDescription = null, tint = Color.Gray)
+                                                    }
+                                                } else {
+                                                    Icon(Icons.Filled.Person, contentDescription = null, tint = Color.Gray)
                                                 }
                                             }
-                                            OutlinedButton(onClick = { manageUser(email, "resetTime") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Reset") }
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text("${userData.name} $listCrown", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                                Text(email, fontSize = 12.sp, color = Color.Gray)
+                                            }
+                                        }
 
-                                            if (!isAdminAccount) {
-                                                if (userData.isBanned) { Button(onClick = { manageUser(email, "unban") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Desbloq.") } }
-                                                else { Button(onClick = { manageUser(email, "ban") }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)), contentPadding = PaddingValues(0.dp)) { Text("Bloquear") } }
+                                        if (isAdminAccount) {
+                                            Text("Administrador del Sistema ✅", color = Color(0xFF4CAF50), fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top=8.dp))
+                                        } else if (userData.isBanned) {
+                                            Text("SUSPENDIDO 🚫", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(top=8.dp))
+                                        } else {
+                                            Text("Tiempo restante (${userData.role}): $timeRemainingStr", color = Color(0xFFE65100), fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top=8.dp))
+                                        }
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
+                                        // SOLO MUESTRA LOS BOTONES SI NO ES EL ADMINISTRADOR
+                                        if (!isAdminAccount) {
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Box(modifier = Modifier.weight(1f)) {
+                                                    OutlinedButton(onClick = { expandedRoleMenu = true }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) { Text("Rol") }
+                                                    DropdownMenu(expanded = expandedRoleMenu, onDismissRequest = { expandedRoleMenu = false }) {
+                                                        // MODIFICADO: Solo dejamos INVITADO e Invitado-Gold
+                                                        listOf("INVITADO", "Invitado-Gold").forEach { newRole ->
+                                                            DropdownMenuItem(text = { Text(newRole) }, onClick = {
+                                                                expandedRoleMenu = false
+                                                                if (newRole == "INVITADO") { manageUser(email, "setRole", newRole, 2592000L) }
+                                                                else { roleToAssign = newRole; targetEmailToAssign = email }
+                                                            })
+                                                        }
+                                                    }
+                                                }
+                                                OutlinedButton(onClick = { manageUser(email, "resetTime") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Reset") }
+
+                                                if (userData.isBanned) {
+                                                    Button(onClick = { manageUser(email, "unban") }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(0.dp)) { Text("Desbloq.") }
+                                                } else {
+                                                    Button(onClick = { manageUser(email, "ban") }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)), contentPadding = PaddingValues(0.dp)) { Text("Bloquear") }
+                                                }
                                             }
                                         }
                                     }
@@ -2898,8 +2963,11 @@ fun ProfileDialog(
     currentRole: String,
     consumedSecs: Long,
     planDurationSecs: Long,
+    userId: String,
     onDismiss: () -> Unit,
     onNameChange: (String) -> Unit,
+    onImageChange: (String) -> Unit,
+    onViewImage: (String) -> Unit, // <--- ESTE ERA EL PARÁMETRO QUE FALTABA
     onUpgradeClick: () -> Unit
 ) {
     val context = LocalContext.current
@@ -2907,21 +2975,38 @@ fun ProfileDialog(
 
     var editingName by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf(currentName) }
-    var profileImageUri by remember { mutableStateOf(prefs.getString("profilePic_$currentName", null)) }
+    var profileImageUri by remember { mutableStateOf(prefs.getString("profilePic_$userId", null)) }
     var showImageSourceDialog by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
 
-    // Lanzador para Explorador de archivos / Galería
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) {}
-            profileImageUri = uri.toString()
-            prefs.edit().putString("profilePic_$currentName", uri.toString()).apply()
+
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+                    if (bitmap != null) {
+                        val scale = kotlin.math.min(400f / bitmap.width, 400f / bitmap.height)
+                        val resized = android.graphics.Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+                        val outputStream = java.io.ByteArrayOutputStream()
+                        resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
+                        val b64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.DEFAULT)
+                        val uriStr = "data:image/jpeg;base64,$b64"
+
+                        prefs.edit().putString("profilePic_$userId", uriStr).apply()
+                        launch(Dispatchers.Main) {
+                            profileImageUri = uriStr
+                            onImageChange(uriStr)
+                        }
+                    }
+                } catch (e: Exception) {}
+            }
         }
     }
 
-    // Lanzador directo para Cámara (Comprimido en Base64 para almacenamiento seguro)
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
         if (bitmap != null) {
             coroutineScope.launch(Dispatchers.IO) {
@@ -2930,8 +3015,12 @@ fun ProfileDialog(
                     bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
                     val b64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.DEFAULT)
                     val uriStr = "data:image/jpeg;base64,$b64"
-                    prefs.edit().putString("profilePic_$currentName", uriStr).apply()
-                    launch(Dispatchers.Main) { profileImageUri = uriStr }
+
+                    prefs.edit().putString("profilePic_$userId", uriStr).apply()
+                    launch(Dispatchers.Main) {
+                        profileImageUri = uriStr
+                        onImageChange(uriStr)
+                    }
                 } catch (e: Exception) {}
             }
         }
@@ -2949,43 +3038,29 @@ fun ProfileDialog(
     val rSecs = remainingSecs % 60
     val timeRemainingStr = "${rDays}d ${rHours}h ${rMins}m ${rSecs}s"
 
-    // Modal para elegir entre Cámara y Explorador
     if (showImageSourceDialog) {
         AlertDialog(
             onDismissRequest = { showImageSourceDialog = false },
-            title = { Text("Elegir Foto de Perfil 📸", fontWeight = FontWeight.Bold) },
+            title = { Text("Foto de Perfil 📸", fontWeight = FontWeight.Bold) },
             containerColor = MaterialTheme.colorScheme.surface,
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = {
-                            showImageSourceDialog = false
-                            cameraLauncher.launch(null)
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Filled.CameraAlt, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Tomar con la Cámara")
+                    if (profileImageUri != null) {
+                        OutlinedButton(onClick = { showImageSourceDialog = false; onViewImage(profileImageUri!!) }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Filled.Visibility, contentDescription = null); Spacer(modifier = Modifier.width(8.dp)); Text("Ver Foto Grande")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    OutlinedButton(onClick = { showImageSourceDialog = false; cameraLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.CameraAlt, contentDescription = null); Spacer(modifier = Modifier.width(8.dp)); Text("Tomar con la Cámara")
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = {
-                            showImageSourceDialog = false
-                            galleryLauncher.launch(arrayOf("image/*"))
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Filled.FolderOpen, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Explorador de Archivos")
+                    OutlinedButton(onClick = { showImageSourceDialog = false; galleryLauncher.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.FolderOpen, contentDescription = null); Spacer(modifier = Modifier.width(8.dp)); Text("Explorador de Archivos")
                     }
                 }
             },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showImageSourceDialog = false }) { Text("Cancelar") }
-            }
+            confirmButton = {}, dismissButton = { TextButton(onClick = { showImageSourceDialog = false }) { Text("Cancelar") } }
         )
     }
 
@@ -3001,13 +3076,8 @@ fun ProfileDialog(
         text = {
             Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
 
-                // Círculo para la foto (Abre el selector de opciones al tocarlo)
                 Box(
-                    modifier = Modifier
-                        .size(100.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable { showImageSourceDialog = true },
+                    modifier = Modifier.size(100.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant).clickable { showImageSourceDialog = true },
                     contentAlignment = Alignment.Center
                 ) {
                     var bitmap by remember(profileImageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -3017,19 +3087,9 @@ fun ProfileDialog(
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                 try {
                                     val uriStr = profileImageUri!!
-                                    if (uriStr.startsWith("data:image") || uriStr.length > 1000) {
-                                        val b64 = uriStr.substringAfter(",")
-                                        val decoded = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                                        bitmap = android.graphics.BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
-                                    } else {
-                                        val uri = Uri.parse(uriStr)
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                                            bitmap = android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
-                                        } else {
-                                            @Suppress("DEPRECATION")
-                                            bitmap = android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
-                                        }
-                                    }
+                                    val b64 = if (uriStr.contains(",")) uriStr.split(",")[1] else uriStr
+                                    val decoded = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                    bitmap = android.graphics.BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
                                 } catch (e: Exception) { null }
                             }
                         }
@@ -3046,16 +3106,9 @@ fun ProfileDialog(
 
                 if (editingName) {
                     OutlinedTextField(
-                        value = nameInput,
-                        onValueChange = { nameInput = it },
-                        label = { Text("Nombre") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
+                        value = nameInput, onValueChange = { nameInput = it }, label = { Text("Nombre") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                         trailingIcon = {
-                            IconButton(onClick = {
-                                editingName = false
-                                if (nameInput.isNotBlank()) onNameChange(nameInput.trim())
-                            }) { Icon(Icons.Filled.Check, "Guardar", tint = Color(0xFF4CAF50)) }
+                            IconButton(onClick = { editingName = false; if (nameInput.isNotBlank()) onNameChange(nameInput.trim()) }) { Icon(Icons.Filled.Check, "Guardar", tint = Color(0xFF4CAF50)) }
                         }
                     )
                 } else {
@@ -3094,11 +3147,7 @@ fun ProfileDialog(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     if (currentRole != "GOLD" && currentRole != "ADMIN") {
-                        Button(
-                            onClick = onUpgradeClick,
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)
-                        ) {
+                        Button(onClick = onUpgradeClick, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)) {
                             Text("⭐ Mejorar Membresía", fontWeight = FontWeight.Bold)
                         }
                     }
@@ -3472,10 +3521,10 @@ fun AddTransactionDialog(categories: List<String>, onDismiss: () -> Unit, onConf
                     val inputStream = context.contentResolver.openInputStream(uri)
                     val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
                     if (bitmap != null) {
-                        val scale = kotlin.math.min(800f / bitmap.width, 800f / bitmap.height)
+                        val scale = kotlin.math.min(1200f / bitmap.width, 1200f / bitmap.height)
                         val resized = android.graphics.Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
                         val outputStream = java.io.ByteArrayOutputStream()
-                        resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
+                        resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, outputStream)
                         val b64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.DEFAULT)
                         launch(Dispatchers.Main) { imageUri = "data:image/jpeg;base64,$b64" }
                     }
@@ -3491,7 +3540,7 @@ fun AddTransactionDialog(categories: List<String>, onDismiss: () -> Unit, onConf
             coroutineScope.launch(Dispatchers.IO) {
                 try {
                     val outputStream = java.io.ByteArrayOutputStream()
-                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, outputStream)
                     val b64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.DEFAULT)
                     launch(Dispatchers.Main) { imageUri = "data:image/jpeg;base64,$b64" }
                 } catch (e: Exception) {}
@@ -4584,6 +4633,50 @@ fun ChatDialog(currentUserEmail: String, targetClientEmail: String, isAdmin: Boo
     val focusManager = LocalFocusManager.current
     var showClearConfirm by remember { mutableStateOf(false) }
 
+    // Estados para las imágenes del chat
+    var imageUriToSend by remember { mutableStateOf<String?>(null) }
+    var isProcessingImage by remember { mutableStateOf(false) }
+    var expandedImageUri by remember { mutableStateOf<String?>(null) }
+    var showAttachmentOptions by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            isProcessingImage = true
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+                    if (bitmap != null) {
+                        val scale = kotlin.math.min(800f / bitmap.width, 800f / bitmap.height)
+                        val resized = android.graphics.Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+                        val outputStream = java.io.ByteArrayOutputStream()
+                        resized.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outputStream)
+                        val b64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.DEFAULT)
+                        launch(Dispatchers.Main) { imageUriToSend = "data:image/jpeg;base64,$b64" }
+                    }
+                } catch (e: Exception) {}
+                launch(Dispatchers.Main) { isProcessingImage = false }
+            }
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
+        if (bitmap != null) {
+            isProcessingImage = true
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    val outputStream = java.io.ByteArrayOutputStream()
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
+                    val b64 = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.DEFAULT)
+                    launch(Dispatchers.Main) { imageUriToSend = "data:image/jpeg;base64,$b64" }
+                } catch (e: Exception) {}
+                launch(Dispatchers.Main) { isProcessingImage = false }
+            }
+        }
+    }
+
     LaunchedEffect(targetClientEmail) {
         while (true) {
             try {
@@ -4606,12 +4699,33 @@ fun ChatDialog(currentUserEmail: String, targetClientEmail: String, isAdmin: Boo
         )
     }
 
+    if (showAttachmentOptions) {
+        AlertDialog(
+            onDismissRequest = { showAttachmentOptions = false },
+            title = { Text("Adjuntar Imagen 📸", fontWeight = FontWeight.Bold) },
+            containerColor = MaterialTheme.colorScheme.surface,
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { showAttachmentOptions = false; cameraLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.CameraAlt, contentDescription = null); Spacer(modifier = Modifier.width(8.dp)); Text("Cámara")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(onClick = { showAttachmentOptions = false; galleryLauncher.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Filled.Image, contentDescription = null); Spacer(modifier = Modifier.width(8.dp)); Text("Galería")
+                    }
+                }
+            },
+            confirmButton = {}, dismissButton = { TextButton(onClick = { showAttachmentOptions = false }) { Text("Cancelar") } }
+        )
+    }
+
+    if (expandedImageUri != null) {
+        ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null })
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false
-        )
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)
     ) {
         Surface(modifier = Modifier.fillMaxSize().systemBarsPadding().imePadding(), color = MaterialTheme.colorScheme.background) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -4627,9 +4741,26 @@ fun ChatDialog(currentUserEmail: String, targetClientEmail: String, isAdmin: Boo
                     items(messages) { msg ->
                         val isMe = msg.sender == currentUserEmail
                         Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start) {
-                            Box(modifier = Modifier.background(if (isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = if (isMe) 16.dp else 4.dp, bottomEnd = if (isMe) 4.dp else 16.dp)).padding(12.dp).widthIn(max = 250.dp)) {
+                            Box(modifier = Modifier.background(if (isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = if (isMe) 16.dp else 4.dp, bottomEnd = if (isMe) 4.dp else 16.dp)).padding(12.dp).widthIn(max = 280.dp)) {
                                 Column {
-                                    Text(msg.text, color = if (isMe) Color.White else MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
+                                    if (msg.imageUrl != null) {
+                                        var bitmap by remember(msg.imageUrl) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                                        LaunchedEffect(msg.imageUrl) {
+                                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                try {
+                                                    val b64 = if (msg.imageUrl.contains(",")) msg.imageUrl.split(",")[1] else msg.imageUrl
+                                                    val decoded = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                                    bitmap = android.graphics.BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+                                                } catch (e: Exception) {}
+                                            }
+                                        }
+                                        if (bitmap != null) {
+                                            Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.height(150.dp).fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { expandedImageUri = msg.imageUrl }.padding(bottom = 8.dp), contentScale = ContentScale.Crop)
+                                        }
+                                    }
+                                    if (msg.text.isNotBlank()) {
+                                        Text(msg.text, color = if (isMe) Color.White else MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
+                                    }
                                     Text(SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(msg.timestamp)), fontSize = 10.sp, color = (if (isMe) Color.White else MaterialTheme.colorScheme.onSurface).copy(alpha = 0.6f), modifier = Modifier.align(Alignment.End).padding(top = 4.dp))
                                 }
                             }
@@ -4638,26 +4769,54 @@ fun ChatDialog(currentUserEmail: String, targetClientEmail: String, isAdmin: Boo
                     item { Spacer(modifier = Modifier.height(8.dp)) }
                 }
 
-                Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
-                        placeholder = { Text("Escribe un mensaje...") }, shape = RoundedCornerShape(24.dp), maxLines = 4
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    FloatingActionButton(onClick = {
-                        if (inputText.isNotBlank()) {
-                            focusManager.clearFocus()
-                            val textToSend = inputText; inputText = ""
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    val receiver = if (isAdmin) targetClientEmail else "zonacami77777@gmail.com"
-                                    RetrofitInstance.api.sendMessage(ChatSendRequest(currentUserEmail, receiver, textToSend))
-                                    val updated = RetrofitInstance.api.getChat(targetClientEmail)
-                                    launch(Dispatchers.Main) { messages = updated; if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) }
-                                } catch (_: Exception) {}
+                Column(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+                    if (isProcessingImage) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                    if (imageUriToSend != null) {
+                        Box(modifier = Modifier.padding(start = 16.dp, top = 8.dp).size(80.dp).clip(RoundedCornerShape(8.dp))) {
+                            var previewBitmap by remember(imageUriToSend) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                            LaunchedEffect(imageUriToSend) {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    try {
+                                        val b64 = imageUriToSend!!.substringAfter(",")
+                                        val decoded = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
+                                        previewBitmap = android.graphics.BitmapFactory.decodeByteArray(decoded, 0, decoded.size)
+                                    } catch (e: Exception) {}
+                                }
+                            }
+                            if (previewBitmap != null) {
+                                Image(bitmap = previewBitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            }
+                            IconButton(onClick = { imageUriToSend = null }, modifier = Modifier.align(Alignment.TopEnd).size(24.dp).background(Color.Black.copy(0.5f), CircleShape)) {
+                                Icon(Icons.Filled.Close, null, tint = Color.White, modifier = Modifier.size(16.dp))
                             }
                         }
-                    }, containerColor = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Send, null, tint = Color.White) }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { showAttachmentOptions = true }) { Icon(Icons.Filled.AttachFile, null, tint = MaterialTheme.colorScheme.primary) }
+                        OutlinedTextField(
+                            value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
+                            placeholder = { Text("Escribe un mensaje...") }, shape = RoundedCornerShape(24.dp), maxLines = 4
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        FloatingActionButton(onClick = {
+                            if (inputText.isNotBlank() || imageUriToSend != null) {
+                                focusManager.clearFocus()
+                                val textToSend = inputText; inputText = ""
+                                val imgToSend = imageUriToSend; imageUriToSend = null
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        val receiver = if (isAdmin) targetClientEmail else "zonacami77777@gmail.com"
+                                        RetrofitInstance.api.sendMessage(ChatSendRequest(currentUserEmail, receiver, textToSend, imgToSend))
+                                        val updated = RetrofitInstance.api.getChat(targetClientEmail)
+                                        launch(Dispatchers.Main) { messages = updated; if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1) }
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        }, containerColor = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp)) { Icon(Icons.Filled.Send, null, tint = Color.White) }
+                    }
                 }
             }
         }
