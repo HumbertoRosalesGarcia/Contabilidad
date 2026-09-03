@@ -1173,6 +1173,7 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // BOTÓN DE INVITADO GOLD
+                // BOTÓN DE INVITADO GOLD
                 Button(
                     onClick = {
                         isLoading = true
@@ -1180,12 +1181,14 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
                             val authPrefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
                             var guestId = authPrefs.getString("trialGuestId", null)
                             if (guestId == null) {
-                                guestId = "prueba_" + UUID.randomUUID().toString().substring(0, 8)
+                                // NUEVO: Vinculamos la prueba al identificador físico del hardware del teléfono.
+                                // Aunque desinstale la app o borre datos, será el mismo usuario y el tiempo no se reiniciará.
+                                val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: UUID.randomUUID().toString().substring(0, 8)
+                                guestId = "dispositivo_$androidId"
                                 authPrefs.edit().putString("trialGuestId", guestId).apply()
                             }
                             try {
                                 RetrofitInstance.api.syncUser(UserSyncRequest(email = guestId, name = "Usuario de Prueba"))
-                                // Inicia con 1 día exacto (86400 segundos)
                                 RetrofitInstance.api.manageUser(UserManageRequest(guestId, "setRole", "Invitado-Gold", 86400L))
                                 launch(Dispatchers.Main) {
                                     Toast.makeText(context, "Modo Invitado-Gold Activado ⏳", Toast.LENGTH_LONG).show()
@@ -1269,9 +1272,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         while(true) {
             delay(30000L)
 
-            if (currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA") {
-                viewModel.silentBackup()
-            }
+            // Se eliminó la llamada a viewModel.silentBackup()
+            // Ahora solo se consume el tiempo del plan (30s) sin forzar el guardado.
 
             try {
                 val response = RetrofitInstance.api.addUserTime(UserTimeRequest(viewModel.userId, 30L))
@@ -1304,18 +1306,31 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
     }
 
+    var show24hWarningModal by remember { mutableStateOf(false) } // NUEVO ESTADO PARA EL MODAL DE 24 HORAS
+
     // --- 6.2. TICKER EN VIVO DE 1 SEGUNDO Y CONTROL DE MODOS ---
     LaunchedEffect(Unit) {
         val hasShownTrialWarning = authPrefs.getBoolean("hasShownTrialWarning_${viewModel.userId}", false)
+        val hasShown24hWarning = authPrefs.getBoolean("hasShown24hWarning_${viewModel.userId}", false)
+
         while (true) {
             delay(1000L)
             if (!isSuperAdmin) {
                 currentConsumed++
                 val timeLeftSecs = currentPlanDuration - currentConsumed
 
+                // Alerta de 3 horas para modo prueba
                 if ((currentRole == "PRUEBA" || currentRole == "Invitado-Gold") && timeLeftSecs in 1..10800 && !hasShownTrialWarning) {
                     showTrialWarning = true
                     authPrefs.edit().putBoolean("hasShownTrialWarning_${viewModel.userId}", true).apply()
+                }
+
+                // NUEVO: Alerta obligatoria de 24 horas para membresías activas
+                if (currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA" && currentRole != "PRUEBA" && currentRole != "Invitado-Gold") {
+                    if (timeLeftSecs in 1..86400 && !hasShown24hWarning) {
+                        show24hWarningModal = true
+                        authPrefs.edit().putBoolean("hasShown24hWarning_${viewModel.userId}", true).apply()
+                    }
                 }
 
                 if (timeLeftSecs <= 0 && currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA") {
@@ -1603,6 +1618,23 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     containerColor = MaterialTheme.colorScheme.surface,
                     text = { Text("Te quedan menos de 3 horas de tu Modo de Prueba. Una vez que el tiempo culmine, pasarás automáticamente al Modo Invitado, el cual tiene funciones restringidas de solo lectura. Contacta al administrador si deseas adquirir un plan completo.") },
                     confirmButton = { Button(onClick = { showTrialWarning = false }) { Text("Entendido") } }
+                )
+            }
+
+            // NUEVO: MODAL DE ADVERTENCIA 24 HORAS RESTANTES
+            if (show24hWarningModal) {
+                AlertDialog(
+                    onDismissRequest = { show24hWarningModal = false },
+                    title = { Text("¡Tu Membresía está por terminar! ⚠️", fontWeight = FontWeight.Bold) },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    text = {
+                        Text("Te quedan menos de 24 horas de tiempo activo en la aplicación. Por favor, comunícate con el administrador para que te restablezca tu membresía.\n\nRecuerda realizar el pago primero y tener a la mano el capture de pantalla como soporte para agilizar la activación.")
+                    },
+                    confirmButton = {
+                        Button(onClick = { show24hWarningModal = false }) {
+                            Text("Entendido")
+                        }
+                    }
                 )
             }
 
@@ -1927,7 +1959,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                                 Box(modifier = Modifier.weight(1f)) {
                                                     OutlinedButton(onClick = { expandedRoleMenu = true }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) { Text("Rol") }
                                                     DropdownMenu(expanded = expandedRoleMenu, onDismissRequest = { expandedRoleMenu = false }) {
-                                                        listOf("INVITADO", "Invitado-Gold").forEach { newRole ->
+                                                        // AÑADIDOS TODOS LOS ROLES AL MENÚ DESPLEGABLE
+                                                        listOf("INVITADO", "Invitado-Gold", "BÁSICO", "PREMIUM", "GOLD", "ADMIN").forEach { newRole ->
                                                             DropdownMenuItem(text = { Text(newRole) }, onClick = {
                                                                 expandedRoleMenu = false
                                                                 if (newRole == "INVITADO") { manageUser(email, "setRole", newRole, 2592000L) }
@@ -2601,7 +2634,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         Text("No tienes copias de seguridad en la nube.", color = Color.Gray)
                     } else {
                         LazyColumn(modifier = Modifier.heightIn(max = 350.dp)) {
-                            items(cloudBackupsList!!) { record ->
+                            // SOLUCIÓN 1: Cambiamos !! por ?: emptyList() y agregamos el key = { it.id }
+                            items(cloudBackupsList ?: emptyList(), key = { it.id }) { record ->
                                 Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
                                     Column(modifier = Modifier.padding(12.dp)) {
                                         Text(record.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
@@ -2609,9 +2643,14 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                             TextButton(onClick = {
+                                                // SOLUCIÓN 2: Activar el icono de carga mientras procesa la eliminación
+                                                isLoadingList = true
                                                 viewModel.deleteBackupRecord(record.id) { msg ->
                                                     customToastMessage = msg
-                                                    viewModel.fetchBackupList { list -> cloudBackupsList = list }
+                                                    viewModel.fetchBackupList { list ->
+                                                        cloudBackupsList = list
+                                                        isLoadingList = false
+                                                    }
                                                 }
                                             }, colors = ButtonDefaults.textButtonColors(contentColor = Color.Red)) {
                                                 Text("Eliminar")
