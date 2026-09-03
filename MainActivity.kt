@@ -619,22 +619,6 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
-    fun silentBackup() {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val currentData = BackupData(dao.getBackupTransactions(), dao.getBackupReminders(), dao.getBackupFiadores(), dao.getBackupProducts())
-                val timeString = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
-                val newRecord = BackupRecord(UUID.randomUUID().toString(), "AutoSync 30s", System.currentTimeMillis(), currentData)
-                val remotePayload = RetrofitInstance.api.getBackup(userId)
-                val existingBackups = mutableListOf<BackupRecord>()
-                if (remotePayload != null && remotePayload.backups != null) { existingBackups.addAll(remotePayload.backups) }
-                existingBackups.add(0, newRecord)
-                if (existingBackups.size > 10) { existingBackups.removeAt(existingBackups.size - 1) }
-                RetrofitInstance.api.uploadBackup(userId, CloudPayload(backups = existingBackups))
-            } catch (e: Exception) {}
-        }
-    }
-
     fun manualBackup(backupName: String, onResult: (String) -> Unit) {
         isSyncing = true
         syncMessage = "Guardando tus cuentas actuales..."
@@ -1575,7 +1559,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     onDismissRequest = { showGoldWelcomeDialog = false },
                     title = { Text("¡Modo Invitado-Gold! 🌟", fontWeight = FontWeight.Bold) },
                     containerColor = MaterialTheme.colorScheme.surface,
-                    text = { Text("Disfrutas de acceso total a todas las herramientas sin ninguna restricción. Te quedan $hours horas y $mins minutos de este privilegio.\n\nTus datos se estarán guardando y respaldando bajo perfil en la nube cada 30 segundos automáticamente.") },
+                    // TEXTO MODIFICADO: Se eliminó la mención a los 30 segundos
+                    text = { Text("Disfrutas de acceso total a todas las herramientas sin ninguna restricción. Te quedan $hours horas y $mins minutos de este privilegio.") },
                     confirmButton = { Button(onClick = { showGoldWelcomeDialog = false }) { Text("¡Entendido!") } }
                 )
             }
