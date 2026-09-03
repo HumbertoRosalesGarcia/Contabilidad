@@ -1223,9 +1223,7 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
     }
 }
 
-// ==========================================
-// 6. INTERFAZ GRÁFICA PRINCIPAL Y CONTROL DE PLANES EN VIVO
-// ==========================================
+// --- 6. INTERFAZ GRÁFICA PRINCIPAL Y CONTROL DE PLANES EN VIVO ---
 fun showPremiumToastMsg(context: Context) { Toast.makeText(context, "👑 Esta función es exclusiva para planes de pago.", Toast.LENGTH_SHORT).show() }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1259,9 +1257,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showManageCategoriesDialog by remember { mutableStateOf(false) }
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
 
-    // --- NUEVO: MODALES DE DESGLOSE DE GASTOS ---
+    // --- NUEVO: MODALES DE DESGLOSE DE GASTOS E INGRESOS ---
     var showCashExpensesDialog by remember { mutableStateOf(false) }
     var showDigitalExpensesDialog by remember { mutableStateOf(false) }
+    var showAllExpensesDialog by remember { mutableStateOf(false) }
+    var showAllIncomesDialog by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -1507,12 +1507,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
                             }
 
-                            if (isManualSyncAllowed) { DropdownMenuItem(text = { Text("☁️ Sincronización Nube") }, onClick = { showCloudSyncDialog = true; showMenu = false }) }
-                            else { DropdownMenuItem(text = { Text("👑 Sincronización Nube", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) }, onClick = { showPremiumToastMsg(context); showMenu = false }) }
-
+                            // --- 1. NUEVO: BOTÓN DE OPCIONES CENTRALIZADO ---
+                            DropdownMenuItem(
+                                text = { Text("⚙️ Opciones") },
+                                onClick = { showOptionsDialog = true; showMenu = false }
+                            )
                             Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
 
-                            // --- NUEVO: BOTÓN DE CATEGORÍAS ---
                             if (currentTab == 0) {
                                 DropdownMenuItem(text = { Text("🏷️ Gestionar Categorías") }, onClick = { showManageCategoriesDialog = true; showMenu = false })
                                 Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
@@ -1564,14 +1565,14 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 )
             }
 
-// --- 6.4. MODAL DE PERFIL (LLAMADA) ---
+            // --- 6.4. MODAL DE PERFIL (LLAMADA) ---
             if (showProfileDialog) {
                 ProfileDialog(
                     currentName = localUserName,
                     currentRole = currentRole,
                     consumedSecs = currentConsumed,
                     planDurationSecs = currentPlanDuration,
-                    userId = viewModel.userId, // Identificador real
+                    userId = viewModel.userId,
                     onDismiss = { showProfileDialog = false },
                     onNameChange = { newName ->
                         localUserName = newName
@@ -1582,12 +1583,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         }
                     },
                     onImageChange = { newPic ->
-                        // Sincroniza la foto en la nube en segundo plano
                         coroutineScope.launch(Dispatchers.IO) {
                             try { RetrofitInstance.api.syncUser(UserSyncRequest(viewModel.userId, localUserName, newPic)) } catch(e: Exception){}
                         }
                     },
-                    onViewImage = { uri -> expandedImageUri = uri }, // <--- NUEVO: PERMITE VER LA FOTO
+                    onViewImage = { uri -> expandedImageUri = uri },
                     onUpgradeClick = {
                         showProfileDialog = false
                         showPlansDialog = true
@@ -1640,7 +1640,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 cashExpense = personalCashExpense,
                                 digitalExpense = personalDigitalExpense,
                                 onCashClick = { showCashExpensesDialog = true },
-                                onDigitalClick = { showDigitalExpensesDialog = true }
+                                onDigitalClick = { showDigitalExpensesDialog = true },
+                                onIncomeClick = { showAllIncomesDialog = true },
+                                onExpenseClick = { showAllExpensesDialog = true }
                             )
                             AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) {
                                 Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) {
@@ -1814,9 +1816,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         if (showAdminPanelDialog) {
             var usersList by remember { mutableStateOf<Map<String, UserData>?>(null) }; var isLoadingUsers by remember { mutableStateOf(true) }
             var roleToAssign by remember { mutableStateOf<String?>(null) }; var targetEmailToAssign by remember { mutableStateOf<String?>(null) }
-
-            // --- NUEVO: TICKER PARA TIEMPO REAL ---
             var adminTick by remember { mutableStateOf(0) }
+
             LaunchedEffect(Unit) {
                 while(true) {
                     delay(1000L)
@@ -1869,10 +1870,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 val email = entry.key; val userData = entry.value; var expandedRoleMenu by remember { mutableStateOf(false) }
                                 val isAdminAccount = email.lowercase(Locale.getDefault()) == "zonacami77777@gmail.com"
 
-                                // ROLES FILTRADOS
                                 val listCrown = when (userData.role ?: "INVITADO") { "INVITADO" -> "🪵"; "Invitado-Gold" -> "⏳"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
 
-                                // --- CÁLCULO DEL TIEMPO EN VIVO ---
                                 val currentConsumed = userData.consumedSeconds + if (!isAdminAccount && !userData.isBanned && userData.role != "INVITADO") adminTick else 0
                                 val remainingSecs = maxOf(0L, userData.planDuration - currentConsumed)
                                 val rDays = remainingSecs / 86400
@@ -1884,7 +1883,6 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 Card(modifier = Modifier.fillMaxWidth().padding(vertical=4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha=0.4f))) {
                                     Column(modifier = Modifier.padding(12.dp)) {
 
-                                        // --- FOTO, NOMBRE Y EMAIL ---
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant).clickable { if (!userData.profileImage.isNullOrEmpty()) expandedImageUri = userData.profileImage }, contentAlignment = Alignment.Center) {
                                                 if (!userData.profileImage.isNullOrEmpty()) {
@@ -1924,13 +1922,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
                                         Spacer(modifier = Modifier.height(8.dp))
 
-                                        // SOLO MUESTRA LOS BOTONES SI NO ES EL ADMINISTRADOR
                                         if (!isAdminAccount) {
                                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 Box(modifier = Modifier.weight(1f)) {
                                                     OutlinedButton(onClick = { expandedRoleMenu = true }, modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(0.dp)) { Text("Rol") }
                                                     DropdownMenu(expanded = expandedRoleMenu, onDismissRequest = { expandedRoleMenu = false }) {
-                                                        // MODIFICADO: Solo dejamos INVITADO e Invitado-Gold
                                                         listOf("INVITADO", "Invitado-Gold").forEach { newRole ->
                                                             DropdownMenuItem(text = { Text(newRole) }, onClick = {
                                                                 expandedRoleMenu = false
@@ -1981,14 +1977,15 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
 
         // --- NUEVO: VISTA EXPANDIDA DEL RECIBO/FOTO DE UN GASTO ---
-        // --- NUEVO: VISTA EXPANDIDA DEL RECIBO/FOTO DE UN GASTO ---
         if (expandedImageUri != null) {
             ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null })
         }
 
-        // --- NUEVO: MODALES DE DESGLOSE DE GASTOS ---
+        // --- NUEVO: MODALES DE DESGLOSE DE GASTOS E INGRESOS ---
         val cashExpensesList = remember(personalTransactions) { personalTransactions.filter { !it.isIncome && it.cashAmount > 0 } }
         val digitalExpensesList = remember(personalTransactions) { personalTransactions.filter { !it.isIncome && it.digitalAmount > 0 } }
+        val allExpensesList = remember(personalTransactions) { personalTransactions.filter { !it.isIncome } }
+        val allIncomesList = remember(personalTransactions) { personalTransactions.filter { it.isIncome } }
 
         if (showCashExpensesDialog) {
             ExpenseBreakdownDialog(
@@ -2015,6 +2012,38 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     viewModel.deleteTransaction(it)
                     coroutineScope.launch {
                         val result = snackbarHostState.showSnackbar(message = "Gasto eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short)
+                        if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(it)
+                    }
+                },
+                onImageClick = { uri -> expandedImageUri = uri }
+            )
+        }
+
+        if (showAllExpensesDialog) {
+            ExpenseBreakdownDialog(
+                title = "Todos los Gastos 🔴",
+                expenses = allExpensesList,
+                onDismiss = { showAllExpensesDialog = false },
+                onDelete = {
+                    viewModel.deleteTransaction(it)
+                    coroutineScope.launch {
+                        val result = snackbarHostState.showSnackbar(message = "Gasto eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short)
+                        if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(it)
+                    }
+                },
+                onImageClick = { uri -> expandedImageUri = uri }
+            )
+        }
+
+        if (showAllIncomesDialog) {
+            ExpenseBreakdownDialog(
+                title = "Todos los Ingresos 🟢",
+                expenses = allIncomesList,
+                onDismiss = { showAllIncomesDialog = false },
+                onDelete = {
+                    viewModel.deleteTransaction(it)
+                    coroutineScope.launch {
+                        val result = snackbarHostState.showSnackbar(message = "Ingreso eliminado 🗑️", actionLabel = "Deshacer ↩️", duration = SnackbarDuration.Short)
                         if (result == SnackbarResult.ActionPerformed) viewModel.insertRawTransaction(it)
                     }
                 },
@@ -2615,7 +2644,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text("Opciones ⚙️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f)); IconButton(onClick = { showOptionsDialog = false }) { Icon(Icons.Filled.Close, "Cerrar") } } },
                 containerColor = MaterialTheme.colorScheme.surface,
                 text = {
-                    Column {
+                    // Se agregó verticalScroll para que funcione sin problemas en pantallas de todos los tamaños
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+
+                        // --- 1. MODO OSCURO ---
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { onThemeToggle() }.padding(vertical = 12.dp)) {
                             Icon(if (isDarkTheme) Icons.Filled.DarkMode else Icons.Filled.LightMode, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(12.dp))
@@ -2623,12 +2655,38 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             Switch(checked = isDarkTheme, onCheckedChange = { onThemeToggle() })
                         }
                         Divider(color = Color.Gray.copy(alpha = 0.2f))
+
+                        // --- 2. GESTOR DE SONIDOS ---
+                        // Al tocar aquí, cerrará este modal y abrirá tu motor de sonidos ya programado
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { showOptionsDialog = false; showSoundDialog = true }.padding(vertical = 16.dp)) {
                             Icon(Icons.Filled.VolumeUp, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             Spacer(Modifier.width(12.dp))
-                            Text("Sonidos y Asistente de Voz", fontSize = 16.sp)
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Sonidos de Notificaciones", fontSize = 16.sp)
+                                Text("Tonos, toques y asistente de voz", fontSize = 12.sp, color = Color.Gray)
+                            }
                         }
                         Divider(color = Color.Gray.copy(alpha = 0.2f))
+
+                        // --- 3. COPIAS DE SEGURIDAD (Ingresada al menú Opciones) ---
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable {
+                            if (isManualSyncAllowed) {
+                                showOptionsDialog = false
+                                showCloudSyncDialog = true
+                            } else {
+                                showPremiumToastMsg(context)
+                            }
+                        }.padding(vertical = 16.dp)) {
+                            Icon(Icons.Filled.CloudSync, contentDescription = null, tint = if (isManualSyncAllowed) MaterialTheme.colorScheme.primary else Color.Gray)
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(if (isManualSyncAllowed) "Copias de Seguridad" else "👑 Copias de Seguridad", fontSize = 16.sp, color = if (isManualSyncAllowed) MaterialTheme.colorScheme.onSurface else Color.Gray)
+                                Text("Guardar o restaurar datos en la nube", fontSize = 12.sp, color = Color.Gray)
+                            }
+                        }
+                        Divider(color = Color.Gray.copy(alpha = 0.2f))
+
+                        // --- 4. MONEDA DE LA APP (Mantenido intacto) ---
                         Spacer(Modifier.height(16.dp))
                         Text("Moneda de la Aplicación", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
                         Spacer(Modifier.height(8.dp))
@@ -4915,7 +4973,7 @@ fun ProductInfoDialog(product: Product, selectedCountry: String, bcvRate: Double
 }
 
 @Composable
-fun DashboardCard(balance: Double, income: Double, expense: Double, cashExpense: Double, digitalExpense: Double, onCashClick: () -> Unit, onDigitalClick: () -> Unit) {
+fun DashboardCard(balance: Double, income: Double, expense: Double, cashExpense: Double, digitalExpense: Double, onCashClick: () -> Unit, onDigitalClick: () -> Unit, onIncomeClick: () -> Unit, onExpenseClick: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth().padding(16.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("Saldo Total", color = Color.Gray, fontSize = 16.sp)
@@ -4936,8 +4994,25 @@ fun DashboardCard(balance: Double, income: Double, expense: Double, cashExpense:
 
             Spacer(modifier = Modifier.height(24.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFE8F5E9).copy(alpha = 0.2f)).padding(4.dp)) { Text("🟢", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Ingresos", color = Color.Gray) }; Text(formatCOP(income), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) { Row(verticalAlignment = Alignment.CenterVertically) { Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFFFEBEE).copy(alpha = 0.2f)).padding(4.dp)) { Text("🔴", fontSize = 12.sp) }; Spacer(modifier = Modifier.width(4.dp)); Text("Gastos", color = Color.Gray) }; Text(formatCOP(expense), fontWeight = FontWeight.Bold, color = Color(0xFFF44336)) }
+                // MODIFICADO: Agregada la función clickable hacia onIncomeClick
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onIncomeClick() }.padding(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFE8F5E9).copy(alpha = 0.2f)).padding(4.dp)) { Text("🟢", fontSize = 12.sp) }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Ingresos", color = Color.Gray)
+                    }
+                    Text(formatCOP(income), fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                }
+
+                // MODIFICADO: Agregada la función clickable hacia onExpenseClick
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onExpenseClick() }.padding(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.clip(CircleShape).background(Color(0xFFFFEBEE).copy(alpha = 0.2f)).padding(4.dp)) { Text("🔴", fontSize = 12.sp) }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Gastos", color = Color.Gray)
+                    }
+                    Text(formatCOP(expense), fontWeight = FontWeight.Bold, color = Color(0xFFF44336))
+                }
             }
         }
     }
