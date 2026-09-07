@@ -1,0 +1,490 @@
+const fs = require('fs');
+
+const code = `package com.xxcamixx.contabilidad.ui.screens
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.xxcamixx.contabilidad.model.ComercioPedido
+import com.xxcamixx.contabilidad.model.ComercioProduct
+import com.xxcamixx.contabilidad.model.ComercioMovement
+import com.xxcamixx.contabilidad.util.formatMoneyMain
+import com.xxcamixx.contabilidad.util.formatMoneySec
+import com.xxcamixx.contabilidad.util.formatDateOnly
+import com.xxcamixx.contabilidad.util.cleanAmountInput
+import com.xxcamixx.contabilidad.viewmodel.FinanceViewModel
+import com.xxcamixx.contabilidad.ui.dialogs.AddComercioProductDialog
+
+fun formatQty(qty: Double): String = if (qty % 1.0 == 0.0) qty.toInt().toString() else qty.toString()
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+fun ComercioScreen(
+    viewModel: FinanceViewModel,
+    pedidos: List<ComercioPedido>,
+    products: List<ComercioProduct>,
+    movements: List<ComercioMovement>,
+    country: String,
+    bcvRate: Double
+) {
+    var showAddPedidoDialog by remember { mutableStateOf(false) }
+    var showInvestedDialog by remember { mutableStateOf(false) }
+    var activePedidoForAdd by remember { mutableStateOf<ComercioPedido?>(null) }
+    var viewMode by remember { mutableStateOf("INVENTARIO") }
+    var expandedPedidos by remember { mutableStateOf(setOf<Int>()) }
+    var expandedInvestedPedidos by remember { mutableStateOf(setOf<Int>()) }
+
+    // Edit/Delete States
+    var pedidoOptions by remember { mutableStateOf<ComercioPedido?>(null) }
+    var productOptions by remember { mutableStateOf<ComercioProduct?>(null) }
+    var pedidoToEdit by remember { mutableStateOf<ComercioPedido?>(null) }
+    var productToEdit by remember { mutableStateOf<ComercioProduct?>(null) }
+
+    // Cart: Triple(Product, Quantity, SalePrice)
+    val cart = remember { mutableStateListOf<Triple<ComercioProduct, Double, Double>>() }
+    var showCartDialog by remember { mutableStateOf(false) }
+    var productToCart by remember { mutableStateOf<ComercioProduct?>(null) }
+
+    val totalInvested = movements.filter { it.type == "COMPRA" }.sumOf { it.total }
+    val totalSold = movements.filter { it.type == "VENTA" }.sumOf { it.total }
+    
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+            Card(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Panel de Pedidos \\uD83D\\uDCE6", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(modifier = Modifier.clickable { showInvestedDialog = true }) {
+                            Text("Total Invertido (Ver Lista)", fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                            Text(formatMoneyMain(totalInvested, country), color = Color(0xFFE53935), fontWeight = FontWeight.Bold)
+                            val sec = formatMoneySec(totalInvested, country, bcvRate)
+                            if(sec.isNotEmpty()) Text(sec, fontSize = 10.sp, color = Color.Gray)
+                        }
+                        Column {
+                            Text("Total Vendido", fontSize = 12.sp)
+                            Text(formatMoneyMain(totalSold, country), color = Color(0xFF2196F3), fontWeight = FontWeight.Bold)
+                            val sec = formatMoneySec(totalSold, country, bcvRate)
+                            if(sec.isNotEmpty()) Text(sec, fontSize = 10.sp, color = Color.Gray)
+                        }
+                    }
+                }
+            }
+            
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                FilterChip(selected = viewMode == "INVENTARIO", onClick = { viewMode = "INVENTARIO" }, label = { Text("Estantes") })
+                FilterChip(selected = viewMode == "HISTORIAL", onClick = { viewMode = "HISTORIAL" }, label = { Text("Movimientos") })
+                Button(onClick = { showAddPedidoDialog = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "Nuevo")
+                    Spacer(Modifier.width(4.dp))
+                    Text("Pedido")
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            if (viewMode == "INVENTARIO") {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(pedidos) { pedido ->
+                        val pedidoProducts = products.filter { it.pedidoId == pedido.id }
+                        val isExpanded = expandedPedidos.contains(pedido.id)
+                        
+                        Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), elevation = CardDefaults.cardElevation(defaultElevation = if (isExpanded) 4.dp else 1.dp)) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().combinedClickable(
+                                        onClick = { expandedPedidos = if (isExpanded) expandedPedidos - pedido.id else expandedPedidos + pedido.id },
+                                        onLongClick = { pedidoOptions = pedido }
+                                    ).padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(pedido.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                        Text(formatDateOnly(pedido.timestamp), fontSize = 12.sp, color = Color.Gray)
+                                    }
+                                    Icon(if (isExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, contentDescription = null)
+                                }
+                                
+                                if (isExpanded) {
+                                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                                        Divider()
+                                        pedidoProducts.forEach { p ->
+                                            Row(modifier = Modifier.fillMaxWidth().combinedClickable(
+                                                onClick = {},
+                                                onLongClick = { productOptions = p }
+                                            ).padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(p.name, fontWeight = FontWeight.Bold)
+                                                    Text("Disp: \${formatQty(p.quantityInStock)} \${p.unit}", fontSize = 12.sp, color = if(p.quantityInStock<=0) Color.Red else Color.Unspecified)
+                                                    
+                                                    val costTotal = p.costPerUnit * p.totalPurchased
+                                                    Text("Costo: \${formatMoneyMain(costTotal, country)}", fontSize = 12.sp, color = Color.Gray)
+                                                    val secCosto = formatMoneySec(costTotal, country, bcvRate)
+                                                    if(secCosto.isNotEmpty()) Text(secCosto, fontSize = 10.sp, color = Color.Gray)
+                                                    
+                                                    Text("Venta Sugerida: \${formatMoneyMain(p.salePricePerUnit, country)}", fontSize = 12.sp, color = Color.Gray)
+                                                }
+                                                Button(
+                                                    onClick = { productToCart = p },
+                                                    enabled = p.quantityInStock > 0,
+                                                    modifier = Modifier.height(36.dp)
+                                                ) {
+                                                    Icon(Icons.Filled.ShoppingCart, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text("Añadir", fontSize = 12.sp)
+                                                }
+                                            }
+                                            Divider(color = Color.LightGray.copy(alpha = 0.5f))
+                                        }
+                                        OutlinedButton(
+                                            onClick = { activePedidoForAdd = pedido },
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                                        ) {
+                                            Icon(Icons.Filled.Add, contentDescription = null)
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Agregar producto a este pedido")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(movements) { m ->
+                        val isCompra = m.type == "COMPRA"
+                        Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Column {
+                                    Text("\${m.productName} (\${formatQty(m.quantity)})", fontWeight = FontWeight.Bold)
+                                    Text(if (isCompra) "Inversi\\u00F3n" else "Venta", fontSize = 12.sp, color = if (isCompra) Color(0xFFE53935) else Color(0xFF2196F3))
+                                    Text(formatDateOnly(m.timestamp), fontSize = 10.sp, color = Color.Gray)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(formatMoneyMain(m.total, country), fontWeight = FontWeight.Bold, color = if (isCompra) Color(0xFFE53935) else Color(0xFF2196F3))
+                                    val secT = formatMoneySec(m.total, country, bcvRate)
+                                    if(secT.isNotEmpty()) Text(secT, fontSize = 10.sp, color = Color.Gray)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cart FAB
+        if (cart.isNotEmpty() && viewMode == "INVENTARIO") {
+            FloatingActionButton(
+                onClick = { showCartDialog = true },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                containerColor = MaterialTheme.colorScheme.primary
+            ) {
+                Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.ShoppingCart, contentDescription = "Carrito", tint = MaterialTheme.colorScheme.onPrimary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("\${cart.size}", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    if (showInvestedDialog) {
+        AlertDialog(
+            onDismissRequest = { showInvestedDialog = false },
+            title = { Text("Desglose de Inversi\\u00F3n") },
+            text = {
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+                    items(pedidos) { pedido ->
+                        val pedidoProducts = products.filter { it.pedidoId == pedido.id }
+                        val pedidoCost = pedidoProducts.sumOf { it.totalPurchased * it.costPerUnit }
+                        val isExp = expandedInvestedPedidos.contains(pedido.id)
+                        
+                        Column(modifier = Modifier.fillMaxWidth().clickable { expandedInvestedPedidos = if (isExp) expandedInvestedPedidos - pedido.id else expandedInvestedPedidos + pedido.id }.padding(vertical = 8.dp)) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Column {
+                                    Text(pedido.name, fontWeight = FontWeight.Bold)
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text(formatMoneyMain(pedidoCost, country))
+                                        Text(formatMoneySec(pedidoCost, country, bcvRate), color = Color.Gray)
+                                    }
+                                }
+                                Icon(if (isExp) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, contentDescription = null)
+                            }
+                            
+                            if (isExp) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 8.dp)) {
+                                    pedidoProducts.forEach { p ->
+                                        val pCost = p.costPerUnit * p.totalPurchased
+                                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text("\u2022 \${p.name} (\${formatQty(p.totalPurchased)})", fontSize = 12.sp)
+                                            Text(formatMoneyMain(pCost, country), fontSize = 12.sp, color = Color.Gray)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Divider(color = Color.LightGray.copy(alpha = 0.5f))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showInvestedDialog = false }) { Text("Cerrar") }
+            }
+        )
+    }
+
+    // Modal Edit/Delete Pedido Options
+    pedidoOptions?.let { p ->
+        AlertDialog(
+            onDismissRequest = { pedidoOptions = null },
+            title = { Text("Opciones de Pedido") },
+            text = { Text("¿Qué deseas hacer con '\${p.name}'?") },
+            confirmButton = {
+                Button(onClick = { pedidoToEdit = p; pedidoOptions = null }) { Text("Editar") }
+            },
+            dismissButton = {
+                Row {
+                    OutlinedButton(onClick = { viewModel.deleteComercioPedido(p); pedidoOptions = null }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)) { Text("Eliminar") }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { pedidoOptions = null }) { Text("Cancelar") }
+                }
+            }
+        )
+    }
+
+    // Modal Edit Pedido Form
+    pedidoToEdit?.let { p ->
+        var editName by remember { mutableStateOf(p.name) }
+        AlertDialog(
+            onDismissRequest = { pedidoToEdit = null },
+            title = { Text("Editar Pedido") },
+            text = {
+                OutlinedTextField(
+                    value = editName,
+                    onValueChange = { editName = it },
+                    label = { Text("Nombre del Pedido") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (editName.isNotBlank()) {
+                        viewModel.updateComercioPedido(p.copy(name = editName))
+                        pedidoToEdit = null
+                    }
+                }) { Text("Guardar") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pedidoToEdit = null }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    // Modal Edit/Delete Product Options
+    productOptions?.let { p ->
+        AlertDialog(
+            onDismissRequest = { productOptions = null },
+            title = { Text("Opciones de Producto") },
+            text = { Text("¿Qué deseas hacer con '\${p.name}'?") },
+            confirmButton = {
+                Button(onClick = { productToEdit = p; productOptions = null }) { Text("Editar") }
+            },
+            dismissButton = {
+                Row {
+                    OutlinedButton(onClick = { viewModel.deleteComercioProduct(p); productOptions = null }, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)) { Text("Eliminar") }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { productOptions = null }) { Text("Cancelar") }
+                }
+            }
+        )
+    }
+
+    // Modal Edit Product Form
+    productToEdit?.let { p ->
+        var editName by remember { mutableStateOf(p.name) }
+        var editSpStr by remember { mutableStateOf(if (p.salePricePerUnit > 0) p.salePricePerUnit.toInt().toString() else "") }
+        
+        AlertDialog(
+            onDismissRequest = { productToEdit = null },
+            title = { Text("Editar Producto") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Nombre") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editSpStr,
+                        onValueChange = { editSpStr = cleanAmountInput(it) },
+                        label = { Text("Precio Venta Sugerido") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val sp = editSpStr.toDoubleOrNull() ?: 0.0
+                    if (editName.isNotBlank() && sp > 0) {
+                        viewModel.updateComercioProduct(p.copy(name = editName, salePricePerUnit = sp))
+                        productToEdit = null
+                    }
+                }) { Text("Guardar") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { productToEdit = null }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    if (showAddPedidoDialog) {
+        var newName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showAddPedidoDialog = false },
+            title = { Text("Nuevo Pedido") },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Nombre (Ej: Pedido Septiembre)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (newName.isNotBlank()) {
+                        viewModel.addComercioPedido(newName)
+                        showAddPedidoDialog = false
+                    }
+                }) { Text("Crear") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showAddPedidoDialog = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    activePedidoForAdd?.let { pedido ->
+        AddComercioProductDialog(
+            country = country,
+            bcvRate = bcvRate,
+            onDismiss = { activePedidoForAdd = null },
+            onSave = { name, unit, qty, cost, sp ->
+                viewModel.addComercioProduct(pedido.id, name, unit, qty, cost, sp)
+                expandedPedidos = expandedPedidos + pedido.id
+            }
+        )
+    }
+
+    productToCart?.let { p ->
+        var qtyStr by remember { mutableStateOf("") }
+        
+        AlertDialog(
+            onDismissRequest = { productToCart = null },
+            title = { Text("Añadir \${p.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Disponible: \${formatQty(p.quantityInStock)} \${p.unit}")
+                    Text("Precio Venta: \${formatMoneyMain(p.salePricePerUnit, country)} c/u")
+                    
+                    OutlinedTextField(
+                        value = qtyStr,
+                        onValueChange = { qtyStr = cleanAmountInput(it) },
+                        label = { Text("Cantidad a vender") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true
+                    )
+                    
+                    val q = qtyStr.toDoubleOrNull() ?: 0.0
+                    if (q > 0) {
+                        val total = q * p.salePricePerUnit
+                        Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                            Text("Total:", fontSize = 12.sp, color = Color.Gray)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(formatMoneyMain(total, country), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Text(formatMoneySec(total, country, bcvRate), color = Color.Gray)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val q = qtyStr.toDoubleOrNull() ?: 0.0
+                    if (q > 0 && q <= p.quantityInStock) {
+                        cart.add(Triple(p, q, p.salePricePerUnit))
+                        productToCart = null
+                    }
+                }) { Text("Añadir") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { productToCart = null }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    if (showCartDialog) {
+        AlertDialog(
+            onDismissRequest = { showCartDialog = false },
+            title = { Text("Carrito de Ventas") },
+            text = {
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
+                    items(cart.toList()) { item ->
+                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("\${item.first.name} (\${formatQty(item.second)})", fontWeight = FontWeight.Bold)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("\${formatMoneyMain(item.second * item.third, country)}", color = Color(0xFF2196F3))
+                                    Text(formatMoneySec(item.second * item.third, country, bcvRate), color = Color.Gray, fontSize = 10.sp)
+                                }
+                            }
+                            IconButton(onClick = { cart.remove(item) }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Quitar", tint = Color.Red)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (cart.isNotEmpty()) {
+                        viewModel.checkoutComercioCart(cart.toList())
+                        cart.clear()
+                        showCartDialog = false
+                    }
+                }) { Text("Confirmar Venta") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showCartDialog = false }) { Text("Cerrar") }
+            }
+        )
+    }
+}
+`
+
+fs.writeFileSync('d:/Proyectos/Contabilidad/app/src/main/java/com/xxcamixx/contabilidad/ui/screens/ComercioScreen.kt', code, 'utf-8');
+console.log('ComercioScreen completely rewritten');
