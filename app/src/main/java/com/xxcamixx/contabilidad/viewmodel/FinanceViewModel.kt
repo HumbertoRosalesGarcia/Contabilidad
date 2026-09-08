@@ -475,7 +475,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             )
             val id = dao.insertFiador(f).toInt()
             val remaining = totalAmount - paidAmount
-            val voiceText = "$name te debe ${remaining.toLong()} pesos"
+            val voiceText = createFiadorVoiceText(name, remaining, "Deuda retomada manualmente", true)
             scheduleNotification(context, f.targetDateInMillis, "¡Cobrar a $name! 💰", "Monto: ${formatCOP(remaining)}", id + 100000, "FIADOR_TRIGGER", voiceText)
             launch(Dispatchers.Main) { onResult("Deuda de $name restaurada correctamente ♻️") }
         }
@@ -671,7 +671,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 )).toInt()
 
                 if (context != null && targetDate > 0) {
-                    val voiceText = "$fiadorName te debe ${remainingDebt.toLong()} pesos por la deuda de $productNames"
+                    val voiceText = createFiadorVoiceText(fiadorName, remainingDebt, productNames, true)
                     scheduleNotification(context, targetDate, "¡Cobrar a $fiadorName! 💰", "Monto: ${formatCOP(remainingDebt)} - $productNames", fiadorId + 100000, "FIADOR_TRIGGER", voiceText)
                 }
             }
