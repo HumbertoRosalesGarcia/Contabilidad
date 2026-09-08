@@ -624,6 +624,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
             val noteText = if (customerName.isNotBlank()) "Cliente: $customerName | $paymentSummary" else paymentSummary
 
+            val currentTransactionId = java.util.UUID.randomUUID().toString()
             for (item in items) {
                 val p = item.first
                 val q = item.second
@@ -642,7 +643,8 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     total = q * sp,
                     note = noteText,
                     timestamp = saleTimestamp,
-                    country = selectedCountry
+                    country = selectedCountry,
+                    transactionId = currentTransactionId
                 ))
             }
 

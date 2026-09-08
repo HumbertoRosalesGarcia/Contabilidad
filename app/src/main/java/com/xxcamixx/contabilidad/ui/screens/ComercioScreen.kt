@@ -203,6 +203,7 @@ fun ComercioScreen(
     var expandedPedidos by remember { mutableStateOf(setOf<Int>()) }
     var expandedInvestedPedidos by remember { mutableStateOf(setOf<Int>()) }
     var expandedProfitProducts by remember { mutableStateOf(setOf<Int>()) }
+    var expandedVentas by remember { mutableStateOf(setOf<String>()) }
 
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
 
@@ -937,6 +938,10 @@ fun ComercioScreen(
                         }
                     }
 
+                    val groupedVentas = remember(filteredVentas) {
+                        filteredVentas.groupBy { it.transactionId ?: it.timestamp.toString() }
+                    }
+
                     val filteredDeudas = remember(deudasEnProceso, q, country) {
                         if (q.isBlank()) deudasEnProceso
                         else deudasEnProceso.filter { f ->
@@ -1078,7 +1083,7 @@ fun ComercioScreen(
                             }
 
                             // Luego las ventas realizadas
-                            if (showVentas && filteredVentas.isNotEmpty()) {
+                            if (showVentas && groupedVentas.isNotEmpty()) {
                                 if (showDeudas && filteredDeudas.isNotEmpty()) {
                                     item {
                                         Spacer(Modifier.height(8.dp))
@@ -1097,57 +1102,98 @@ fun ComercioScreen(
                                         }
                                     }
                                 }
-                                items(filteredVentas) { m ->
-                                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                                                Box(
+                                groupedVentas.entries.forEachIndexed { index, entry ->
+                                    val groupId = entry.key
+                                    val groupItems = entry.value
+                                    val isExpanded = expandedVentas.contains(groupId)
+                                    val groupTotal = groupItems.sumOf { it.total }
+                                    val firstItem = groupItems.first()
+                                    val dateStr = formatDateOnly(firstItem.timestamp)
+
+                                    // Determinar nombre del cliente a partir de la nota (Cliente: nombre | ...)
+                                    val noteRegex = Regex("Cliente: ([^|]+)")
+                                    val match = noteRegex.find(firstItem.note)
+                                    val clientName = match?.groups?.get(1)?.value?.trim()
+
+                                    val headerTitle = if (clientName != null) "Venta: $clientName" else "Venta #${groupedVentas.size - index}"
+
+                                    item {
+                                        Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                            Column {
+                                                Row(
                                                     modifier = Modifier
-                                                        .size(38.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color(0xFF2196F3).copy(alpha = 0.15f)),
-                                                    contentAlignment = Alignment.Center
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            expandedVentas = if (isExpanded) expandedVentas - groupId else expandedVentas + groupId
+                                                        }
+                                                        .padding(12.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Icon(
-                                                        Icons.Filled.ShoppingCart,
-                                                        contentDescription = null,
-                                                        tint = Color(0xFF2196F3),
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Column {
-                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                        Text("${m.productName} (${formatQty(m.quantity)})", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                                        Surface(
-                                                            color = Color(0xFF4CAF50).copy(alpha = 0.15f),
-                                                            shape = RoundedCornerShape(4.dp)
+                                                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(38.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color(0xFF2196F3).copy(alpha = 0.15f)),
+                                                            contentAlignment = Alignment.Center
                                                         ) {
-                                                            Text(
-                                                                "Realizada",
-                                                                color = Color(0xFF2E7D32),
-                                                                fontSize = 9.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                            Icon(
+                                                                Icons.Filled.ShoppingCart,
+                                                                contentDescription = null,
+                                                                tint = Color(0xFF2196F3),
+                                                                modifier = Modifier.size(18.dp)
                                                             )
                                                         }
+                                                        Spacer(modifier = Modifier.width(10.dp))
+                                                        Column {
+                                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                                Text(headerTitle, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                                Surface(
+                                                                    color = Color(0xFF4CAF50).copy(alpha = 0.15f),
+                                                                    shape = RoundedCornerShape(4.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        "Realizada",
+                                                                        color = Color(0xFF2E7D32),
+                                                                        fontSize = 9.sp,
+                                                                        fontWeight = FontWeight.Bold,
+                                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                                    )
+                                                                }
+                                                            }
+                                                            Text(dateStr, fontSize = 10.sp, color = Color.Gray)
+                                                            if (groupItems.size > 1) {
+                                                                Text("${groupItems.size} productos", fontSize = 11.sp, color = Color.Gray)
+                                                            }
+                                                        }
                                                     }
-                                                    if (m.note.isNotEmpty()) {
-                                                        Text(m.note, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                                    Column(horizontalAlignment = Alignment.End) {
+                                                        Text(formatMoneyMain(groupTotal, country), fontWeight = FontWeight.Bold, color = Color(0xFF2196F3), fontSize = 14.sp)
+                                                        val secT = formatMoneySec(groupTotal, country, bcvRate)
+                                                        if (secT.isNotEmpty()) Text(secT, fontSize = 10.sp, color = Color.Gray)
                                                     }
-                                                    Text(formatDateOnly(m.timestamp), fontSize = 10.sp, color = Color.Gray)
                                                 }
-                                            }
-                                            Column(horizontalAlignment = Alignment.End) {
-                                                Text(formatMoneyMain(m.total, country), fontWeight = FontWeight.Bold, color = Color(0xFF2196F3), fontSize = 14.sp)
-                                                val secT = formatMoneySec(m.total, country, bcvRate)
-                                                if (secT.isNotEmpty()) Text(secT, fontSize = 10.sp, color = Color.Gray)
+
+                                                AnimatedVisibility(visible = isExpanded) {
+                                                    Column(modifier = Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.05f)).padding(12.dp)) {
+                                                        // Show the payment note from the first item
+                                                        if (firstItem.note.isNotEmpty()) {
+                                                            Text(firstItem.note, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+                                                        }
+
+                                                        groupItems.forEach { m ->
+                                                            Row(
+                                                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                Text("• ${m.productName} (${formatQty(m.quantity)})", fontSize = 13.sp)
+                                                                Text(formatMoneyMain(m.total, country), fontSize = 13.sp, color = Color.Gray)
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
