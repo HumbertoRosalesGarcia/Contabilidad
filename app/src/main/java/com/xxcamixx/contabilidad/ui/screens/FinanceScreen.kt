@@ -404,8 +404,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var currentUiTime by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(60000L); currentUiTime = System.currentTimeMillis() } }
 
-    val activeReminders = remember(currentTabReminders, currentUiTime) { currentTabReminders.filter { it.targetDateInMillis <= currentUiTime } }
-    val activeFiadores = remember(currentTabFiadores, currentUiTime) { currentTabFiadores.filter { it.targetDateInMillis <= currentUiTime } }
+    val allActiveReminders = remember(reminders, currentUiTime) { reminders.filter { it.targetDateInMillis <= currentUiTime } }
+    val allActiveFiadores = remember(fiadores, currentUiTime) { fiadores.filter { it.targetDateInMillis <= currentUiTime } }
 
     LaunchedEffect(customToastMessage ?: "") { if (customToastMessage != null) { delay(3000L); customToastMessage = null } }
     LaunchedEffect(undoMessage ?: "") { if (undoMessage != null) { delay(5000L); undoMessage = null; undoAction = null } }
@@ -638,7 +638,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 }
                             }
 
-                            activeFiadores.forEach { fiador ->
+                            val personalActiveFiadores = remember(allActiveFiadores) { allActiveFiadores.filter { it.originMode == "PERSONAL" || (it.originMode.isEmpty() && !it.isStore) } }
+                            personalActiveFiadores.forEach { fiador ->
                                 val remaining = fiador.amount - fiador.paidAmount
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFFBC02D), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { fiadorToEdit = fiador; showFiadorDialog = true }.padding(12.dp),
@@ -655,7 +656,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 }
                             }
 
-                            activeReminders.forEach { reminder ->
+                            val personalActiveReminders = remember(allActiveReminders) { allActiveReminders.filter { it.originMode == "PERSONAL" || (it.originMode.isEmpty() && !it.isStore) } }
+                            personalActiveReminders.forEach { reminder ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFF1976D2), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { reminderToEdit = reminder; showReminderDialog = true }.padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -711,8 +713,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 else showPremiumToastMsg(context)
                             },
                             totalProfit = totalProfit,
-                            activeFiadores = activeFiadores,
-                            activeReminders = activeReminders,
+                            activeFiadores = allActiveFiadores.filter { it.originMode == "TIENDA" || (it.originMode.isEmpty() && it.isStore) },
+                            activeReminders = allActiveReminders.filter { it.originMode == "TIENDA" || (it.originMode.isEmpty() && it.isStore) },
                             onSettleFiador = { viewModel.deleteFiador(it, context) },
                             onEditFiador = { fiadorToEdit = it; showFiadorDialog = true },
                             onSettleReminder = { viewModel.deleteReminder(it, context) },
