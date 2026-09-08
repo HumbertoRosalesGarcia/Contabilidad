@@ -180,6 +180,7 @@ fun ComercioScreen(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
+    val imageCache = remember { androidx.compose.runtime.mutableStateMapOf<String, android.graphics.Bitmap>() }
 
     fun matchesDateQuery(timestamp: Long, query: String): Boolean {
         if (query.isBlank()) return false
@@ -565,16 +566,25 @@ fun ComercioScreen(
                                 ) {
                                     Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                                          if (pedido.imageUri != null) {
-                                             var bitmap by remember(pedido.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
-                                             LaunchedEffect(pedido.imageUri) {
-                                                 val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                     com.xxcamixx.contabilidad.util.loadBitmapFromUri(context, pedido.imageUri)
-                                                 }
-                                                 bitmap = b
-                                             }
-                                             if (bitmap != null) {
-                                                 Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape).clickable { expandedImageUri = pedido.imageUri }, contentScale = ContentScale.Crop)
+                                             val cachedBitmap = imageCache[pedido.imageUri]
+                                             if (cachedBitmap != null) {
+                                                 Image(bitmap = cachedBitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape).clickable { expandedImageUri = pedido.imageUri }, contentScale = ContentScale.Crop)
                                                  Spacer(modifier = Modifier.width(8.dp))
+                                             } else {
+                                                 var bitmap by remember(pedido.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                                                 LaunchedEffect(pedido.imageUri) {
+                                                     val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                         com.xxcamixx.contabilidad.util.loadBitmapFromUri(context, pedido.imageUri)
+                                                     }
+                                                     if (b != null) {
+                                                         imageCache[pedido.imageUri!!] = b
+                                                         bitmap = b
+                                                     }
+                                                 }
+                                                 if (bitmap != null) {
+                                                     Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape).clickable { expandedImageUri = pedido.imageUri }, contentScale = ContentScale.Crop)
+                                                     Spacer(modifier = Modifier.width(8.dp))
+                                                 }
                                              }
                                          } else {
                                              Text(getSmartEmoji(pedido.name, true), fontSize = 24.sp)
@@ -647,16 +657,10 @@ fun ComercioScreen(
                                                       verticalAlignment = Alignment.Top
                                                   ) {
                                                       if (p.imageUri != null) {
-                                                          var pbitmap by remember(p.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
-                                                          LaunchedEffect(p.imageUri) {
-                                                              val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                                  com.xxcamixx.contabilidad.util.loadBitmapFromUri(context, p.imageUri)
-                                                              }
-                                                              pbitmap = b
-                                                          }
-                                                          if (pbitmap != null) {
+                                                          val cachedBitmap = imageCache[p.imageUri]
+                                                          if (cachedBitmap != null) {
                                                               Image(
-                                                                  bitmap = pbitmap!!.asImageBitmap(),
+                                                                  bitmap = cachedBitmap.asImageBitmap(),
                                                                   contentDescription = null,
                                                                   modifier = Modifier
                                                                       .size(46.dp)
@@ -665,6 +669,29 @@ fun ComercioScreen(
                                                                   contentScale = ContentScale.Crop
                                                               )
                                                               Spacer(modifier = Modifier.width(8.dp))
+                                                          } else {
+                                                              var pbitmap by remember(p.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                                                              LaunchedEffect(p.imageUri) {
+                                                                  val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                                      com.xxcamixx.contabilidad.util.loadBitmapFromUri(context, p.imageUri)
+                                                                  }
+                                                                  if (b != null) {
+                                                                      imageCache[p.imageUri!!] = b
+                                                                      pbitmap = b
+                                                                  }
+                                                              }
+                                                              if (pbitmap != null) {
+                                                                  Image(
+                                                                      bitmap = pbitmap!!.asImageBitmap(),
+                                                                      contentDescription = null,
+                                                                      modifier = Modifier
+                                                                          .size(46.dp)
+                                                                          .clip(RoundedCornerShape(8.dp))
+                                                                          .clickable { expandedImageUri = p.imageUri },
+                                                                      contentScale = ContentScale.Crop
+                                                                  )
+                                                                  Spacer(modifier = Modifier.width(8.dp))
+                                                              }
                                                           }
                                                       }
                                                       Column(modifier = Modifier.weight(1f)) {
