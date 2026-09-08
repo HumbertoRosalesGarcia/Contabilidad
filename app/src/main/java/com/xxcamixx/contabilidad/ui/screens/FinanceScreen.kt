@@ -354,6 +354,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var productToFullDelete by remember { mutableStateOf<Product?>(null) }
     var showLimitDialog by remember { mutableStateOf(false) }
     var showCalendarDialog by remember { mutableStateOf(false) }
+    var showAddEventSelectionDialog by remember { mutableStateOf(false) }
     var showSummaryDialog by remember { mutableStateOf(false) }
     var showDeleteHistoryConfirmDialog by remember { mutableStateOf(false) }
     var showResetProfitsDialog by remember { mutableStateOf(false) }
@@ -1229,13 +1230,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 onDayClick = { dayMillis, _ ->
                     preselectedDateForEvent = dayMillis
                     showCalendarDialog = false
-                    if (currentTab == 0) {
-                        showReminderDialog = true
-                    } else if (currentTab == 1) {
-                        showFiadorDialog = true
-                    } else if (currentTab == 2) {
-                        showFiadorDialog = true
-                    }
+                    showAddEventSelectionDialog = true
                 },
                 onViewReminders = {
                     showCalendarDialog = false
@@ -1244,6 +1239,30 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 onViewFiadores = {
                     showCalendarDialog = false
                     showFiadoresListDialog = true
+                }
+            )
+        }
+
+        if (showAddEventSelectionDialog) {
+            AlertDialog(
+                onDismissRequest = { showAddEventSelectionDialog = false; preselectedDateForEvent = null },
+                title = { Text("¿Qué deseas agregar?", fontWeight = FontWeight.Bold) },
+                text = { Text("Selecciona si deseas agregar una Deuda (para pagar) o un Deudor (para cobrar) en este día.") },
+                confirmButton = {
+                    Button(onClick = {
+                        showAddEventSelectionDialog = false
+                        showFiadorDialog = true
+                    }) {
+                        Text("Un Deudor (Cobrar)")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = {
+                        showAddEventSelectionDialog = false
+                        showReminderDialog = true
+                    }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) {
+                        Text("Una Deuda (Pagar)")
+                    }
                 }
             )
         }
