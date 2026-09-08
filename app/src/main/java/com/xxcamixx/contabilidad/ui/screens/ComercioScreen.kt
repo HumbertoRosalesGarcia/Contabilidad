@@ -174,7 +174,8 @@ fun ComercioScreen(
     bcvRate: Double,
     onOpenHistory: () -> Unit = {},
     showSearch: Boolean = true,
-    onToggleSearch: () -> Unit = {}
+    onToggleSearch: () -> Unit = {},
+    onEditFiador: (com.xxcamixx.contabilidad.model.Fiador) -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -981,7 +982,8 @@ fun ComercioScreen(
                                     Card(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(vertical = 4.dp),
+                                            .padding(vertical = 4.dp)
+                                            .clickable { onEditFiador(f) },
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB300).copy(alpha = 0.5f))
                                     ) {

@@ -112,6 +112,9 @@ fun FiadorDialog(
                     Button(onClick = { activeScreen = "EDIT_INFO" }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("\uD83D\uDCDD Información del Fiador") }
                     Button(onClick = { isEditDateOnly = true; showDatePicker = true }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("\uD83D\uDCC5 Fecha de Cobro") }
                     Button(onClick = { activeScreen = "EDIT_TIME" }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("⏰ Hora de Cobro") }
+                    if (initialFiador != null && (initialFiador.amount - initialFiador.paidAmount > 0)) {
+                        Button(onClick = { onConfirmEdit(initialFiador, System.currentTimeMillis() + 86400000L) }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))) { Text("⏳ Aplazar Deuda (24h)") }
+                    }
                 }
             },
             confirmButton = {},
@@ -172,7 +175,13 @@ fun FiadorDialog(
                     }
                 }) { Text("Confirmar Abono") }
             },
-            dismissButton = { TextButton(onClick = { activeScreen = "EDIT_OPTIONS" }) { Text("Atrás") } }
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { activeScreen = "EDIT_OPTIONS" }) { Text("Atrás") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onConfirmEdit(initialFiador, System.currentTimeMillis() + 86400000L) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))) { Text("⏳ Aplazar 24h") }
+                }
+            }
         )
     }
 

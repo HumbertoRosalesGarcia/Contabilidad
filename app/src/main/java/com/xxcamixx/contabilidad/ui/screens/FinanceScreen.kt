@@ -694,7 +694,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 }
                             }
                         }
-                    } else if (tab == 1) { ComercioScreen(viewModel, comercioPedidos, comercioProducts, comercioMovements, viewModel.selectedCountry, viewModel.bcvRate, onOpenHistory = { showComercioPedidosHistoryDialog = true }, showSearch = showComercioSearch, onToggleSearch = { showComercioSearch = !showComercioSearch }) } else {
+                    } else if (tab == 1) { ComercioScreen(viewModel, comercioPedidos, comercioProducts, comercioMovements, viewModel.selectedCountry, viewModel.bcvRate, onOpenHistory = { showComercioPedidosHistoryDialog = true }, showSearch = showComercioSearch, onToggleSearch = { showComercioSearch = !showComercioSearch }, onEditFiador = { fiadorToEdit = it; showFiadorDialog = true }) } else {
                         StoreScreen(
                             products = products,
                             transactions = transactions,
