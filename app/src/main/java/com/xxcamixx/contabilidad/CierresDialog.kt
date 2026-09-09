@@ -33,9 +33,10 @@ fun CierresDialog(
     var calculatedExpense by remember { mutableStateOf(0.0) }
     var nameForCierre by remember { mutableStateOf("") }
 
-    // Simple calculations based on what isn't closed yet.
-    // In a real scenario you would query these from the DB, but since we are closing everything of a certain mode,
-    // we can request it from viewModel or just show a warning. For simplicity we will do a basic approach.
+    // Get unclosed fiadores (debts) directly from viewmodel flow (or similar data)
+    // to show in an alternate section.
+    val fiadores by viewModel.fiadores.collectAsState(initial = emptyList())
+    var currentTab by remember { mutableStateOf(0) } // 0 = Cierres, 1 = Deudas Pendientes
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -49,68 +50,63 @@ fun CierresDialog(
             color = MaterialTheme.colorScheme.background
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Header
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Cierres", style = MaterialTheme.typography.titleLarge)
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Cerrar")
-                    }
+                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Cierres de Sesión", style = MaterialTheme.typography.titleLarge)
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar") }
                 }
 
-                // Botones para generar nuevos cierres
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    Button(onClick = {
-                        modeToClose = "PERSONAL"
-                        nameForCierre = "Cierre Personal - " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
-                        showConfirmation = true
-                    }) {
-                        Text("Personal")
-                    }
-                    Button(onClick = {
-                        modeToClose = "PEDIDOS"
-                        nameForCierre = "Cierre Pedidos - " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
-                        showConfirmation = true
-                    }) {
-                        Text("Pedidos")
-                    }
-                    Button(onClick = {
-                        modeToClose = "TIENDA"
-                        nameForCierre = "Cierre Tienda - " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
-                        showConfirmation = true
-                    }) {
-                        Text("Tienda")
-                    }
+                TabRow(selectedTabIndex = currentTab) {
+                    Tab(selected = currentTab == 0, onClick = { currentTab = 0 }, text = { Text("Sesiones") })
+                    Tab(selected = currentTab == 1, onClick = { currentTab = 1 }, text = { Text("Deudas Pendientes") })
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
-                Divider()
+                if (currentTab == 0) {
+                    // Botones para generar nuevos cierres
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        Button(onClick = {
+                            modeToClose = "PERSONAL"
+                            nameForCierre = "Cierre Personal - " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+                            showConfirmation = true
+                        }) { Text("Personal") }
+                        Button(onClick = {
+                            modeToClose = "PEDIDOS"
+                            nameForCierre = "Cierre Pedidos - " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+                            showConfirmation = true
+                        }) { Text("Pedidos") }
+                        Button(onClick = {
+                            modeToClose = "TIENDA"
+                            nameForCierre = "Cierre Tienda - " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
+                            showConfirmation = true
+                        }) { Text("Tienda") }
+                    }
 
-                // Lista de cierres previos
-                Text(
-                    "Historial de Cierres",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(16.dp)
-                )
+                    Divider()
 
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(horizontal = 16.dp)
-                ) {
-                    items(cierres) { cierre ->
-                        CierreItem(cierre = cierre, onDelete = { viewModel.deleteCierreSession(cierre) })
+                    // Lista de cierres previos
+                    Text("Historial de Cierres", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(16.dp))
+
+                    LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp)) {
+                        items(cierres) { cierre ->
+                            CierreItem(cierre = cierre, onDelete = { viewModel.deleteCierreSession(cierre) })
+                        }
+                    }
+                } else {
+                    // Vista de deudas pendientes
+                    LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f).padding(16.dp)) {
+                        items(fiadores) { fiador ->
+                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text("Cobrar a: ${fiador.name}", fontWeight = FontWeight.Bold)
+                                    Text("Resta: ${fiador.amount - fiador.paidAmount} (${fiador.originMode})")
+                                    Text("Motivo: ${fiador.reason}")
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -82,9 +82,10 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
             // Mark items as closed depending on mode
             if (mode == "PERSONAL") {
-                dao.updateTransactionsWithCierre(selectedCountry, sessionId)
+                dao.updatePersonalTransactionsWithCierre(selectedCountry, sessionId)
                 dao.updateFiadoresWithCierre(selectedCountry, sessionId, "PERSONAL")
             } else if (mode == "TIENDA") {
+                dao.updateTiendaTransactionsWithCierre(selectedCountry, sessionId)
                 dao.updateFiadoresWithCierre(selectedCountry, sessionId, "TIENDA")
             } else if (mode == "PEDIDOS") {
                 dao.updateComercioMovementsWithCierre(selectedCountry, sessionId)

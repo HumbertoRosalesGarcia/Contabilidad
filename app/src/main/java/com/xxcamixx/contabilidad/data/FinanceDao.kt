@@ -13,7 +13,7 @@ import com.xxcamixx.contabilidad.model.CierreSession
 
 @Dao
 interface FinanceDao {
-    @Query("SELECT * FROM transactions WHERE country = :country ORDER BY timestamp DESC")
+    @Query("SELECT * FROM transactions WHERE country = :country AND cierreId IS NULL ORDER BY timestamp DESC")
     fun getAllTransactions(country: String): Flow<List<Transaction>>
 
     @Insert suspend fun insertTransaction(transaction: Transaction)
@@ -34,7 +34,7 @@ interface FinanceDao {
     @Delete suspend fun deleteReminder(reminder: Reminder)
     @Query("DELETE FROM reminders") suspend fun deleteAllReminders()
 
-    @Query("SELECT * FROM fiadores WHERE country = :country ORDER BY targetDateInMillis ASC")
+    @Query("SELECT * FROM fiadores WHERE country = :country AND cierreId IS NULL ORDER BY targetDateInMillis ASC")
     fun getAllFiadores(country: String): Flow<List<Fiador>>
 
     @Insert suspend fun insertFiador(fiador: Fiador): Long
@@ -72,7 +72,7 @@ interface FinanceDao {
     @Query("DELETE FROM comercio_products WHERE pedidoId = :pedidoId")
     suspend fun deleteComercioProductsByPedidoId(pedidoId: Int)
 
-    @Query("SELECT * FROM comercio_movements WHERE country = :country ORDER BY timestamp DESC")
+    @Query("SELECT * FROM comercio_movements WHERE country = :country AND cierreId IS NULL ORDER BY timestamp DESC")
     fun getAllComercioMovements(country: String): Flow<List<ComercioMovement>>
 
     @Insert suspend fun insertComercioProduct(product: ComercioProduct): Long
@@ -123,8 +123,11 @@ interface FinanceDao {
     @Query("SELECT * FROM comercio_movements WHERE country = :country AND cierreId IS NULL")
     fun getComercioMovementsWithoutCierre(country: String): Flow<List<ComercioMovement>>
 
-    @Query("UPDATE transactions SET cierreId = :cierreId WHERE country = :country AND cierreId IS NULL")
-    suspend fun updateTransactionsWithCierre(country: String, cierreId: Int)
+    @Query("UPDATE transactions SET cierreId = :cierreId WHERE country = :country AND cierreId IS NULL AND description NOT LIKE 'Venta: %'")
+    suspend fun updatePersonalTransactionsWithCierre(country: String, cierreId: Int)
+
+    @Query("UPDATE transactions SET cierreId = :cierreId WHERE country = :country AND cierreId IS NULL AND description LIKE 'Venta: %'")
+    suspend fun updateTiendaTransactionsWithCierre(country: String, cierreId: Int)
 
     @Query("UPDATE fiadores SET cierreId = :cierreId WHERE country = :country AND cierreId IS NULL AND originMode = :mode")
     suspend fun updateFiadoresWithCierre(country: String, cierreId: Int, mode: String)
