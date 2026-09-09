@@ -107,6 +107,7 @@ import com.xxcamixx.contabilidad.model.Reminder
 import com.xxcamixx.contabilidad.model.Transaction
 import com.xxcamixx.contabilidad.network.RetrofitInstance
 import com.xxcamixx.contabilidad.model.UserData
+import com.xxcamixx.contabilidad.CierresDialog
 import com.xxcamixx.contabilidad.model.UserManageRequest
 import com.xxcamixx.contabilidad.model.UserSyncRequest
 import com.xxcamixx.contabilidad.model.UserTimeRequest
@@ -184,6 +185,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showDigitalExpensesDialog by remember { mutableStateOf(false) }
     var showAllExpensesDialog by remember { mutableStateOf(false) }
     var showAllIncomesDialog by remember { mutableStateOf(false) }
+    var showCierresDialog by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -1688,6 +1690,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     viewModel.addTransaction(desc, amount, isInc, note, method, cat, uri)
                     showAddDialog = false
                 }
+            )
+        }
+
+        if (showCierresDialog) {
+            CierresDialog(
+                onDismiss = { showCierresDialog = false },
+                viewModel = viewModel
             )
         }
     }

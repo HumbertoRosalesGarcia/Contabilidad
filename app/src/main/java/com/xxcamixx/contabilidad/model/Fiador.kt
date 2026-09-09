@@ -16,5 +16,6 @@ data class Fiador(
     val isStore: Boolean = true,
     val totalCost: Double = 0.0,
     val country: String = "Colombia",
-    val originMode: String = "TIENDA"
+    val originMode: String = "TIENDA",
+    val cierreId: Int? = null
 )

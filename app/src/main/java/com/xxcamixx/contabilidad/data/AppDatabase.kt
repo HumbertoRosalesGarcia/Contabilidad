@@ -11,9 +11,10 @@ import com.xxcamixx.contabilidad.model.Product
 import com.xxcamixx.contabilidad.model.ComercioProduct
 import com.xxcamixx.contabilidad.model.ComercioMovement
 import com.xxcamixx.contabilidad.model.ComercioPedido
+import com.xxcamixx.contabilidad.model.CierreSession
 import com.xxcamixx.contabilidad.data.MIGRATION_22_23
 
-@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class, ComercioProduct::class, ComercioMovement::class, ComercioPedido::class], version = 23, exportSchema = false)
+@Database(entities = [Transaction::class, Reminder::class, Fiador::class, Product::class, ComercioProduct::class, ComercioMovement::class, ComercioPedido::class, CierreSession::class], version = 23, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun financeDao(): FinanceDao
     companion object {

@@ -9,6 +9,7 @@ import com.xxcamixx.contabilidad.model.Product
 import com.xxcamixx.contabilidad.model.ComercioProduct
 import com.xxcamixx.contabilidad.model.ComercioMovement
 import com.xxcamixx.contabilidad.model.ComercioPedido
+import com.xxcamixx.contabilidad.model.CierreSession
 
 @Dao
 interface FinanceDao {
@@ -99,4 +100,35 @@ interface FinanceDao {
     @Query("DELETE FROM comercio_products") suspend fun deleteAllComercioProducts()
     @Query("DELETE FROM comercio_movements") suspend fun deleteAllComercioMovements()
     @Query("DELETE FROM comercio_pedidos") suspend fun deleteAllComercioPedidos()
+
+    // --- CIERRES ---
+    @Query("SELECT * FROM cierre_sessions WHERE country = :country ORDER BY timestamp DESC")
+    fun getAllCierreSessions(country: String): Flow<List<CierreSession>>
+
+    @Insert suspend fun insertCierreSession(session: CierreSession): Long
+    @Delete suspend fun deleteCierreSession(session: CierreSession)
+
+    @Query("SELECT * FROM cierre_sessions ORDER BY timestamp DESC")
+    suspend fun getBackupCierreSessions(): List<CierreSession>
+
+    @Query("DELETE FROM cierre_sessions") suspend fun deleteAllCierreSessions()
+
+    // Query para obtener transacciones sin cierre de tipo personal/pedidos/tienda (isIncome no se usa aquí pero podríamos filtrar por categoría si quisiéramos)
+    @Query("SELECT * FROM transactions WHERE country = :country AND cierreId IS NULL")
+    fun getTransactionsWithoutCierre(country: String): Flow<List<Transaction>>
+
+    @Query("SELECT * FROM fiadores WHERE country = :country AND cierreId IS NULL")
+    fun getFiadoresWithoutCierre(country: String): Flow<List<Fiador>>
+
+    @Query("SELECT * FROM comercio_movements WHERE country = :country AND cierreId IS NULL")
+    fun getComercioMovementsWithoutCierre(country: String): Flow<List<ComercioMovement>>
+
+    @Query("UPDATE transactions SET cierreId = :cierreId WHERE country = :country AND cierreId IS NULL")
+    suspend fun updateTransactionsWithCierre(country: String, cierreId: Int)
+
+    @Query("UPDATE fiadores SET cierreId = :cierreId WHERE country = :country AND cierreId IS NULL AND originMode = :mode")
+    suspend fun updateFiadoresWithCierre(country: String, cierreId: Int, mode: String)
+
+    @Query("UPDATE comercio_movements SET cierreId = :cierreId WHERE country = :country AND cierreId IS NULL")
+    suspend fun updateComercioMovementsWithCierre(country: String, cierreId: Int)
 }

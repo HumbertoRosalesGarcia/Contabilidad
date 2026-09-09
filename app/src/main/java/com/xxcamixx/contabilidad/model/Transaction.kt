@@ -16,5 +16,6 @@ data class Transaction(
     val digitalAmount: Double = 0.0,
     val country: String = "Colombia",
     val category: String? = null, // <-- NUEVO
-    val imageUri: String? = null  // <-- NUEVO
+    val imageUri: String? = null,  // <-- NUEVO
+    val cierreId: Int? = null
 )

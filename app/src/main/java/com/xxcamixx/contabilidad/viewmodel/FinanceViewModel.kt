@@ -32,6 +32,7 @@ import com.xxcamixx.contabilidad.model.ComercioPedido
 import com.xxcamixx.contabilidad.model.ComercioMovement
 import com.xxcamixx.contabilidad.model.Reminder
 import com.xxcamixx.contabilidad.model.Transaction
+import com.xxcamixx.contabilidad.model.CierreSession
 import com.xxcamixx.contabilidad.network.CloudSyncWorker
 import com.xxcamixx.contabilidad.network.RetrofitInstance
 import com.xxcamixx.contabilidad.receiver.ReminderReceiver
@@ -64,6 +65,38 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val transactions: Flow<List<Transaction>> = _selectedCountryFlow.flatMapLatest { dao.getAllTransactions(it) }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val cierreSessions: Flow<List<CierreSession>> = _selectedCountryFlow.flatMapLatest { dao.getAllCierreSessions(it) }
+
+    fun createCierreSession(mode: String, name: String, totalIncomes: Double, totalExpenses: Double) {
+        viewModelScope.launch {
+            val session = CierreSession(
+                mode = mode,
+                name = name,
+                totalIncomes = totalIncomes,
+                totalExpenses = totalExpenses,
+                country = selectedCountry
+            )
+            val sessionId = dao.insertCierreSession(session).toInt()
+
+            // Mark items as closed depending on mode
+            if (mode == "PERSONAL") {
+                dao.updateTransactionsWithCierre(selectedCountry, sessionId)
+                dao.updateFiadoresWithCierre(selectedCountry, sessionId, "PERSONAL")
+            } else if (mode == "TIENDA") {
+                dao.updateFiadoresWithCierre(selectedCountry, sessionId, "TIENDA")
+            } else if (mode == "PEDIDOS") {
+                dao.updateComercioMovementsWithCierre(selectedCountry, sessionId)
+            }
+        }
+    }
+
+    fun deleteCierreSession(session: CierreSession) {
+        viewModelScope.launch {
+            dao.deleteCierreSession(session)
+        }
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val reminders: Flow<List<Reminder>> = _selectedCountryFlow.flatMapLatest { dao.getAllReminders(it) }
