@@ -28,7 +28,7 @@ fun SellComercioDialog(
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Stock disponible: ${product.quantityInStock} ${product.unit}")
                 Text("Costo promedio: ${formatCOP(product.costPerUnit)}")
-                
+
                 OutlinedTextField(
                     value = quantityStr,
                     onValueChange = { quantityStr = cleanAmountInput(it) },
@@ -46,7 +46,7 @@ fun SellComercioDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                
+
                 val q = quantityStr.toDoubleOrNull() ?: 0.0
                 val p = salePriceStr.toDoubleOrNull() ?: 0.0
                 if (q > 0 && p > 0) {

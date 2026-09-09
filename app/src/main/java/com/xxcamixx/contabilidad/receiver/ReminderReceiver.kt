@@ -157,13 +157,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 notificationManager.notify(id, notification)
             }
         } finally {
-            try {
-                if (wakeLock?.isHeld == true) {
-                    wakeLock.release()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            // WakeLock se liberará por sí solo cuando expire o la corrutina termine
         }
     }
 }

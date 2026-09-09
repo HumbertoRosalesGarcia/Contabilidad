@@ -50,69 +50,69 @@ fun cleanDecimalWithPrecision(input: String, maxDecimals: Int = 2): String {
 
 fun cleanAmountInput(input: String): String { return input.filter { it.isDigit() } }
 
-class AmountVisualTransformation(val prefix: String = "$ ") : VisualTransformation { 
-    override fun filter(text: AnnotatedString): TransformedText { 
+class AmountVisualTransformation(val prefix: String = "$ ") : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
         val inputText = text.text
-        val formattedInt = if (inputText.isNotEmpty()) { 
+        val formattedInt = if (inputText.isNotEmpty()) {
             var result = ""
             val reversed = inputText.reversed()
-            for (i in reversed.indices) { 
+            for (i in reversed.indices) {
                 result += reversed[i]
-                if ((i + 1) % 3 == 0 && i != reversed.lastIndex) { result += "." } 
+                if ((i + 1) % 3 == 0 && i != reversed.lastIndex) { result += "." }
             }
-            prefix + result.reversed() 
+            prefix + result.reversed()
         } else ""
 
-        val offsetMapping = object : OffsetMapping { 
-            override fun originalToTransformed(offset: Int): Int { 
+        val offsetMapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int {
                 if (inputText.isEmpty()) return 0
                 var transformedCursor = prefix.length
                 var originalCursor = 0
-                while (originalCursor < offset && originalCursor < inputText.length) { 
+                while (originalCursor < offset && originalCursor < inputText.length) {
                     transformedCursor++
                     originalCursor++
                     val remaining = inputText.length - originalCursor
-                    if (remaining > 0 && remaining % 3 == 0) transformedCursor++ 
+                    if (remaining > 0 && remaining % 3 == 0) transformedCursor++
                 }
-                return transformedCursor.coerceIn(0, formattedInt.length) 
+                return transformedCursor.coerceIn(0, formattedInt.length)
             }
 
-            override fun transformedToOriginal(offset: Int): Int { 
+            override fun transformedToOriginal(offset: Int): Int {
                 if (inputText.isEmpty() || offset <= prefix.length) return 0
                 var originalOffset = 0
                 var transformedIndex = prefix.length
-                while (transformedIndex < offset && originalOffset < inputText.length) { 
-                    if (formattedInt[transformedIndex] == '.') { 
-                        transformedIndex++ 
-                    } else { 
+                while (transformedIndex < offset && originalOffset < inputText.length) {
+                    if (formattedInt[transformedIndex] == '.') {
+                        transformedIndex++
+                    } else {
                         originalOffset++
-                        transformedIndex++ 
-                    } 
+                        transformedIndex++
+                    }
                 }
-                return originalOffset.coerceIn(0, inputText.length) 
-            } 
+                return originalOffset.coerceIn(0, inputText.length)
+            }
         }
-        return TransformedText(AnnotatedString(formattedInt), offsetMapping) 
-    } 
+        return TransformedText(AnnotatedString(formattedInt), offsetMapping)
+    }
 }
 
-fun formatCOP(amount: Double): String { 
+fun formatCOP(amount: Double): String {
     val format = DecimalFormat("#,###").apply { decimalFormatSymbols = decimalFormatSymbols.apply { groupingSeparator = '.' } }
-    return "$${format.format(amount)}" 
+    return "$${format.format(amount)}"
 }
 
-fun formatDate(timestamp: Long): String { 
-    return SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(timestamp)) 
+fun formatDate(timestamp: Long): String {
+    return SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date(timestamp))
 }
 
-fun formatDateOnly(timestamp: Long): String { 
-    return SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(timestamp)) 
+fun formatDateOnly(timestamp: Long): String {
+    return SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(timestamp))
 }
 
-fun isSameDay(time1: Long, time2: Long): Boolean { 
+fun isSameDay(time1: Long, time2: Long): Boolean {
     val cal1 = Calendar.getInstance().apply { timeInMillis = time1 }
     val cal2 = Calendar.getInstance().apply { timeInMillis = time2 }
-    return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) && cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR) 
+    return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) && cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
 }
 
 fun getSmartEmoji(description: String, isIncome: Boolean = true): String {
@@ -128,7 +128,7 @@ fun getSmartEmoji(description: String, isIncome: Boolean = true): String {
                 else -> "👟" // Tenis / Zapatos por defecto
             }
         }
-        
+
         // --- ROPA Y VESTIMENTA ---
         listOf("camisa", "camiseta", "franela", "playera", "remera", "polo").any { d.contains(it) } -> "👕"
         listOf("pantalon", "pantalón", "jeans", "jean", "short", "bermuda").any { d.contains(it) } -> "👖"
@@ -168,7 +168,7 @@ fun getSmartEmoji(description: String, isIncome: Boolean = true): String {
         listOf("salario", "sueldo", "pago", "nomina", "nómina").any { d.contains(it) } -> "💵"
         listOf("negocio", "venta", "cliente", "producto").any { d.contains(it) } -> "📦"
         listOf("ahorro", "banco", "intereses", "nequi", "bancolombia", "daviplata").any { d.contains(it) } -> "🏦"
-        
+
         // --- TECNOLOGÍA ---
         listOf("celular", "telefono", "teléfono", "iphone", "samsung", "xiaomi").any { d.contains(it) } -> "📱"
         listOf("computador", "laptop", "pc").any { d.contains(it) } -> "💻"

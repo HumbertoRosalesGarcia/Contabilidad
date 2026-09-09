@@ -475,7 +475,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             )
             val id = dao.insertFiador(f).toInt()
             val remaining = totalAmount - paidAmount
-            val voiceText = "$name te debe ${remaining.toLong()} pesos"
+            val voiceText = createFiadorVoiceText(name, remaining, "Deuda retomada manualmente", true)
             scheduleNotification(context, f.targetDateInMillis, "¡Cobrar a $name! 💰", "Monto: ${formatCOP(remaining)}", id + 100000, "FIADOR_TRIGGER", voiceText)
             launch(Dispatchers.Main) { onResult("Deuda de $name restaurada correctamente ♻️") }
         }
@@ -547,13 +547,13 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     val comercioProducts: kotlinx.coroutines.flow.Flow<List<ComercioProduct>> = _selectedCountryFlow.flatMapLatest { dao.getAllComercioProducts(it) }
     val comercioMovements: kotlinx.coroutines.flow.Flow<List<ComercioMovement>> = _selectedCountryFlow.flatMapLatest { dao.getAllComercioMovements(it) }
 
-    
+
     fun addComercioPedido(name: String, imageUri: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.insertComercioPedido(ComercioPedido(name = name, imageUri = imageUri, country = selectedCountry))
         }
     }
-    
+
     fun updateComercioPedido(pedido: ComercioPedido) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.updateComercioPedido(pedido)
@@ -624,6 +624,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
             val noteText = if (customerName.isNotBlank()) "Cliente: $customerName | $paymentSummary" else paymentSummary
 
+            val currentTransactionId = java.util.UUID.randomUUID().toString()
             for (item in items) {
                 val p = item.first
                 val q = item.second
@@ -642,7 +643,8 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     total = q * sp,
                     note = noteText,
                     timestamp = saleTimestamp,
-                    country = selectedCountry
+                    country = selectedCountry,
+                    transactionId = currentTransactionId
                 ))
             }
 
@@ -671,7 +673,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 )).toInt()
 
                 if (context != null && targetDate > 0) {
-                    val voiceText = "$fiadorName te debe ${remainingDebt.toLong()} pesos por la deuda de $productNames"
+                    val voiceText = createFiadorVoiceText(fiadorName, remainingDebt, productNames, true)
                     scheduleNotification(context, targetDate, "¡Cobrar a $fiadorName! 💰", "Monto: ${formatCOP(remainingDebt)} - $productNames", fiadorId + 100000, "FIADOR_TRIGGER", voiceText)
                 }
             }
@@ -709,7 +711,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
-    
+
     fun updateComercioProductStock(product: ComercioProduct, quantity: Double, newCost: Double, note: String = "Reabastecimiento", context: Context? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             val totalOldCost = product.quantityInStock * product.costPerUnit

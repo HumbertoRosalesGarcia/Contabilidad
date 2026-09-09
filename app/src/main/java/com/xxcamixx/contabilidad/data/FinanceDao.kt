@@ -61,7 +61,7 @@ interface FinanceDao {
     @Insert suspend fun insertComercioPedido(pedido: ComercioPedido): Long
     @Update suspend fun updateComercioPedido(pedido: ComercioPedido)
     @Delete suspend fun deleteComercioPedido(pedido: ComercioPedido)
-    
+
     @Query("SELECT * FROM comercio_pedidos ORDER BY timestamp DESC")
     suspend fun getBackupComercioPedidos(): List<ComercioPedido>
 

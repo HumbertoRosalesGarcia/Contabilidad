@@ -14,5 +14,6 @@ data class ComercioMovement(
     val total: Double,
     val note: String = "",
     val country: String = "Colombia",
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val transactionId: String? = null
 )

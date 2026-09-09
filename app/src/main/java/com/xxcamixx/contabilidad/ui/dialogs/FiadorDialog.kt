@@ -32,6 +32,18 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Box
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,6 +124,9 @@ fun FiadorDialog(
                     Button(onClick = { activeScreen = "EDIT_INFO" }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("\uD83D\uDCDD Información del Fiador") }
                     Button(onClick = { isEditDateOnly = true; showDatePicker = true }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("\uD83D\uDCC5 Fecha de Cobro") }
                     Button(onClick = { activeScreen = "EDIT_TIME" }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Text("⏰ Hora de Cobro") }
+                    if (initialFiador != null && (initialFiador.amount - initialFiador.paidAmount > 0)) {
+                        Button(onClick = { onConfirmEdit(initialFiador, System.currentTimeMillis() + 86400000L) }, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))) { Text("⏳ Aplazar Deuda (24h)") }
+                    }
                 }
             },
             confirmButton = {},
@@ -132,7 +147,31 @@ fun FiadorDialog(
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text("Deuda Total: ${formatCOP(initialFiador.amount)}", fontWeight = FontWeight.Bold)
                     Text("Abonado hasta ahora: ${formatCOP(initialFiador.paidAmount)}", color = Color(0xFF2196F3))
-                    Text("Resta por pagar: ${formatCOP(remaining)}", color = Color.Red, fontWeight = FontWeight.Bold)
+
+                    val infiniteTransition = rememberInfiniteTransition()
+                    val scale by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 1.05f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(800, easing = FastOutSlowInEasing),
+                            repeatMode = RepeatMode.Reverse
+                        )
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 4.dp)
+                            .scale(scale)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Red.copy(alpha = 0.1f))
+                            .clickable {
+                                // format remaining amount to string without decimals if possible, just the number
+                                abonoRaw = if (remaining % 1.0 == 0.0) remaining.toLong().toString() else remaining.toString()
+                            }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text("Resta por pagar: ${formatCOP(remaining)}", color = Color.Red, fontWeight = FontWeight.Bold)
+                    }
                     Spacer(modifier = Modifier.height(16.dp))
 
                     if (initialFiador.paymentHistory.isNotEmpty()) {
@@ -172,7 +211,13 @@ fun FiadorDialog(
                     }
                 }) { Text("Confirmar Abono") }
             },
-            dismissButton = { TextButton(onClick = { activeScreen = "EDIT_OPTIONS" }) { Text("Atrás") } }
+            dismissButton = {
+                Row {
+                    TextButton(onClick = { activeScreen = "EDIT_OPTIONS" }) { Text("Atrás") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(onClick = { onConfirmEdit(initialFiador, System.currentTimeMillis() + 86400000L) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))) { Text("⏳ Aplazar 24h") }
+                }
+            }
         )
     }
 

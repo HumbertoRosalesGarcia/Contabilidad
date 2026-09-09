@@ -354,6 +354,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var productToFullDelete by remember { mutableStateOf<Product?>(null) }
     var showLimitDialog by remember { mutableStateOf(false) }
     var showCalendarDialog by remember { mutableStateOf(false) }
+    var showAddEventSelectionDialog by remember { mutableStateOf(false) }
     var showSummaryDialog by remember { mutableStateOf(false) }
     var showDeleteHistoryConfirmDialog by remember { mutableStateOf(false) }
     var showResetProfitsDialog by remember { mutableStateOf(false) }
@@ -404,8 +405,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var currentUiTime by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(60000L); currentUiTime = System.currentTimeMillis() } }
 
-    val activeReminders = remember(currentTabReminders, currentUiTime) { currentTabReminders.filter { it.targetDateInMillis <= currentUiTime } }
-    val activeFiadores = remember(currentTabFiadores, currentUiTime) { currentTabFiadores.filter { it.targetDateInMillis <= currentUiTime } }
+    val allActiveReminders = remember(reminders, currentUiTime) { reminders.filter { it.targetDateInMillis <= currentUiTime } }
+    val allActiveFiadores = remember(fiadores, currentUiTime) { fiadores.filter { it.targetDateInMillis <= currentUiTime } }
 
     LaunchedEffect(customToastMessage ?: "") { if (customToastMessage != null) { delay(3000L); customToastMessage = null } }
     LaunchedEffect(undoMessage ?: "") { if (undoMessage != null) { delay(5000L); undoMessage = null; undoAction = null } }
@@ -638,7 +639,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 }
                             }
 
-                            activeFiadores.forEach { fiador ->
+                            val personalActiveFiadores = remember(allActiveFiadores) { allActiveFiadores.filter { it.originMode == "PERSONAL" || (it.originMode.isEmpty() && !it.isStore) } }
+                            personalActiveFiadores.forEach { fiador ->
                                 val remaining = fiador.amount - fiador.paidAmount
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFFBC02D), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { fiadorToEdit = fiador; showFiadorDialog = true }.padding(12.dp),
@@ -655,7 +657,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 }
                             }
 
-                            activeReminders.forEach { reminder ->
+                            val personalActiveReminders = remember(allActiveReminders) { allActiveReminders.filter { it.originMode == "PERSONAL" || (it.originMode.isEmpty() && !it.isStore) } }
+                            personalActiveReminders.forEach { reminder ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFF1976D2), RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).clickable { reminderToEdit = reminder; showReminderDialog = true }.padding(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -692,7 +695,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 }
                             }
                         }
-                    } else if (tab == 1) { ComercioScreen(viewModel, comercioPedidos, comercioProducts, comercioMovements, viewModel.selectedCountry, viewModel.bcvRate, onOpenHistory = { showComercioPedidosHistoryDialog = true }, showSearch = showComercioSearch, onToggleSearch = { showComercioSearch = !showComercioSearch }) } else {
+                    } else if (tab == 1) { ComercioScreen(viewModel, comercioPedidos, comercioProducts, comercioMovements, viewModel.selectedCountry, viewModel.bcvRate, onOpenHistory = { showComercioPedidosHistoryDialog = true }, showSearch = showComercioSearch, onToggleSearch = { showComercioSearch = !showComercioSearch }, onEditFiador = { fiadorToEdit = it; showFiadorDialog = true }) } else {
                         StoreScreen(
                             products = products,
                             transactions = transactions,
@@ -711,8 +714,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 else showPremiumToastMsg(context)
                             },
                             totalProfit = totalProfit,
-                            activeFiadores = activeFiadores,
-                            activeReminders = activeReminders,
+                            activeFiadores = allActiveFiadores.filter { it.originMode == "TIENDA" || (it.originMode.isEmpty() && it.isStore) },
+                            activeReminders = allActiveReminders.filter { it.originMode == "TIENDA" || (it.originMode.isEmpty() && it.isStore) },
                             onSettleFiador = { viewModel.deleteFiador(it, context) },
                             onEditFiador = { fiadorToEdit = it; showFiadorDialog = true },
                             onSettleReminder = { viewModel.deleteReminder(it, context) },
@@ -1227,13 +1230,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 onDayClick = { dayMillis, _ ->
                     preselectedDateForEvent = dayMillis
                     showCalendarDialog = false
-                    if (currentTab == 0) {
-                        showReminderDialog = true
-                    } else if (currentTab == 1) {
-                        showFiadorDialog = true
-                    } else if (currentTab == 2) {
-                        showFiadorDialog = true
-                    }
+                    showAddEventSelectionDialog = true
                 },
                 onViewReminders = {
                     showCalendarDialog = false
@@ -1242,6 +1239,30 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 onViewFiadores = {
                     showCalendarDialog = false
                     showFiadoresListDialog = true
+                }
+            )
+        }
+
+        if (showAddEventSelectionDialog) {
+            AlertDialog(
+                onDismissRequest = { showAddEventSelectionDialog = false; preselectedDateForEvent = null },
+                title = { Text("¿Qué deseas agregar?", fontWeight = FontWeight.Bold) },
+                text = { Text("Selecciona si deseas agregar una Deuda (para pagar) o un Deudor (para cobrar) en este día.") },
+                confirmButton = {
+                    Button(onClick = {
+                        showAddEventSelectionDialog = false
+                        showFiadorDialog = true
+                    }) {
+                        Text("Un Deudor (Cobrar)")
+                    }
+                },
+                dismissButton = {
+                    Button(onClick = {
+                        showAddEventSelectionDialog = false
+                        showReminderDialog = true
+                    }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)) {
+                        Text("Una Deuda (Pagar)")
+                    }
                 }
             )
         }
@@ -1656,7 +1677,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             com.xxcamixx.contabilidad.ui.dialogs.AddTransactionDialog(
                 categories = viewModel.customCategories.toList(),
                 onDismiss = { showAddDialog = false },
-                onConfirm = { desc, amount, isInc, note, method, cat, uri -> 
+                onConfirm = { desc, amount, isInc, note, method, cat, uri ->
                     viewModel.addTransaction(desc, amount, isInc, note, method, cat, uri)
                     showAddDialog = false
                 }

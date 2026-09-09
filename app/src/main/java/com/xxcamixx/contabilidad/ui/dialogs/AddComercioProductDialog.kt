@@ -54,7 +54,7 @@ fun AddComercioProductDialog(
     var costStr by remember { mutableStateOf("") }
     var salePriceStr by remember { mutableStateOf("") }
     var imageUri by remember { mutableStateOf<String?>(null) }
-    
+
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val scrollState = rememberScrollState()
@@ -312,11 +312,11 @@ fun AddComercioProductDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                
+
                 val q = quantityStr.toDoubleOrNull() ?: 0.0
                 val c = costStr.toDoubleOrNull() ?: 0.0
                 val sp = salePriceStr.toDoubleOrNull() ?: 0.0
-                
+
                 if (q > 0 && (c > 0 || sp > 0)) {
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),

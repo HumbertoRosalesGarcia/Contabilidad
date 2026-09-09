@@ -17,18 +17,18 @@ fun EditTransactionDialog(
     var isCash by remember { mutableStateOf(transaction.cashAmount > 0) }
     var isDigital by remember { mutableStateOf(transaction.digitalAmount > 0) }
 
-    // Si era mixto (ambos > 0) no se permite cambiar a un solo tipo fácilmente usando checkbox aquí, pero 
-    // asumiremos que el usuario usará radio buttons para pasarlo todo a Efectivo o todo a Digital, 
+    // Si era mixto (ambos > 0) no se permite cambiar a un solo tipo fácilmente usando checkbox aquí, pero
+    // asumiremos que el usuario usará radio buttons para pasarlo todo a Efectivo o todo a Digital,
     // y si era mixto inicialmente, lo dejamos mixto si no toca los radio buttons.
     // Para simplificar, usemos un estado: "Efectivo", "Digital", "Mixto".
-    var paymentType by remember { 
+    var paymentType by remember {
         mutableStateOf(
             when {
                 transaction.cashAmount > 0 && transaction.digitalAmount > 0 -> "Mixto"
                 transaction.digitalAmount > 0 -> "Digital"
                 else -> "Efectivo"
             }
-        ) 
+        )
     }
 
     AlertDialog(
@@ -58,10 +58,10 @@ fun EditTransactionDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { 
+                onClick = {
                     val newCash = paymentType == "Efectivo" || paymentType == "Mixto"
                     val newDigital = paymentType == "Digital" || paymentType == "Mixto"
-                    onConfirm(newCash, newDigital, note) 
+                    onConfirm(newCash, newDigital, note)
                 }
             ) {
                 Text("Guardar")

@@ -174,11 +174,13 @@ fun ComercioScreen(
     bcvRate: Double,
     onOpenHistory: () -> Unit = {},
     showSearch: Boolean = true,
-    onToggleSearch: () -> Unit = {}
+    onToggleSearch: () -> Unit = {},
+    onEditFiador: (com.xxcamixx.contabilidad.model.Fiador) -> Unit = {}
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     var searchQuery by remember { mutableStateOf("") }
+    val imageCache = remember { androidx.compose.runtime.mutableStateMapOf<String, android.graphics.Bitmap>() }
 
     fun matchesDateQuery(timestamp: Long, query: String): Boolean {
         if (query.isBlank()) return false
@@ -201,6 +203,7 @@ fun ComercioScreen(
     var expandedPedidos by remember { mutableStateOf(setOf<Int>()) }
     var expandedInvestedPedidos by remember { mutableStateOf(setOf<Int>()) }
     var expandedProfitProducts by remember { mutableStateOf(setOf<Int>()) }
+    var expandedVentas by remember { mutableStateOf(setOf<String>()) }
 
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
 
@@ -228,7 +231,7 @@ fun ComercioScreen(
     val totalInvested = remember(products) { products.sumOf { it.totalPurchased * it.costPerUnit } }
     val totalSold = remember(validMovements) { validMovements.filter { it.type == "VENTA" }.sumOf { it.total } }
     val totalProfit = remember(products) { products.sumOf { it.totalSold * (it.salePricePerUnit - it.costPerUnit) } }
-    
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
             Card(
@@ -355,7 +358,7 @@ fun ComercioScreen(
                     }
                 }
             }
-            
+
             // Selector elegante de Modos: Estantes / Ventas (Cada uno con el 50% de ancho)
             Row(
                 modifier = Modifier
@@ -388,7 +391,7 @@ fun ComercioScreen(
                     Text("🛍️ Ventas", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(6.dp))
 
             // Barra de Búsqueda elegante con Lupa
@@ -400,12 +403,12 @@ fun ComercioScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 4.dp, vertical = 2.dp),
-                        placeholder = { 
+                        placeholder = {
                             Text(
-                                "Búsqueda", 
-                                fontSize = 13.sp, 
-                                color = Color.Gray 
-                            ) 
+                                "Búsqueda",
+                                fontSize = 13.sp,
+                                color = Color.Gray
+                            )
                         },
                         leadingIcon = {
                             Icon(
@@ -551,7 +554,7 @@ fun ComercioScreen(
                             formatMoneyMain(p.costPerUnit, country).lowercase(Locale.getDefault()).contains(qLower)
                         }
                         val isExpanded = expandedPedidos.contains(pedido.id) || hasMatchingProduct
-                        
+
                         Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), elevation = CardDefaults.cardElevation(defaultElevation = if (isExpanded) 4.dp else 1.dp)) {
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Row(
@@ -564,16 +567,25 @@ fun ComercioScreen(
                                 ) {
                                     Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                                          if (pedido.imageUri != null) {
-                                             var bitmap by remember(pedido.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
-                                             LaunchedEffect(pedido.imageUri) {
-                                                 val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                     com.xxcamixx.contabilidad.util.loadBitmapFromUri(context, pedido.imageUri)
-                                                 }
-                                                 bitmap = b
-                                             }
-                                             if (bitmap != null) {
-                                                 Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape).clickable { expandedImageUri = pedido.imageUri }, contentScale = ContentScale.Crop)
+                                             val cachedBitmap = imageCache[pedido.imageUri]
+                                             if (cachedBitmap != null) {
+                                                 Image(bitmap = cachedBitmap.asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape).clickable { expandedImageUri = pedido.imageUri }, contentScale = ContentScale.Crop)
                                                  Spacer(modifier = Modifier.width(8.dp))
+                                             } else {
+                                                 var bitmap by remember(pedido.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                                                 LaunchedEffect(pedido.imageUri) {
+                                                     val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                         com.xxcamixx.contabilidad.util.loadBitmapFromUri(context, pedido.imageUri)
+                                                     }
+                                                     if (b != null) {
+                                                         imageCache[pedido.imageUri!!] = b
+                                                         bitmap = b
+                                                     }
+                                                 }
+                                                 if (bitmap != null) {
+                                                     Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = null, modifier = Modifier.size(40.dp).clip(CircleShape).clickable { expandedImageUri = pedido.imageUri }, contentScale = ContentScale.Crop)
+                                                     Spacer(modifier = Modifier.width(8.dp))
+                                                 }
                                              }
                                          } else {
                                              Text(getSmartEmoji(pedido.name, true), fontSize = 24.sp)
@@ -598,7 +610,7 @@ fun ComercioScreen(
                                          Icon(if (isExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, contentDescription = null)
                                      }
                                  }
-                                 
+
                                   if (isExpanded) {
                                       val displayedProducts = remember(pedidoProducts, qLower, country) {
                                           if (qLower.isBlank()) {
@@ -646,16 +658,10 @@ fun ComercioScreen(
                                                       verticalAlignment = Alignment.Top
                                                   ) {
                                                       if (p.imageUri != null) {
-                                                          var pbitmap by remember(p.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
-                                                          LaunchedEffect(p.imageUri) {
-                                                              val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                                  com.xxcamixx.contabilidad.util.loadBitmapFromUri(context, p.imageUri)
-                                                              }
-                                                              pbitmap = b
-                                                          }
-                                                          if (pbitmap != null) {
+                                                          val cachedBitmap = imageCache[p.imageUri]
+                                                          if (cachedBitmap != null) {
                                                               Image(
-                                                                  bitmap = pbitmap!!.asImageBitmap(),
+                                                                  bitmap = cachedBitmap.asImageBitmap(),
                                                                   contentDescription = null,
                                                                   modifier = Modifier
                                                                       .size(46.dp)
@@ -664,6 +670,29 @@ fun ComercioScreen(
                                                                   contentScale = ContentScale.Crop
                                                               )
                                                               Spacer(modifier = Modifier.width(8.dp))
+                                                          } else {
+                                                              var pbitmap by remember(p.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+                                                              LaunchedEffect(p.imageUri) {
+                                                                  val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                                      com.xxcamixx.contabilidad.util.loadBitmapFromUri(context, p.imageUri)
+                                                                  }
+                                                                  if (b != null) {
+                                                                      imageCache[p.imageUri!!] = b
+                                                                      pbitmap = b
+                                                                  }
+                                                              }
+                                                              if (pbitmap != null) {
+                                                                  Image(
+                                                                      bitmap = pbitmap!!.asImageBitmap(),
+                                                                      contentDescription = null,
+                                                                      modifier = Modifier
+                                                                          .size(46.dp)
+                                                                          .clip(RoundedCornerShape(8.dp))
+                                                                          .clickable { expandedImageUri = p.imageUri },
+                                                                      contentScale = ContentScale.Crop
+                                                                  )
+                                                                  Spacer(modifier = Modifier.width(8.dp))
+                                                              }
                                                           }
                                                       }
                                                       Column(modifier = Modifier.weight(1f)) {
@@ -684,7 +713,7 @@ fun ComercioScreen(
                                                                   color = if (available <= 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                                                               )
                                                           }
-                                                          
+
                                                           Spacer(modifier = Modifier.height(3.dp))
                                                           Row(verticalAlignment = Alignment.CenterVertically) {
                                                               Text("Costo: ", fontSize = 12.sp, color = Color.Gray)
@@ -694,7 +723,7 @@ fun ComercioScreen(
                                                           if (secCosto.isNotEmpty()) {
                                                               Text(secCosto, fontSize = 10.sp, color = Color.Gray)
                                                           }
-                                                          
+
                                                           Spacer(modifier = Modifier.height(2.dp))
                                                           Row(verticalAlignment = Alignment.CenterVertically) {
                                                               Text("Precio Venta: ", fontSize = 12.sp, color = Color(0xFF2196F3))
@@ -909,6 +938,10 @@ fun ComercioScreen(
                         }
                     }
 
+                    val groupedVentas = remember(filteredVentas) {
+                        filteredVentas.groupBy { it.transactionId ?: it.timestamp.toString() }
+                    }
+
                     val filteredDeudas = remember(deudasEnProceso, q, country) {
                         if (q.isBlank()) deudasEnProceso
                         else deudasEnProceso.filter { f ->
@@ -981,7 +1014,8 @@ fun ComercioScreen(
                                     Card(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(vertical = 4.dp),
+                                            .padding(vertical = 4.dp)
+                                            .clickable { onEditFiador(f) },
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB300).copy(alpha = 0.5f))
                                     ) {
@@ -1049,7 +1083,7 @@ fun ComercioScreen(
                             }
 
                             // Luego las ventas realizadas
-                            if (showVentas && filteredVentas.isNotEmpty()) {
+                            if (showVentas && groupedVentas.isNotEmpty()) {
                                 if (showDeudas && filteredDeudas.isNotEmpty()) {
                                     item {
                                         Spacer(Modifier.height(8.dp))
@@ -1068,57 +1102,98 @@ fun ComercioScreen(
                                         }
                                     }
                                 }
-                                items(filteredVentas) { m ->
-                                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                                                Box(
+                                groupedVentas.entries.forEachIndexed { index, entry ->
+                                    val groupId = entry.key
+                                    val groupItems = entry.value
+                                    val isExpanded = expandedVentas.contains(groupId)
+                                    val groupTotal = groupItems.sumOf { it.total }
+                                    val firstItem = groupItems.first()
+                                    val dateStr = formatDateOnly(firstItem.timestamp)
+
+                                    // Determinar nombre del cliente a partir de la nota (Cliente: nombre | ...)
+                                    val noteRegex = Regex("Cliente: ([^|]+)")
+                                    val match = noteRegex.find(firstItem.note)
+                                    val clientName = match?.groups?.get(1)?.value?.trim()
+
+                                    val headerTitle = if (clientName != null) "Venta: $clientName" else "Venta #${groupedVentas.size - index}"
+
+                                    item {
+                                        Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                            Column {
+                                                Row(
                                                     modifier = Modifier
-                                                        .size(38.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color(0xFF2196F3).copy(alpha = 0.15f)),
-                                                    contentAlignment = Alignment.Center
+                                                        .fillMaxWidth()
+                                                        .clickable {
+                                                            expandedVentas = if (isExpanded) expandedVentas - groupId else expandedVentas + groupId
+                                                        }
+                                                        .padding(12.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    Icon(
-                                                        Icons.Filled.ShoppingCart,
-                                                        contentDescription = null,
-                                                        tint = Color(0xFF2196F3),
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                Column {
-                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                        Text("${m.productName} (${formatQty(m.quantity)})", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                                        Surface(
-                                                            color = Color(0xFF4CAF50).copy(alpha = 0.15f),
-                                                            shape = RoundedCornerShape(4.dp)
+                                                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(38.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color(0xFF2196F3).copy(alpha = 0.15f)),
+                                                            contentAlignment = Alignment.Center
                                                         ) {
-                                                            Text(
-                                                                "Realizada",
-                                                                color = Color(0xFF2E7D32),
-                                                                fontSize = 9.sp,
-                                                                fontWeight = FontWeight.Bold,
-                                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                            Icon(
+                                                                Icons.Filled.ShoppingCart,
+                                                                contentDescription = null,
+                                                                tint = Color(0xFF2196F3),
+                                                                modifier = Modifier.size(18.dp)
                                                             )
                                                         }
+                                                        Spacer(modifier = Modifier.width(10.dp))
+                                                        Column {
+                                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                                Text(headerTitle, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                                Surface(
+                                                                    color = Color(0xFF4CAF50).copy(alpha = 0.15f),
+                                                                    shape = RoundedCornerShape(4.dp)
+                                                                ) {
+                                                                    Text(
+                                                                        "Realizada",
+                                                                        color = Color(0xFF2E7D32),
+                                                                        fontSize = 9.sp,
+                                                                        fontWeight = FontWeight.Bold,
+                                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                                    )
+                                                                }
+                                                            }
+                                                            Text(dateStr, fontSize = 10.sp, color = Color.Gray)
+                                                            if (groupItems.size > 1) {
+                                                                Text("${groupItems.size} productos", fontSize = 11.sp, color = Color.Gray)
+                                                            }
+                                                        }
                                                     }
-                                                    if (m.note.isNotEmpty()) {
-                                                        Text(m.note, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                                    Column(horizontalAlignment = Alignment.End) {
+                                                        Text(formatMoneyMain(groupTotal, country), fontWeight = FontWeight.Bold, color = Color(0xFF2196F3), fontSize = 14.sp)
+                                                        val secT = formatMoneySec(groupTotal, country, bcvRate)
+                                                        if (secT.isNotEmpty()) Text(secT, fontSize = 10.sp, color = Color.Gray)
                                                     }
-                                                    Text(formatDateOnly(m.timestamp), fontSize = 10.sp, color = Color.Gray)
                                                 }
-                                            }
-                                            Column(horizontalAlignment = Alignment.End) {
-                                                Text(formatMoneyMain(m.total, country), fontWeight = FontWeight.Bold, color = Color(0xFF2196F3), fontSize = 14.sp)
-                                                val secT = formatMoneySec(m.total, country, bcvRate)
-                                                if (secT.isNotEmpty()) Text(secT, fontSize = 10.sp, color = Color.Gray)
+
+                                                AnimatedVisibility(visible = isExpanded) {
+                                                    Column(modifier = Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.05f)).padding(12.dp)) {
+                                                        // Show the payment note from the first item
+                                                        if (firstItem.note.isNotEmpty()) {
+                                                            Text(firstItem.note, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(bottom = 8.dp))
+                                                        }
+
+                                                        groupItems.forEach { m ->
+                                                            Row(
+                                                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                Text("• ${m.productName} (${formatQty(m.quantity)})", fontSize = 13.sp)
+                                                                Text(formatMoneyMain(m.total, country), fontSize = 13.sp, color = Color.Gray)
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1167,7 +1242,7 @@ fun ComercioScreen(
                     items(pedidos) { pedido ->
                         val pedidoProducts = products.filter { it.pedidoId == pedido.id }
                         val pedidoCost = pedidoProducts.sumOf { it.totalPurchased * it.costPerUnit }
-                        
+
                         Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                             Text(pedido.name, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1220,7 +1295,7 @@ fun ComercioScreen(
                     items(pedidos) { pedido ->
                         val pedidoProducts = products.filter { it.pedidoId == pedido.id }
                         val pedidoSales = pedidoProducts.sumOf { it.totalSold * it.salePricePerUnit }
-                        
+
                         Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                             Text(pedido.name, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1908,7 +1983,7 @@ fun ComercioScreen(
                 onSelectFileManager = { filePickerLauncher.launch(arrayOf("image/*")) }
             )
         }
-        
+
         AlertDialog(
             onDismissRequest = { showAddPedidoDialog = false },
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
@@ -1970,7 +2045,7 @@ fun ComercioScreen(
                             }
                         }
                     }
-                    
+
                     OutlinedTextField(
                         value = newName,
                         onValueChange = { newName = it },
@@ -2028,7 +2103,7 @@ fun ComercioScreen(
         val totalCosto = q * p.costPerUnit
         val totalVenta = q * p.salePricePerUnit
         val totalGanancia = totalVenta - totalCosto
-        
+
         AlertDialog(
             onDismissRequest = { productToCart = null },
             properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
@@ -2059,7 +2134,7 @@ fun ComercioScreen(
                         Text("Disponible: ${formatQty(available)} ${p.unit}", fontSize = 12.sp, color = if (available <= 0) MaterialTheme.colorScheme.error else Color.Gray)
                         Text("Venta: ${formatMoneyMain(p.salePricePerUnit, country)} c/u", fontSize = 12.sp, color = Color(0xFF2196F3))
                     }
-                    
+
                     OutlinedTextField(
                         value = qtyStr,
                         onValueChange = { input ->

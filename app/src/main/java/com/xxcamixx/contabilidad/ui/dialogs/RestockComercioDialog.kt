@@ -26,7 +26,7 @@ fun RestockComercioDialog(
         text = {
             Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Stock actual: ${product.quantityInStock} ${product.unit}")
-                
+
                 OutlinedTextField(
                     value = quantityStr,
                     onValueChange = { quantityStr = cleanAmountInput(it) },
