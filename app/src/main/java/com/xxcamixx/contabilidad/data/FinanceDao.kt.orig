@@ -123,15 +123,6 @@ interface FinanceDao {
     @Query("SELECT * FROM comercio_movements WHERE country = :country AND cierreId IS NULL")
     fun getComercioMovementsWithoutCierre(country: String): Flow<List<ComercioMovement>>
 
-    @Query("SELECT * FROM transactions WHERE country = :country AND cierreId = :cierreId ORDER BY timestamp DESC")
-    fun getTransactionsByCierreId(country: String, cierreId: Int): Flow<List<Transaction>>
-
-    @Query("SELECT * FROM comercio_movements WHERE country = :country AND cierreId = :cierreId ORDER BY timestamp DESC")
-    fun getComercioMovementsByCierreId(country: String, cierreId: Int): Flow<List<ComercioMovement>>
-
-    @Query("SELECT * FROM fiadores WHERE country = :country AND cierreId = :cierreId ORDER BY targetDateInMillis ASC")
-    fun getFiadoresByCierreId(country: String, cierreId: Int): Flow<List<Fiador>>
-
     @Query("UPDATE transactions SET cierreId = :cierreId WHERE country = :country AND cierreId IS NULL AND description NOT LIKE 'Venta: %'")
     suspend fun updatePersonalTransactionsWithCierre(country: String, cierreId: Int)
 

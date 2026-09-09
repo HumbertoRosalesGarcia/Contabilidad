@@ -93,6 +93,18 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
+    fun getTransactionsForCierre(cierreId: Int): Flow<List<Transaction>> {
+        return dao.getTransactionsByCierreId(selectedCountry, cierreId)
+    }
+
+    fun getComercioMovementsForCierre(cierreId: Int): Flow<List<ComercioMovement>> {
+        return dao.getComercioMovementsByCierreId(selectedCountry, cierreId)
+    }
+
+    fun getFiadoresForCierre(cierreId: Int): Flow<List<Fiador>> {
+        return dao.getFiadoresByCierreId(selectedCountry, cierreId)
+    }
+
     fun deleteCierreSession(session: CierreSession) {
         viewModelScope.launch {
             dao.deleteCierreSession(session)
