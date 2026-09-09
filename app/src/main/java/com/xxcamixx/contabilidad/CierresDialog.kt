@@ -19,6 +19,8 @@ import com.xxcamixx.contabilidad.model.CierreSession
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.style.TextOverflow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,6 +39,8 @@ fun CierresDialog(
     // to show in an alternate section.
     val fiadores by viewModel.fiadores.collectAsState(initial = emptyList())
     var currentTab by remember { mutableStateOf(0) } // 0 = Cierres, 1 = Deudas Pendientes
+
+    var selectedCierre by remember { mutableStateOf<CierreSession?>(null) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -61,28 +65,30 @@ fun CierresDialog(
                 }
 
                 if (currentTab == 0) {
-                    // Botones para generar nuevos cierres
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        Button(onClick = {
+                    // Pestañas para generar nuevos cierres
+                    var modeTab by remember { mutableStateOf(-1) }
+
+                    TabRow(selectedTabIndex = if (modeTab == -1) 0 else modeTab, modifier = Modifier.padding(top = 16.dp)) {
+                        Tab(selected = modeTab == 0, onClick = {
+                            modeTab = 0
                             modeToClose = "PERSONAL"
                             nameForCierre = "Cierre Personal - " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
                             showConfirmation = true
-                        }) { Text("Personal") }
-                        Button(onClick = {
+                        }, text = { Text("Personal", maxLines = 1, overflow = TextOverflow.Ellipsis) })
+
+                        Tab(selected = modeTab == 1, onClick = {
+                            modeTab = 1
                             modeToClose = "PEDIDOS"
                             nameForCierre = "Cierre Pedidos - " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
                             showConfirmation = true
-                        }) { Text("Pedidos") }
-                        Button(onClick = {
+                        }, text = { Text("Pedidos", maxLines = 1, overflow = TextOverflow.Ellipsis) })
+
+                        Tab(selected = modeTab == 2, onClick = {
+                            modeTab = 2
                             modeToClose = "TIENDA"
                             nameForCierre = "Cierre Tienda - " + SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
                             showConfirmation = true
-                        }) { Text("Tienda") }
+                        }, text = { Text("Tienda", maxLines = 1, overflow = TextOverflow.Ellipsis) })
                     }
 
                     Divider()
@@ -92,7 +98,7 @@ fun CierresDialog(
 
                     LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f).padding(horizontal = 16.dp)) {
                         items(cierres) { cierre ->
-                            CierreItem(cierre = cierre, onDelete = { viewModel.deleteCierreSession(cierre) })
+                            CierreItem(cierre = cierre, onDelete = { viewModel.deleteCierreSession(cierre) }, onClick = { selectedCierre = cierre })
                         }
                     }
                 } else {
@@ -143,28 +149,108 @@ fun CierresDialog(
             }
         )
     }
+
+    if (selectedCierre != null) {
+        CierreDetailsDialog(
+            cierre = selectedCierre!!,
+            onDismiss = { selectedCierre = null },
+            viewModel = viewModel
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CierreDetailsDialog(
+    cierre: CierreSession,
+    onDismiss: () -> Unit,
+    viewModel: com.xxcamixx.contabilidad.viewmodel.FinanceViewModel
+) {
+    val formatter = NumberFormat.getCurrencyInstance(Locale("es", "CO"))
+    val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Detalles del Cierre", style = MaterialTheme.typography.titleLarge)
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar") }
+                }
+                Text("Nombre: ${cierre.name}", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+                Text("Modo: ${cierre.mode}")
+                Text("Fecha: ${sdf.format(Date(cierre.timestamp))}")
+
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                if (cierre.mode == "PERSONAL" || cierre.mode == "TIENDA") {
+                    val transactions by viewModel.getTransactionsForCierre(cierre.id).collectAsState(initial = emptyList())
+                    val incomes = transactions.filter { it.isIncome }.sumOf { it.amount }
+                    val expenses = transactions.filter { !it.isIncome }.sumOf { it.amount }
+
+                    Text("Total Ingresos: ${formatter.format(incomes)}", fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                    Text("Total Egresos: ${formatter.format(expenses)}", fontWeight = FontWeight.Bold, color = Color.Red)
+
+                    Divider(modifier = Modifier.padding(vertical = 8.dp))
+                    Text("Transacciones:", fontWeight = FontWeight.Bold)
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        items(transactions) { t ->
+                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Text(t.description, fontWeight = FontWeight.Bold)
+                                    Text("Monto: ${formatter.format(t.amount)}", color = if (t.isIncome) Color(0xFF4CAF50) else Color.Red)
+                                    if (t.note.isNotBlank()) Text("Nota: ${t.note}", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                } else if (cierre.mode == "PEDIDOS") {
+                    val movements by viewModel.getComercioMovementsForCierre(cierre.id).collectAsState(initial = emptyList())
+                    Text("Movimientos de Pedidos:", fontWeight = FontWeight.Bold)
+                    LazyColumn(modifier = Modifier.weight(1f)) {
+                        items(movements) { m ->
+                            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Text(if (m.type == "IN") "Entrada: ${m.quantity}" else "Salida: ${m.quantity}", fontWeight = FontWeight.Bold, color = if (m.type == "IN") Color(0xFF4CAF50) else Color.Red)
+                                    if (m.note.isNotBlank()) Text("Nota: ${m.note}", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
-fun CierreItem(cierre: CierreSession, onDelete: () -> Unit) {
+fun CierreItem(cierre: CierreSession, onDelete: () -> Unit, onClick: () -> Unit = {}) {
     val formatter = NumberFormat.getCurrencyInstance(Locale("es", "CO"))
     val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 4.dp)
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(cierre.name, fontWeight = FontWeight.Bold)
+                Text(cierre.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 TextButton(onClick = onDelete) {
-                    Text("Eliminar", color = Color.Red)
+                    Text("Eliminar", color = Color.Red, maxLines = 1, softWrap = false)
                 }
             }
             Text("Modo: ${cierre.mode}")
