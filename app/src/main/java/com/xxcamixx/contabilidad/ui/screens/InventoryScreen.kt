@@ -63,7 +63,7 @@ fun InventoryScreen(
     bcvRate: Double,
     categories: List<String>,
     onBack: () -> Unit,
-    onAddProductClick: () -> Unit,
+    onAddProductClick: (String?) -> Unit,
     onAddToCartClick: (Product) -> Unit,
     onOpenCheckout: () -> Unit,
     onEditClick: (Product) -> Unit,
@@ -166,7 +166,7 @@ fun InventoryScreen(
                 }
             }
         }
-        FloatingActionButton(onClick = { focusManager.clearFocus(); onAddProductClick() }, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = 16.dp)) { Icon(Icons.Filled.Add, contentDescription = "Agregar Producto") }
+        FloatingActionButton(onClick = { focusManager.clearFocus(); onAddProductClick(selectedCategory) }, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = 16.dp)) { Icon(Icons.Filled.Add, contentDescription = "Agregar Producto") }
 
         if (expandedImageUri != null) { ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null }) }
     }

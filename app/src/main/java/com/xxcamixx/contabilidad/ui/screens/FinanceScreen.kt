@@ -616,9 +616,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     bcvRate = viewModel.bcvRate,
                     categories = viewModel.customStoreCategories.toList(),
                     onBack = { showInventoryScreen = false },
-                    onAddProductClick = {
+                    onAddProductClick = { selectedCat ->
                         productToEdit = null
                         productDraftState.clear()
+                        productDraftState.category = selectedCat
                         showAddProductDialog = true
                     },
                     onAddToCartClick = { productToAddToCart = it },
