@@ -78,7 +78,7 @@ class ReminderReceiver : BroadcastReceiver() {
                                 val userPrefs = context.getSharedPreferences("FinancePrefs_$userId", Context.MODE_PRIVATE)
                                 val useVoice = userPrefs.getBoolean("voiceEnabled", false)
 
-                                if (useVoice) {
+                                if (!useVoice) {
                                     AppVoice.speak(context, "Nuevo mensaje de $notificationSender. $notificationMsg")
                                 } else {
                                     AppSounds.init()
@@ -117,7 +117,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 customSound = userPrefs.getString("customSoundUri", "") ?: ""
             }
 
-            if (useVoice) {
+            if (!useVoice) {
                 // Selecciona el texto fantasma (fluido) o el normal (si es otra notificación)
                 val textToSpeak = voiceText ?: "$notifTitle. $notifText"
                 // Limpieza rápida extra para que no diga "punto" en notificaciones normales

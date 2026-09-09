@@ -33,7 +33,7 @@ fun showChatNotification(context: Context, title: String, text: String) {
         useVoice = userPrefs.getBoolean("voiceEnabled", false)
     }
 
-    if (useVoice) {
+    if (!useVoice) {
         AppVoice.speak(context, "$title... $text")
     } else {
         AppSounds.play(context, "")
