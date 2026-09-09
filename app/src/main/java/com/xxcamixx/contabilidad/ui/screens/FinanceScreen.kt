@@ -1716,5 +1716,14 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 onRemove = { viewModel.removeStoreCategory(it) }
             )
         }
+
+        if (showManageCategoriesDialog) {
+            com.xxcamixx.contabilidad.ui.dialogs.ManageCategoriesDialog(
+                categories = viewModel.customCategories,
+                onDismiss = { showManageCategoriesDialog = false },
+                onAdd = { viewModel.addCategory(it) },
+                onRemove = { viewModel.removeCategory(it) }
+            )
+        }
     }
 }
