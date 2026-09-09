@@ -15,5 +15,6 @@ data class Product(
     val entryDateInMillis: Long = System.currentTimeMillis(),
     val minStock: Int = 0,
     val imageUri: String? = null,
-    val country: String = "Colombia"
+    val country: String = "Colombia",
+    val category: String? = null
 )

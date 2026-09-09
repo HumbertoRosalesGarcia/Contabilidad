@@ -178,6 +178,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     // --- NUEVO: ESTADO CATEGORÍAS Y FOTO ---
     var showManageCategoriesDialog by remember { mutableStateOf(false) }
+    var showManageStoreCategoriesDialog by remember { mutableStateOf(false) }
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
 
     // --- NUEVO: MODALES DE DESGLOSE DE GASTOS E INGRESOS ---
@@ -496,6 +497,9 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             if (currentTab == 0) {
                                 DropdownMenuItem(text = { Text("🏷️ Gestionar Categorías") }, onClick = { showManageCategoriesDialog = true; showMenu = false })
                                 Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
+                            } else if (currentTab == 2) {
+                                DropdownMenuItem(text = { Text("🏷️ Gestionar Categorías (Tienda)") }, onClick = { showManageStoreCategoriesDialog = true; showMenu = false })
+                                Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
                             }
 
                             if (currentTab == 0) { DropdownMenuItem(text = { Text("⚠️ Borrar Historial", color = Color(0xFFE53935)) }, onClick = { showDeleteHistoryConfirmDialog = true; showMenu = false }) }
@@ -610,6 +614,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     shoppingCart = shoppingCart,
                     selectedCountry = viewModel.selectedCountry,
                     bcvRate = viewModel.bcvRate,
+                    categories = viewModel.customStoreCategories.toList(),
                     onBack = { showInventoryScreen = false },
                     onAddProductClick = {
                         productToEdit = null
@@ -973,6 +978,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 draftState = productDraftState,
                 selectedCountry = viewModel.selectedCountry,
                 bcvRate = viewModel.bcvRate,
+                categories = viewModel.customStoreCategories.toList(),
                 onDismiss = {
                     showAddProductDialog = false
                     productDraftState.clear()
@@ -993,6 +999,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             expirationDateInMillis = expDate,
                             minStock = minStock,
                             imageUri = productDraftState.imageUri,
+                            category = productDraftState.category,
                             context = context,
                             onConfigured = { msg -> customToastMessage = msg }
                         )
@@ -1006,7 +1013,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 unit = productDraftState.selectedUnit,
                                 expirationDateInMillis = expDate,
                                 minStock = minStock,
-                                imageUri = productDraftState.imageUri
+                                imageUri = productDraftState.imageUri,
+                                category = productDraftState.category
                             ),
                             context = context,
                             onConfigured = { msg -> customToastMessage = msg }
@@ -1697,6 +1705,15 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             CierresDialog(
                 onDismiss = { showCierresDialog = false },
                 viewModel = viewModel
+            )
+        }
+
+        if (showManageStoreCategoriesDialog) {
+            com.xxcamixx.contabilidad.ui.dialogs.ManageCategoriesDialog(
+                categories = viewModel.customStoreCategories,
+                onDismiss = { showManageStoreCategoriesDialog = false },
+                onAdd = { viewModel.addStoreCategory(it) },
+                onRemove = { viewModel.removeStoreCategory(it) }
             )
         }
     }

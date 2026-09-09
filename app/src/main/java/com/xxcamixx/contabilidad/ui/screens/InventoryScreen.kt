@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -59,6 +61,7 @@ fun InventoryScreen(
     shoppingCart: List<Pair<Product, Int>>,
     selectedCountry: String,
     bcvRate: Double,
+    categories: List<String>,
     onBack: () -> Unit,
     onAddProductClick: () -> Unit,
     onAddToCartClick: (Product) -> Unit,
@@ -71,6 +74,7 @@ fun InventoryScreen(
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf("A-Z") }
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
 
     val focusManager = LocalFocusManager.current
     LaunchedEffect(Unit) { focusManager.clearFocus() }
@@ -111,8 +115,30 @@ fun InventoryScreen(
                 }
             }
 
-            val sortedProducts = remember(products, searchQuery, sortBy) {
-                val filtered = products.filter { it.name.contains(searchQuery, ignoreCase = true) }
+            if (categories.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item {
+                        FilterChip(
+                            selected = selectedCategory == null,
+                            onClick = { selectedCategory = null },
+                            label = { Text("Todas") }
+                        )
+                    }
+                    items(categories) { cat ->
+                        FilterChip(
+                            selected = selectedCategory == cat,
+                            onClick = { selectedCategory = cat },
+                            label = { Text(cat) }
+                        )
+                    }
+                }
+            }
+
+            val sortedProducts = remember(products, searchQuery, sortBy, selectedCategory) {
+                val filtered = products.filter { it.name.contains(searchQuery, ignoreCase = true) && (selectedCategory == null || it.category == selectedCategory) }
                 when (sortBy) {
                     "A-Z" -> filtered.sortedBy { it.name.lowercase(Locale.getDefault()) }
                     "Precio" -> filtered.sortedByDescending { it.price }

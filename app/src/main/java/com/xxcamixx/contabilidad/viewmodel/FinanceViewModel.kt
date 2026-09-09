@@ -134,6 +134,20 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         customCategories = updated
         userPrefs.edit().putStringSet("customCategories", updated.toSet()).apply()
     }
+
+    var customStoreCategories by mutableStateOf(userPrefs.getStringSet("customStoreCategories", setOf("Bebidas", "Snacks", "Limpieza", "Otros"))!!.toList())
+        private set
+
+    fun addStoreCategory(cat: String) {
+        val updated = (customStoreCategories + cat).distinct()
+        customStoreCategories = updated
+        userPrefs.edit().putStringSet("customStoreCategories", updated.toSet()).apply()
+    }
+    fun removeStoreCategory(cat: String) {
+        val updated = customStoreCategories - cat
+        customStoreCategories = updated
+        userPrefs.edit().putStringSet("customStoreCategories", updated.toSet()).apply()
+    }
     // ------------------------------------
 
     var bcvRate by mutableStateOf(userPrefs.getFloat("bcvRate", 0f).toDouble())
@@ -364,7 +378,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     fun deletePersonalTransactions() { viewModelScope.launch { dao.deletePersonalTransactions(selectedCountry) } }
     fun resetAllProfits() { viewModelScope.launch { dao.resetAllProfits(selectedCountry) }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
 
-    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri, country = selectedCountry)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(context, touchSoundUri) }
+    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, category: String?, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri, country = selectedCountry, category = category)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(context, touchSoundUri) }
     fun editProduct(product: Product, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateProduct(product); cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER"); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto actualizado") }; AppSounds.play(context, touchSoundUri) }
     fun deleteProductEntirely(product: Product, context: Context) { viewModelScope.launch { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") }; AppSounds.play(context, touchSoundUri) }
 

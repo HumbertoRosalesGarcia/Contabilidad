@@ -16,6 +16,7 @@ class ProductDraftState {
     var hasExpiry by mutableStateOf(false)
     var expiryDateMillis by mutableStateOf<Long?>(null)
     var imageUri by mutableStateOf<String?>(null)
+    var category by mutableStateOf<String?>(null)
 
     fun clear() {
         name = ""
@@ -27,6 +28,7 @@ class ProductDraftState {
         hasExpiry = false
         expiryDateMillis = null
         imageUri = null
+        category = null
     }
 
     fun loadFrom(product: Product) {
@@ -53,5 +55,6 @@ class ProductDraftState {
         hasExpiry = product.expirationDateInMillis != null
         expiryDateMillis = product.expirationDateInMillis
         imageUri = product.imageUri
+        category = product.category
     }
 }

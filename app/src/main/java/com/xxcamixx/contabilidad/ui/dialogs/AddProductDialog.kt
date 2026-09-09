@@ -44,7 +44,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selectedCountry: String, bcvRate: Double, onDismiss: () -> Unit, onConfirm: (Double, Double) -> Unit) {
+fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selectedCountry: String, bcvRate: Double, categories: List<String>, onDismiss: () -> Unit, onConfirm: (Double, Double) -> Unit) {
     val context = LocalContext.current
     var showDatePicker by remember { mutableStateOf(false) }
     var inputCurrency by remember { mutableStateOf("USD") }
@@ -108,6 +108,34 @@ fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selecte
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(value = draftState.name, onValueChange = { input -> draftState.name = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nombre del Producto") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
                 Spacer(modifier = Modifier.height(16.dp))
+
+                if (categories.isNotEmpty()) {
+                    var expandedCat by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = expandedCat,
+                        onExpandedChange = { expandedCat = !expandedCat }
+                    ) {
+                        OutlinedTextField(
+                            value = draftState.category ?: "Sin Categoría",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Categoría") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedCat) },
+                            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                            modifier = Modifier.fillMaxWidth().menuAnchor()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = expandedCat,
+                            onDismissRequest = { expandedCat = false }
+                        ) {
+                            DropdownMenuItem(text = { Text("Sin Categoría") }, onClick = { draftState.category = null; expandedCat = false })
+                            categories.forEach { cat ->
+                                DropdownMenuItem(text = { Text(cat) }, onClick = { draftState.category = cat; expandedCat = false })
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
 
                 if (selectedCountry == "Venezuela") {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
