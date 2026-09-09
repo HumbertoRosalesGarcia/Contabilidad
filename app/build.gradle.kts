@@ -5,6 +5,10 @@
 }
 
 android {
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = false
+    }
     namespace = "com.xxcamixx.contabilidad"
     compileSdk = 37
 

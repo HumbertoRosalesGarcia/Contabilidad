@@ -36,8 +36,17 @@
             android:enabled="true"
             android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="com.xxcamixx.contabilidad.CHAT_SYNC" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="com.xxcamixx.contabilidad.receiver.BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 
