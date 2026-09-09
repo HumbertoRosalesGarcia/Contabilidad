@@ -151,6 +151,15 @@ fun ProductItem(
                         overflow = TextOverflow.Ellipsis
                     )
 
+                    if (product.category != null) {
+                        Text(
+                            text = product.category,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
                     // Badges de alerta si corresponde
                     if (isExpired || isOutOfStock || isLowStock) {
                         Row(
