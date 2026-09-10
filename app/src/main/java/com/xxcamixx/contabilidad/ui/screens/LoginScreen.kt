@@ -54,12 +54,22 @@ import java.util.Locale
 import java.util.UUID
 
 @SuppressLint("ContextGetResource", "DiscouragedApi")
+private data class AuthenticatedUserData(
+    val displayName: String,
+    val userId: String,
+    val role: String,
+    val consumedSeconds: Long,
+    val planDuration: Long
+)
+
+@SuppressLint("ContextGetResource", "DiscouragedApi")
 @Composable
 fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
     var isLoading by remember { mutableStateOf(false) }
+    var authenticatedUser by remember { mutableStateOf<AuthenticatedUserData?>(null) }
 
     // SOLUCIÓN ERROR 1: Extraemos el valor del stringResource fuera del onClick para respetar el entorno Composable
     val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
@@ -76,6 +86,61 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
 
             if (isLoading) {
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            } else if (authenticatedUser != null) {
+                val user = authenticatedUser!!
+                Text("Hola, ${user.displayName}", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onBackground)
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Button(
+                    onClick = {
+                        Toast.makeText(context, "Usted se encuentra bajo el PLAN ${user.role}, Bienvenido", Toast.LENGTH_LONG).show()
+                        onLoginSuccess(user.displayName, user.userId, user.role, user.consumedSeconds, user.planDuration)
+                    },
+                    modifier = Modifier.fillMaxWidth(0.8f).height(50.dp)
+                ) {
+                    Text("Continuar con mi usuario", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                Divider(color = Color.Gray.copy(alpha = 0.2f), modifier = Modifier.fillMaxWidth(0.8f))
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        isLoading = true
+                        coroutineScope.launch(Dispatchers.IO) {
+                            val authPrefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
+                            var guestId = authPrefs.getString("trialGuestId", null)
+                            if (guestId == null) {
+                                val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: UUID.randomUUID().toString().substring(0, 8)
+                                guestId = "dispositivo_$androidId"
+                                authPrefs.edit().putString("trialGuestId", guestId).apply()
+                            }
+                            try {
+                                RetrofitInstance.api.syncUser(UserSyncRequest(email = guestId, name = "Usuario de Prueba"))
+                                RetrofitInstance.api.manageUser(UserManageRequest(guestId, "setRole", "Invitado-Gold", 86400L))
+                                launch(Dispatchers.Main) {
+                                    Toast.makeText(context, "Modo Invitado-Gold Activado ⏳", Toast.LENGTH_LONG).show()
+                                    onLoginSuccess("Usuario de Prueba", guestId, "Invitado-Gold", 0L, 86400L)
+                                }
+                            } catch (e: Exception) {
+                                launch(Dispatchers.Main) {
+                                    Toast.makeText(context, "Modo Invitado-Gold Local (Sin conexión) ⏳", Toast.LENGTH_LONG).show()
+                                    onLoginSuccess("Usuario de Prueba", guestId, "Invitado-Gold", 0L, 86400L)
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(0.8f).height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)
+                ) {
+                    Text("Prueba 1 día gratis 🌟", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                TextButton(onClick = { authenticatedUser = null }) {
+                    Text("Volver", color = Color.Gray)
+                }
             } else {
                 Button(
                     onClick = {
@@ -104,14 +169,13 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
                                             isLoading = false
                                             Toast.makeText(context, "🚫 Tu cuenta está bloqueada o vencida.", Toast.LENGTH_LONG).show()
                                         } else {
-                                            Toast.makeText(context, "Usted se encuentra bajo el PLAN $finalRole, Bienvenido", Toast.LENGTH_LONG).show()
-                                            onLoginSuccess(displayName, userId, finalRole, response.consumedSeconds, response.planDuration)
+                                            authenticatedUser = AuthenticatedUserData(displayName, userId, finalRole, response.consumedSeconds, response.planDuration)
                                         }
                                     } catch (_: Exception) {
                                         val fallbackRole = if (isSuperAdmin) "ADMIN" else "BÁSICO"
-                                        Toast.makeText(context, "Modo sin conexión activado. Usted se encuentra bajo el PLAN $fallbackRole, Bienvenido", Toast.LENGTH_LONG).show()
-                                        onLoginSuccess(displayName, userId, fallbackRole, 0L, 2592000L)
+                                        authenticatedUser = AuthenticatedUserData(displayName, userId, fallbackRole, 0L, 2592000L)
                                     }
+                                    isLoading = false
                                 } else {
                                     isLoading = false
                                     Toast.makeText(context, "Error al procesar la credencial", Toast.LENGTH_SHORT).show()
@@ -145,46 +209,7 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
-                Divider(color = Color.Gray.copy(alpha = 0.2f), modifier = Modifier.fillMaxWidth(0.8f))
-                Spacer(modifier = Modifier.height(16.dp))
 
-                // BOTÓN DE INVITADO GOLD
-                // BOTÓN DE INVITADO GOLD
-                Button(
-                    onClick = {
-                        isLoading = true
-                        coroutineScope.launch(Dispatchers.IO) {
-                            val authPrefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
-                            var guestId = authPrefs.getString("trialGuestId", null)
-                            if (guestId == null) {
-                                // NUEVO: Vinculamos la prueba al identificador físico del hardware del teléfono.
-                                // Aunque desinstale la app o borre datos, será el mismo usuario y el tiempo no se reiniciará.
-                                val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: UUID.randomUUID().toString().substring(0, 8)
-                                guestId = "dispositivo_$androidId"
-                                authPrefs.edit().putString("trialGuestId", guestId).apply()
-                            }
-                            try {
-                                RetrofitInstance.api.syncUser(UserSyncRequest(email = guestId, name = "Usuario de Prueba"))
-                                RetrofitInstance.api.manageUser(UserManageRequest(guestId, "setRole", "Invitado-Gold", 86400L))
-                                launch(Dispatchers.Main) {
-                                    Toast.makeText(context, "Modo Invitado-Gold Activado ⏳", Toast.LENGTH_LONG).show()
-                                    onLoginSuccess("Usuario de Prueba", guestId, "Invitado-Gold", 0L, 86400L)
-                                }
-                            } catch (e: Exception) {
-                                launch(Dispatchers.Main) {
-                                    Toast.makeText(context, "Modo Invitado-Gold Local (Sin conexión) ⏳", Toast.LENGTH_LONG).show()
-                                    onLoginSuccess("Usuario de Prueba", guestId, "Invitado-Gold", 0L, 86400L)
-                                }
-                            }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(0.8f).height(50.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)
-                ) {
-                    Text("Prueba 1 día gratis 🌟", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
                 TextButton(
                     onClick = {
                         try {
