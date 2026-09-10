@@ -251,7 +251,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 }
 
                 // NUEVO: Alerta obligatoria de 24 horas para membresías activas
-                if (currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA" && currentRole != "PRUEBA" && currentRole != "Invitado-Gold") {
+                val roleUpper = currentRole.uppercase()
+                if (roleUpper != "INVITADO" && roleUpper != "INVITADO_PRUEBA" && roleUpper != "PRUEBA" && roleUpper != "INVITADO-GOLD" && roleUpper != "GOLD") {
                     if (timeLeftSecs in 1..86400 && !hasShown24hWarning) {
                         show24hWarningModal = true
                         authPrefs.edit().putBoolean("hasShown24hWarning_${viewModel.userId}", true).apply()
@@ -1792,9 +1793,10 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     Column {
                         Text("Mejora tu plan comunicándote con el Administrador para desbloquear todo el potencial de la aplicación.", fontSize = 13.sp, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.padding(bottom = 12.dp))
                         Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            if (currentRole == "INVITADO" || currentRole == "INVITADO_PRUEBA") { PlanCardInfo("BÁSICO 🥉", "1, 6 o 12 meses.", listOf("Pestaña Personal", "Saldo crítico y Sonidos", "Gestión de Deudas", "Respaldo manual en nube", "Borrar Historial"), listOf("Control de Tienda y Ventas", "Inventario", "Sincronización Automática")) }
-                            if (currentRole == "INVITADO" || currentRole == "INVITADO_PRUEBA" || currentRole == "BÁSICO") { PlanCardInfo("PREMIUM 🥈", "1, 6 o 12 meses.", listOf("Todo lo del Básico", "Acceso total a Tienda", "Inventario y Fechas", "Resumen de Totales", "Sincronización Automática"), listOf("Prioridad de Soporte")) }
-                            if (currentRole == "INVITADO" || currentRole == "INVITADO_PRUEBA" || currentRole == "BÁSICO" || currentRole == "PREMIUM") { PlanCardInfo("GOLD 🥇", "1, 6 o 12 meses.", listOf("Uso de toda la aplicación sin ninguna restricción", "Borrado completo", "Prioridad y Soporte total"), emptyList(), isGold = true) }
+                            val roleUpper = currentRole.uppercase()
+                            if (roleUpper == "INVITADO" || roleUpper == "INVITADO_PRUEBA") { PlanCardInfo("BÁSICO 🥉", "1, 6 o 12 meses.", listOf("Pestaña Personal", "Saldo crítico y Sonidos", "Gestión de Deudas", "Respaldo manual en nube", "Borrar Historial"), listOf("Control de Tienda y Ventas", "Inventario", "Sincronización Automática")) }
+                            if (roleUpper == "INVITADO" || roleUpper == "INVITADO_PRUEBA" || roleUpper == "BÁSICO") { PlanCardInfo("PREMIUM 🥈", "1, 6 o 12 meses.", listOf("Todo lo del Básico", "Acceso total a Tienda", "Inventario y Fechas", "Resumen de Totales", "Sincronización Automática"), listOf("Prioridad de Soporte")) }
+                            if (roleUpper == "INVITADO" || roleUpper == "INVITADO_PRUEBA" || roleUpper == "BÁSICO" || roleUpper == "PREMIUM") { PlanCardInfo("GOLD 🥇", "1, 6 o 12 meses.", listOf("Uso de toda la aplicación sin ninguna restricción", "Borrado completo", "Prioridad y Soporte total"), emptyList(), isGold = true) }
                         }
                     }
                 },

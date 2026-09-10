@@ -218,7 +218,8 @@ fun ProfileDialog(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    if (currentRole != "GOLD" && currentRole != "ADMIN") {
+                    val roleUpper = currentRole.uppercase()
+                    if (roleUpper != "GOLD" && roleUpper != "ADMIN" && roleUpper != "PREMIUM") {
                         Button(onClick = onUpgradeClick, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)) {
                             Text("⭐ Mejorar Membresía", fontWeight = FontWeight.Bold)
                         }
