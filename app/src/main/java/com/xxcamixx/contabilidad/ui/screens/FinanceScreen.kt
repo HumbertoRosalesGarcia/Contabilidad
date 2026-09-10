@@ -419,10 +419,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         productForQuickImageUpdate = null
     }
 
-    val isLockedStore = currentRole == "BÁSICO" || currentRole == "INVITADO" || currentRole == "INVITADO_PRUEBA"
-    val isManualSyncAllowed = currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA"
-    val isResumenAllowed = currentRole == "PREMIUM" || currentRole == "GOLD" || currentRole == "ADMIN" || currentRole == "PRUEBA" || currentRole == "Invitado-Gold"
-    val isBorrarHistorialAllowed = currentRole != "INVITADO_PRUEBA"
+    val normalizedRole = currentRole.uppercase()
+    val isLockedStore = normalizedRole == "BÁSICO" || normalizedRole == "BRONCE" || normalizedRole == "MADERA" || normalizedRole == "INVITADO" || normalizedRole == "INVITADO_PRUEBA"
+    val isManualSyncAllowed = normalizedRole != "INVITADO" && normalizedRole != "INVITADO_PRUEBA"
+    val isResumenAllowed = normalizedRole == "PREMIUM" || normalizedRole == "PLATA" || normalizedRole == "GOLD" || normalizedRole == "ADMIN" || normalizedRole == "PRUEBA" || normalizedRole == "INVITADO-GOLD"
+    val isBorrarHistorialAllowed = normalizedRole != "INVITADO_PRUEBA"
 
     val snackbarHostState = remember { SnackbarHostState() }
     val totalIncome = remember(personalTransactions) { personalTransactions.filter { it.isIncome }.sumOf { it.amount } }
@@ -457,7 +458,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
     }
 
-    val crownEmoji = when (currentRole) { "INVITADO", "INVITADO_PRUEBA" -> "🪵"; "PRUEBA", "Invitado-Gold" -> "⏳"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
+    val crownEmoji = when (normalizedRole) { "INVITADO", "INVITADO_PRUEBA", "MADERA" -> "🪵"; "PRUEBA", "INVITADO-GOLD" -> "⏳"; "BÁSICO", "BRONCE" -> "🥉"; "PREMIUM", "PLATA" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -925,7 +926,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                         Column(modifier = Modifier.padding(12.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(data.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                                                val statusColor = if (data.isBanned) Color.Red else if (data.role == "PREMIUM" || data.role == "GOLD" || data.role == "Invitado-Gold") Color(0xFFFFD700) else Color(0xFF2196F3)
+                                                val dataRoleNorm = data.role.uppercase()
+                                                val statusColor = if (data.isBanned) Color.Red else if (dataRoleNorm == "PREMIUM" || dataRoleNorm == "PLATA" || dataRoleNorm == "GOLD" || dataRoleNorm == "INVITADO-GOLD") Color(0xFFFFD700) else Color(0xFF2196F3)
                                                 Text(if (data.isBanned) "BLOQUEADO" else data.role, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                                 if (!isAdminUser) {
                                                 var showUserMenu by remember { mutableStateOf(false) }
@@ -947,7 +949,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                             }
                                             Text(email, fontSize = 12.sp, color = Color.Gray)
                                             Spacer(modifier = Modifier.height(4.dp))
-                                            val timeLeft = maxOf(0L, data.planDuration - data.consumedSeconds)
+                                            val timeLeft = maxOf(0L, data.planDuration - data.consumedSeconds - adminTick)
                                             val days = timeLeft / 86400
                                             val hours = (timeLeft % 86400) / 3600
                                             val mins = (timeLeft % 3600) / 60
