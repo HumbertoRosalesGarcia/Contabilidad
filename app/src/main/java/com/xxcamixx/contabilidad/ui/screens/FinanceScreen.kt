@@ -884,7 +884,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         else {
                             val sortedUsers = usersList!!.entries.sortedWith(
                                 compareBy<Map.Entry<String, com.xxcamixx.contabilidad.model.UserData>> { if (it.key == "zonacami77777@gmail.com") 0 else 1 }
-                                .thenByDescending { it.value.lastActive }
+                                .thenBy { it.value.name.lowercase(java.util.Locale.getDefault()) }
                             )
                             LazyColumn {
                                 items(sortedUsers) { (email, data) ->
