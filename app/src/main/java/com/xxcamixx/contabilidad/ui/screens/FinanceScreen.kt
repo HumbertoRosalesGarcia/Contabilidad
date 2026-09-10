@@ -2,8 +2,11 @@ package com.xxcamixx.contabilidad.ui.screens
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -392,6 +395,20 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showComercioPedidosHistoryDialog by remember { mutableStateOf(false) }
     var showComercioSearch by remember { mutableStateOf(true) }
 
+    var productForQuickImageUpdate by remember { mutableStateOf<Product?>(null) }
+    val productQuickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && productForQuickImageUpdate != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val updatedProduct = productForQuickImageUpdate!!.copy(imageUri = uri.toString())
+                viewModel.editProduct(updatedProduct, context) {}
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        productForQuickImageUpdate = null
+    }
+
     val isLockedStore = currentRole == "BÁSICO" || currentRole == "INVITADO" || currentRole == "INVITADO_PRUEBA"
     val isManualSyncAllowed = currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA"
     val isResumenAllowed = currentRole == "PREMIUM" || currentRole == "GOLD" || currentRole == "ADMIN" || currentRole == "PRUEBA" || currentRole == "Invitado-Gold"
@@ -645,7 +662,11 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     },
                     onDeleteClick = { productToDelete = it; qtyToDelete = "1"; showDeleteQtyDialog = true },
                     onLongDeleteClick = { productToFullDelete = it },
-                    onInfoClick = { productToInfo = it }
+                    onInfoClick = { productToInfo = it },
+                    onAddImageClick = {
+                        productForQuickImageUpdate = it
+                        productQuickImageLauncher.launch(arrayOf("image/*"))
+                    }
                 )
             } else {
                 Crossfade(targetState = currentTab, label = "TabSwitch") { tab ->

@@ -45,7 +45,8 @@ fun ProductItem(
     onDelete: () -> Unit,
     onLongDelete: () -> Unit,
     onInfo: () -> Unit,
-    onImageClick: () -> Unit
+    onImageClick: () -> Unit,
+    onAddImageClick: () -> Unit
 ) {
     val context = LocalContext.current
     val isOutOfStock = product.stock <= 0
@@ -96,7 +97,7 @@ fun ProductItem(
                         .size(64.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color.Gray.copy(alpha = 0.15f))
-                        .clickable { if (product.imageUri != null) onImageClick() },
+                        .clickable { if (product.imageUri != null) onImageClick() else onAddImageClick() },
                     contentAlignment = Alignment.Center
                 ) {
                     if (product.imageUri != null) {

@@ -69,7 +69,8 @@ fun InventoryScreen(
     onEditClick: (Product) -> Unit,
     onDeleteClick: (Product) -> Unit,
     onLongDeleteClick: (Product) -> Unit,
-    onInfoClick: (Product) -> Unit
+    onInfoClick: (Product) -> Unit,
+    onAddImageClick: (Product) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf("A-Z") }
@@ -161,7 +162,8 @@ fun InventoryScreen(
                         onDelete = { focusManager.clearFocus(); onDeleteClick(product) },
                         onLongDelete = { focusManager.clearFocus(); onLongDeleteClick(product) },
                         onInfo = { focusManager.clearFocus(); onInfoClick(product) },
-                        onImageClick = { focusManager.clearFocus(); expandedImageUri = product.imageUri }
+                        onImageClick = { focusManager.clearFocus(); expandedImageUri = product.imageUri },
+                        onAddImageClick = { focusManager.clearFocus(); onAddImageClick(product) }
                     )
                 }
             }
