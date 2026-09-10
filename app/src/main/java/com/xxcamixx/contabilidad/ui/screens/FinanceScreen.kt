@@ -396,7 +396,17 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showComercioSearch by remember { mutableStateOf(true) }
 
     var productForQuickImageUpdate by remember { mutableStateOf<Product?>(null) }
-    val productQuickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    var showQuickImageSourceDialog by remember { mutableStateOf(false) }
+
+    val quickGalleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && productForQuickImageUpdate != null) {
+            val updatedProduct = productForQuickImageUpdate!!.copy(imageUri = uri.toString())
+            viewModel.editProduct(updatedProduct, context) {}
+        }
+        productForQuickImageUpdate = null
+    }
+
+    val quickFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null && productForQuickImageUpdate != null) {
             try {
                 context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -665,7 +675,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     onInfoClick = { productToInfo = it },
                     onAddImageClick = {
                         productForQuickImageUpdate = it
-                        productQuickImageLauncher.launch(arrayOf("image/*"))
+                        showQuickImageSourceDialog = true
                     }
                 )
             } else {
@@ -1051,6 +1061,33 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     }
                 },
                 onImageClick = { uri -> expandedImageUri = uri }
+            )
+        }
+
+        if (showQuickImageSourceDialog) {
+            AlertDialog(
+                onDismissRequest = {
+                    showQuickImageSourceDialog = false
+                    productForQuickImageUpdate = null
+                },
+                title = { Text("Elegir origen") },
+                text = { Text("¿Desde dónde deseas seleccionar la imagen?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showQuickImageSourceDialog = false
+                        quickFileLauncher.launch(arrayOf("image/*"))
+                    }) {
+                        Text("Archivos")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showQuickImageSourceDialog = false
+                        quickGalleryLauncher.launch("image/*")
+                    }) {
+                        Text("Galería")
+                    }
+                }
             )
         }
 
