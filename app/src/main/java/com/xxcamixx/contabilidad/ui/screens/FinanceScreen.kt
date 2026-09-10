@@ -925,7 +925,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                         Column(modifier = Modifier.padding(12.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(data.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f))
-                                                val statusColor = if (data.isBanned) Color.Red else if (data.role == "PREMIUM" || data.role == "GOLD") Color(0xFFFFD700) else Color(0xFF2196F3)
+                                                val statusColor = if (data.isBanned) Color.Red else if (data.role == "PREMIUM" || data.role == "GOLD" || data.role == "Invitado-Gold") Color(0xFFFFD700) else Color(0xFF2196F3)
                                                 Text(if (data.isBanned) "BLOQUEADO" else data.role, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                                 if (!isAdminUser) {
                                                 var showUserMenu by remember { mutableStateOf(false) }
@@ -947,9 +947,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                             }
                                             Text(email, fontSize = 12.sp, color = Color.Gray)
                                             Spacer(modifier = Modifier.height(4.dp))
-                                            val timeLeft = data.planDuration - data.consumedSeconds
-                                            val days = timeLeft / 86400; val hours = (timeLeft % 86400) / 3600; val mins = (timeLeft % 3600) / 60
-                                            Text("Tiempo Restante: $days d, $hours h, $mins m", fontSize = 13.sp)
+                                            val timeLeft = maxOf(0L, data.planDuration - data.consumedSeconds)
+                                            val days = timeLeft / 86400
+                                            val hours = (timeLeft % 86400) / 3600
+                                            val mins = (timeLeft % 3600) / 60
+                                            val secs = timeLeft % 60
+                                            val timeString = if (days > 0) "${days}d ${hours}h ${mins}m" else "${hours}h ${mins}m ${secs}s"
+                                            Text("Tiempo Restante: $timeString", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                                             Text("Última actividad: ${formatDate(data.lastActive)}", fontSize = 11.sp, color = Color.Gray)
                                             Spacer(modifier = Modifier.height(8.dp))
                                             if (!isAdminUser) {
