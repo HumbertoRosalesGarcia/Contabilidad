@@ -882,15 +882,21 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         if (isLoadingUsers) { CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally)) }
                         else if (usersList.isNullOrEmpty()) { Text("No hay usuarios registrados.", modifier = Modifier.padding(16.dp)) }
                         else {
-                            val sortedUsers = usersList!!.entries.sortedByDescending { it.value.lastActive }
+                            val sortedUsers = usersList!!.entries.sortedWith(
+                                compareBy<Map.Entry<String, com.xxcamixx.contabilidad.model.UserData>> { if (it.key == "zonacami77777@gmail.com") 0 else 1 }
+                                .thenByDescending { it.value.lastActive }
+                            )
                             LazyColumn {
                                 items(sortedUsers) { (email, data) ->
-                                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                                    val isAdminUser = email == "zonacami77777@gmail.com"
+                                    val cardColor = if (isAdminUser) Color(0x33FFD700) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), colors = CardDefaults.cardColors(containerColor = cardColor)) {
                                         Column(modifier = Modifier.padding(12.dp)) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Text(data.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f))
                                                 val statusColor = if (data.isBanned) Color.Red else if (data.role == "PREMIUM" || data.role == "GOLD") Color(0xFFFFD700) else Color(0xFF2196F3)
                                                 Text(if (data.isBanned) "BLOQUEADO" else data.role, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                if (!isAdminUser) {
                                                 var showUserMenu by remember { mutableStateOf(false) }
                                                 Box {
                                                     IconButton(onClick = { showUserMenu = true }, modifier = Modifier.size(24.dp)) {
@@ -906,6 +912,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                                         )
                                                     }
                                                 }
+                                                }
                                             }
                                             Text(email, fontSize = 12.sp, color = Color.Gray)
                                             Spacer(modifier = Modifier.height(4.dp))
@@ -914,6 +921,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                             Text("Tiempo Restante: $days d, $hours h, $mins m", fontSize = 13.sp)
                                             Text("Última actividad: ${formatDate(data.lastActive)}", fontSize = 11.sp, color = Color.Gray)
                                             Spacer(modifier = Modifier.height(8.dp))
+                                            if (!isAdminUser) {
                                             Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                 var expandedRoleMenu by remember { mutableStateOf(false) }
                                                 Box {
@@ -942,6 +950,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                                 ) {
                                                     Text(if (data.isBanned) "Desbloquear" else "Bloquear", fontSize = 11.sp)
                                                 }
+                                            }
                                             }
                                         }
                                     }
