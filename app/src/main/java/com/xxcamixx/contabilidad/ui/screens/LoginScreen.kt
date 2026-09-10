@@ -107,26 +107,33 @@ fun LoginScreen(onLoginSuccess: (String, String, String, Long, Long) -> Unit) {
 
                 Button(
                     onClick = {
+                        if (user.role != "INVITADO" && user.role != "BÁSICO" && user.role != "INVITADO_PRUEBA") {
+                            Toast.makeText(context, "Tu cuenta ya posee un plan superior, no puedes usar la prueba.", Toast.LENGTH_LONG).show()
+                            return@Button
+                        }
                         isLoading = true
                         coroutineScope.launch(Dispatchers.IO) {
                             val authPrefs = context.getSharedPreferences("GlobalAuthPrefs", Context.MODE_PRIVATE)
-                            var guestId = authPrefs.getString("trialGuestId", null)
-                            if (guestId == null) {
-                                val androidId = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: UUID.randomUUID().toString().substring(0, 8)
-                                guestId = "dispositivo_$androidId"
-                                authPrefs.edit().putString("trialGuestId", guestId).apply()
+                            // Evitar que usen la prueba múltiple veces
+                            val hasUsedTrial = authPrefs.getBoolean("hasUsedTrial_${user.userId}", false)
+                            if (hasUsedTrial) {
+                                launch(Dispatchers.Main) {
+                                    isLoading = false
+                                    Toast.makeText(context, "Ya has utilizado tu día de prueba gratis.", Toast.LENGTH_LONG).show()
+                                }
+                                return@launch
                             }
                             try {
-                                RetrofitInstance.api.syncUser(UserSyncRequest(email = guestId, name = "Usuario de Prueba"))
-                                RetrofitInstance.api.manageUser(UserManageRequest(guestId, "setRole", "Invitado-Gold", 86400L))
+                                RetrofitInstance.api.manageUser(UserManageRequest(user.userId, "setRole", "Invitado-Gold", 86400L))
+                                authPrefs.edit().putBoolean("hasUsedTrial_${user.userId}", true).apply()
                                 launch(Dispatchers.Main) {
                                     Toast.makeText(context, "Modo Invitado-Gold Activado ⏳", Toast.LENGTH_LONG).show()
-                                    onLoginSuccess("Usuario de Prueba", guestId, "Invitado-Gold", 0L, 86400L)
+                                    onLoginSuccess(user.displayName, user.userId, "Invitado-Gold", 0L, 86400L)
                                 }
                             } catch (e: Exception) {
                                 launch(Dispatchers.Main) {
-                                    Toast.makeText(context, "Modo Invitado-Gold Local (Sin conexión) ⏳", Toast.LENGTH_LONG).show()
-                                    onLoginSuccess("Usuario de Prueba", guestId, "Invitado-Gold", 0L, 86400L)
+                                    Toast.makeText(context, "Error al activar la prueba. Verifica tu conexión.", Toast.LENGTH_LONG).show()
+                                    isLoading = false
                                 }
                             }
                         }
