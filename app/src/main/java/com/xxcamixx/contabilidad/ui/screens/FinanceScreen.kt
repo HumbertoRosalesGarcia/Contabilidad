@@ -255,8 +255,12 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     }
                 }
 
-                if (timeLeftSecs <= 0 && currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA") {
-                    if (currentRole == "PRUEBA" || currentRole == "Invitado-Gold") {
+                if (timeLeftSecs <= 0 && currentRole != "INVITADO" && currentRole != "INVITADO_PRUEBA" && currentRole != "BLOQUEADO_SISTEMA") {
+                    if (currentRole == "Invitado-Gold") {
+                        currentRole = "BLOQUEADO_SISTEMA"
+                        authPrefs.edit().putString("userRole", "BLOQUEADO_SISTEMA").putString("lastKnownRole", "BLOQUEADO_SISTEMA").apply()
+                        coroutineScope.launch(Dispatchers.IO) { try { RetrofitInstance.api.manageUser(UserManageRequest(viewModel.userId, "setRole", "BLOQUEADO_SISTEMA", 0L)) } catch (e: Exception){} }
+                    } else if (currentRole == "PRUEBA") {
                         currentRole = "INVITADO_PRUEBA"
                         authPrefs.edit().putString("userRole", "INVITADO_PRUEBA").putString("lastKnownRole", "INVITADO_PRUEBA").apply()
                         coroutineScope.launch(Dispatchers.IO) { try { RetrofitInstance.api.manageUser(UserManageRequest(viewModel.userId, "setRole", "INVITADO_PRUEBA", 2592000L)) } catch (e: Exception){} }
@@ -511,7 +515,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             }
         },
         bottomBar = {
-            if (!showInventoryScreen) {
+            if (!showInventoryScreen && currentRole != "BLOQUEADO_SISTEMA") {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) {
                     NavigationBarItem(icon = { Icon(Icons.Filled.Person, "Personal") }, label = { Text("Personal") }, selected = currentTab == 0, onClick = { currentTab = 0 }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
                     NavigationBarItem(icon = { Icon(Icons.Filled.ShoppingCart, "Pedidos") }, label = { Text("Pedidos") }, selected = currentTab == 1, onClick = { currentTab = 1 }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
@@ -520,7 +524,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             }
         },
         floatingActionButton = {
-            if (!showInventoryScreen && currentTab == 0) {
+            if (!showInventoryScreen && currentTab == 0 && currentRole != "BLOQUEADO_SISTEMA") {
                 FloatingActionButton(onClick = {
                     if (currentRole == "INVITADO_PRUEBA") {
                         Toast.makeText(context, "Modo Restringido: Solo puedes visualizar información.", Toast.LENGTH_SHORT).show()
@@ -533,6 +537,16 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             }
         }
     ) { paddingValues ->
+        if (currentRole == "BLOQUEADO_SISTEMA") {
+            Box(modifier = Modifier.fillMaxSize().padding(paddingValues), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Filled.Close, contentDescription = "Bloqueado", tint = Color.Red, modifier = Modifier.size(64.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Tu tiempo ha expirado.", fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Text("El sistema está bloqueado.", fontSize = 16.sp, color = Color.Gray)
+                }
+            }
+        } else {
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues).background(MaterialTheme.colorScheme.background)) {
 
             // --- 6.3. ALERTA DE BIENVENIDA INVITADO GOLD ---
@@ -818,6 +832,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             }
         }
 
+        }
         // --- 6.6. BLOQUE PANEL DE ADMINISTRADOR ---
         if (showAdminPanelDialog) {
             var usersList by remember { mutableStateOf<Map<String, UserData>?>(null) }; var isLoadingUsers by remember { mutableStateOf(true) }
@@ -876,6 +891,21 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                                 Text(data.name, fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.weight(1f))
                                                 val statusColor = if (data.isBanned) Color.Red else if (data.role == "PREMIUM" || data.role == "GOLD") Color(0xFFFFD700) else Color(0xFF2196F3)
                                                 Text(if (data.isBanned) "BLOQUEADO" else data.role, color = statusColor, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                var showUserMenu by remember { mutableStateOf(false) }
+                                                Box {
+                                                    IconButton(onClick = { showUserMenu = true }, modifier = Modifier.size(24.dp)) {
+                                                        Icon(Icons.Filled.MoreVert, contentDescription = "Opciones", tint = Color.Gray)
+                                                    }
+                                                    DropdownMenu(expanded = showUserMenu, onDismissRequest = { showUserMenu = false }) {
+                                                        DropdownMenuItem(
+                                                            text = { Text("Otorgar Invitado Gold (24h)") },
+                                                            onClick = {
+                                                                manageUser(email, "setRole", "Invitado-Gold", 86400L)
+                                                                showUserMenu = false
+                                                            }
+                                                        )
+                                                    }
+                                                }
                                             }
                                             Text(email, fontSize = 12.sp, color = Color.Gray)
                                             Spacer(modifier = Modifier.height(4.dp))
@@ -885,11 +915,33 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                             Text("Última actividad: ${formatDate(data.lastActive)}", fontSize = 11.sp, color = Color.Gray)
                                             Spacer(modifier = Modifier.height(8.dp))
                                             Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                Button(onClick = { roleToAssign = "BÁSICO"; targetEmailToAssign = email }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF8D6E63))) { Text("Básico", fontSize = 11.sp) }
-                                                Button(onClick = { roleToAssign = "PREMIUM"; targetEmailToAssign = email }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2))) { Text("Premium", fontSize = 11.sp) }
-                                                Button(onClick = { roleToAssign = "GOLD"; targetEmailToAssign = email }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)) { Text("Gold", fontSize = 11.sp) }
-                                                Button(onClick = { manageUser(email, "ban") }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("Ban", fontSize = 11.sp) }
-                                                Button(onClick = { manageUser(email, "unban") }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2196F3))) { Text("Unban", fontSize = 11.sp) }
+                                                var expandedRoleMenu by remember { mutableStateOf(false) }
+                                                Box {
+                                                    OutlinedButton(onClick = { expandedRoleMenu = true }) {
+                                                        Text("Asignar Rol")
+                                                    }
+                                                    DropdownMenu(
+                                                        expanded = expandedRoleMenu,
+                                                        onDismissRequest = { expandedRoleMenu = false }
+                                                    ) {
+                                                        listOf("Madera", "Bronce", "Plata", "Gold").forEach { role ->
+                                                            DropdownMenuItem(
+                                                                text = { Text(role) },
+                                                                onClick = {
+                                                                    roleToAssign = role
+                                                                    targetEmailToAssign = email
+                                                                    expandedRoleMenu = false
+                                                                }
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                                Button(
+                                                    onClick = { manageUser(email, if (data.isBanned) "unban" else "ban") },
+                                                    colors = ButtonDefaults.buttonColors(containerColor = if (data.isBanned) Color(0xFF4CAF50) else Color.Red)
+                                                ) {
+                                                    Text(if (data.isBanned) "Desbloquear" else "Bloquear", fontSize = 11.sp)
+                                                }
                                             }
                                         }
                                     }
