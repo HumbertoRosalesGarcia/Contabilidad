@@ -35,6 +35,7 @@ fun ProfileDialog(
     currentRole: String,
     consumedSecs: Long,
     planDurationSecs: Long,
+    registeredAt: Long = 0L,
     userId: String,
     onDismiss: () -> Unit,
     onNameChange: (String) -> Unit,
@@ -98,17 +99,27 @@ fun ProfileDialog(
         }
     }
 
-    val crownEmoji = when (currentRole) { "INVITADO", "INVITADO_PRUEBA" -> "🪵"; "PRUEBA", "Invitado-Gold" -> "⏳"; "BÁSICO" -> "🥉"; "PREMIUM" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
+    val roleUpper = currentRole.uppercase()
+    val isSuperAdmin = userId.lowercase(java.util.Locale.getDefault()) == "zonacami77777@gmail.com" || roleUpper == "ADMIN"
+    val crownEmoji = when (roleUpper) { "INVITADO", "INVITADO_PRUEBA", "MADERA" -> "🪵"; "PRUEBA", "INVITADO-GOLD" -> "⏳"; "BÁSICO", "BASICO", "BRONCE" -> "🥉"; "PREMIUM", "PLATA" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> if (roleUpper.contains("GOLD")) "🥇" else "🪵" }
 
-    val startMillis = System.currentTimeMillis() - (consumedSecs * 1000L)
+    var currentMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(1000L)
+            currentMillis = System.currentTimeMillis()
+        }
+    }
+
+    val startMillis = if (registeredAt > 0L) registeredAt else (currentMillis - (consumedSecs * 1000L))
     val endMillis = startMillis + (planDurationSecs * 1000L)
 
-    val remainingSecs = maxOf(0L, planDurationSecs - consumedSecs)
+    val remainingSecs = maxOf(0L, (endMillis - currentMillis) / 1000L)
     val rDays = remainingSecs / 86400
     val rHours = (remainingSecs % 86400) / 3600
     val rMins = (remainingSecs % 3600) / 60
     val rSecs = remainingSecs % 60
-    val timeRemainingStr = "${rDays}d ${rHours}h ${rMins}m ${rSecs}s"
+    val timeRemainingStr = if (remainingSecs <= 0) "Expirado (00h 00m 00s)" else if (rDays > 0) "${rDays}d ${rHours}h ${rMins}m ${rSecs}s" else "${rHours}h ${rMins}m ${rSecs}s"
 
     if (showImageSourceDialog) {
         AlertDialog(
@@ -201,27 +212,37 @@ fun ProfileDialog(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
-                        Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
-                            Text("Activada el:", fontSize = 12.sp, color = Color.Gray)
-                            Text(formatDate(startMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Finaliza el:", fontSize = 12.sp, color = Color.Gray)
-                            Text(formatDate(endMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    if (isSuperAdmin) {
+                        Card(colors = CardDefaults.cardColors(containerColor = Color(0x33FFD700))) {
+                            Column(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("👑 Administrador del Sistema", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFFFFD700))
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text("Acceso Ilimitado Permanente ♾️", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Text("Sin restricciones de tiempo ni límites de uso.", fontSize = 12.sp, color = Color.Gray)
+                            }
                         }
-                    }
+                    } else {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))) {
+                            Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
+                                Text("Activada el:", fontSize = 12.sp, color = Color.Gray)
+                                Text(formatDate(startMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Finaliza el:", fontSize = 12.sp, color = Color.Gray)
+                                Text(formatDate(endMillis), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                        }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                    Text("Tiempo Restante:", fontSize = 12.sp, color = Color.Gray)
-                    Text(timeRemainingStr, fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = Color(0xFFE65100))
+                        Text("Tiempo Restante:", fontSize = 12.sp, color = Color.Gray)
+                        Text(timeRemainingStr, fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = Color(0xFFE65100))
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
 
-                    val roleUpper = currentRole.uppercase()
-                    if (roleUpper != "GOLD" && roleUpper != "ADMIN" && roleUpper != "PREMIUM") {
-                        Button(onClick = onUpgradeClick, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)) {
-                            Text("⭐ Mejorar Membresía", fontWeight = FontWeight.Bold)
+                        if (roleUpper != "GOLD" && !roleUpper.contains("GOLD") && roleUpper != "ADMIN" && roleUpper != "PREMIUM") {
+                            Button(onClick = onUpgradeClick, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)) {
+                                Text("⭐ Mejorar Membresía", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

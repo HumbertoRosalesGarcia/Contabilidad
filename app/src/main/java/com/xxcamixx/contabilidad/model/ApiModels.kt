@@ -23,10 +23,10 @@ data class CloudPayload(
 data class SyncResponse(val code: String, val message: String)
 
 data class UserSyncRequest(val email: String, val name: String, val profileImage: String? = null, val lastActive: Long = 0L)
-data class UserSyncResponse(val role: String?, val isBanned: Boolean, val consumedSeconds: Long, val planDuration: Long)
-data class UserTimeResponse(val code: String?, val role: String?, val consumedSeconds: Long, val planDuration: Long, val isBanned: Boolean)
+data class UserSyncResponse(val role: String?, val isBanned: Boolean, val consumedSeconds: Long, val planDuration: Long, val registeredAt: Long = 0L)
+data class UserTimeResponse(val code: String?, val role: String?, val consumedSeconds: Long, val planDuration: Long, val isBanned: Boolean, val registeredAt: Long = 0L)
 data class UserData(val name: String = "Usuario", val role: String = "INVITADO", val registeredAt: Long = 0L, val consumedSeconds: Long = 0L, val isBanned: Boolean = false, val planDuration: Long = 2592000L, val profileImage: String? = null, val lastActive: Long = 0L)
-data class UserTimeRequest(val email: String, val seconds: Long)
+data class UserTimeRequest(val email: String, val seconds: Long = 0L, val name: String? = null, val profileImage: String? = null)
 data class UserManageRequest(val email: String, val action: String, val role: String? = null, val planDuration: Long? = null)
 
 data class ChatMessage(val sender: String, val text: String, val imageUrl: String? = null, val timestamp: Long)
