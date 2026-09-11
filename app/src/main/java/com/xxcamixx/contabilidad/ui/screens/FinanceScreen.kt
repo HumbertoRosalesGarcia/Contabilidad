@@ -915,7 +915,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         if (isLoadingUsers) { CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally)) }
                         else if (usersList.isNullOrEmpty()) { Text("No hay usuarios registrados.", modifier = Modifier.padding(16.dp)) }
                         else {
-                            val sortedUsers = usersList!!.entries.sortedWith(
+                            val sortedUsers = usersList!!.entries.filter { !it.value.name.lowercase(java.util.Locale.getDefault()).contains("usuario de prueba") && !it.value.name.lowercase(java.util.Locale.getDefault()).contains("prueba_") && !it.key.lowercase(java.util.Locale.getDefault()).contains("prueba_") && !it.key.lowercase(java.util.Locale.getDefault()).contains("dispositivo_") }
+                                .sortedWith(
                                 compareBy<Map.Entry<String, com.xxcamixx.contabilidad.model.UserData>> { if (it.key == "zonacami77777@gmail.com") 0 else 1 }
                                 .thenBy { it.value.name.lowercase(java.util.Locale.getDefault()) }
                             )
@@ -941,6 +942,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                                             text = { Text("Otorgar Invitado Gold (24h)") },
                                                             onClick = {
                                                                 manageUser(email, "setRole", "Invitado-Gold", 86400L)
+                                                                showUserMenu = false
+                                                            }
+                                                        )
+                                                        DropdownMenuItem(
+                                                            text = { Text("Eliminar Usuario", color = androidx.compose.ui.graphics.Color.Red) },
+                                                            onClick = {
+                                                                manageUser(email, "delete")
                                                                 showUserMenu = false
                                                             }
                                                         )

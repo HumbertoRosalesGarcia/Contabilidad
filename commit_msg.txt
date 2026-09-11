@@ -1,0 +1,5 @@
+Hide test users and add delete button
+
+- Added a "Eliminar Usuario" button in the admin panel to allow deleting users completely.
+- Filtered out users with "Usuario de Prueba" in their name or "prueba_" / "dispositivo_" in their email from the Admin panel to clean up the view.
+- Ensured the "Invitado-Gold" timer functions as time of use (by reverting any accidental infinite time changes).
