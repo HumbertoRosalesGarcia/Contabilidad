@@ -1,6 +1,7 @@
 package com.xxcamixx.contabilidad.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
@@ -45,6 +47,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import com.xxcamixx.contabilidad.ui.components.tour.TourTarget
 import com.xxcamixx.contabilidad.model.Fiador
 import com.xxcamixx.contabilidad.model.Product
 import com.xxcamixx.contabilidad.model.Reminder
@@ -75,7 +80,9 @@ fun StoreScreen(
     onEditFiador: (Fiador) -> Unit,
     onSettleReminder: (Reminder) -> Unit,
     onEditReminder: (Reminder) -> Unit,
-    onRestoreFiador: (String, Double, Double) -> Unit
+    onRestoreFiador: (String, Double, Double) -> Unit,
+    onOpenScanner: () -> Unit = {},
+    onPositionTourTarget: (TourTarget, LayoutCoordinates) -> Unit = { _, _ -> }
 ) {
     val totalInventoryValue = remember(products) { products.sumOf { it.price * it.stock } }
     val totalInversion = remember(products) { products.sumOf { it.purchasePrice * it.stock } }
@@ -137,7 +144,16 @@ fun StoreScreen(
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth().padding(16.dp).padding(top = if(activeFiadores.isNotEmpty() || activeReminders.isNotEmpty()) 0.dp else 0.dp), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(defaultElevation = 8.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .padding(top = if(activeFiadores.isNotEmpty() || activeReminders.isNotEmpty()) 0.dp else 0.dp)
+                .onGloballyPositioned { onPositionTourTarget(TourTarget.TIENDA_METRICS, it) },
+            shape = RoundedCornerShape(24.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
             Column(modifier = Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { showInversionDialog = true }.padding(4.dp)) {
@@ -163,10 +179,48 @@ fun StoreScreen(
         }
 
         Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { if (isLockedStore) showPremiumToast() else showVendidosDialog = true }, modifier = Modifier.weight(1f).height(50.dp).alpha(if(isLockedStore) 0.5f else 1f), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)) { Text(if(isLockedStore) "👑 Ventas" else "Ventas", fontWeight = FontWeight.Bold) }
-            Button(onClick = { if (isLockedStore) showPremiumToast() else onOpenInventory() }, modifier = Modifier.weight(1f).height(50.dp).alpha(if(isLockedStore) 0.5f else 1f), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) { Text(if(isLockedStore) "👑 Inventario \uD83D\uDCE6" else "Inventario \uD83D\uDCE6", fontWeight = FontWeight.Bold) }
+            Button(
+                onClick = { if (isLockedStore) showPremiumToast() else showVendidosDialog = true },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(50.dp)
+                    .alpha(if(isLockedStore) 0.5f else 1f)
+                    .onGloballyPositioned { onPositionTourTarget(TourTarget.TIENDA_CHECKOUT_BAR, it) },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)
+            ) { Text(if(isLockedStore) "👑 Ventas" else "Ventas", fontWeight = FontWeight.Bold) }
+            Button(
+                onClick = { if (isLockedStore) showPremiumToast() else onOpenInventory() },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(50.dp)
+                    .alpha(if(isLockedStore) 0.5f else 1f)
+                    .onGloballyPositioned { onPositionTourTarget(TourTarget.TIENDA_INVENTORY_BTN, it) },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
+            ) { Text(if(isLockedStore) "👑 Inventario \uD83D\uDCE6" else "Inventario \uD83D\uDCE6", fontWeight = FontWeight.Bold) }
         }
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Botón de Escaneo y Agregado Automático al Carrito
+        Button(
+            onClick = { if (isLockedStore) showPremiumToast() else onOpenScanner() },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .height(48.dp)
+                .alpha(if (isLockedStore) 0.5f else 1f)
+                .onGloballyPositioned { onPositionTourTarget(TourTarget.TIENDA_SCANNER_BTN, it) },
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color(0xFF1E1E24),
+                contentColor = MaterialTheme.colorScheme.primary
+            ),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Icon(Icons.Filled.CameraAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Escáner Visual IA (Auto-Carrito)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+        }
+        Spacer(modifier = Modifier.height(12.dp))
 
         AnimatedVisibility(visible = shoppingCart.isNotEmpty()) {
             val totalCart = shoppingCart.sumOf { it.first.price * it.second }; val totalItems = shoppingCart.sumOf { it.second }

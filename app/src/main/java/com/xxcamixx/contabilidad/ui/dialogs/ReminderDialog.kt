@@ -34,7 +34,7 @@ fun ReminderDialog(initialReminder: Reminder? = null, preselectedDate: Long? = n
     var title by remember { mutableStateOf(initialReminder?.title ?: "") }
     var amountRaw by remember { mutableStateOf(if(initialReminder != null && initialReminder.amount > 0) initialReminder.amount.toLong().toString() else "") }
     var tempDateMillis by remember { mutableStateOf<Long?>(initialReminder?.targetDateInMillis ?: preselectedDate) }
-    var activeScreen by remember { mutableStateOf(if (initialReminder == null && preselectedDate == null) "NEW_INFO" else if (initialReminder == null && preselectedDate != null) "NEW_TIME" else "EDIT_OPTIONS") }
+    var activeScreen by remember { mutableStateOf(if (initialReminder == null) "NEW_INFO" else "EDIT_OPTIONS") }
     var isEditDateOnly by remember { mutableStateOf(false) }
     val calendar = remember { Calendar.getInstance().apply { timeInMillis = initialReminder?.targetDateInMillis ?: preselectedDate ?: System.currentTimeMillis() } }
     var showDatePicker by remember { mutableStateOf(false) }
@@ -82,7 +82,12 @@ fun ReminderDialog(initialReminder: Reminder? = null, preselectedDate: Long? = n
                         if (activeScreen == "EDIT_INFO") {
                             onConfirm(capTitle, parsedAmount, tempDateMillis!!)
                         } else {
-                            title = capTitle; showDatePicker = true
+                            title = capTitle
+                            if (preselectedDate != null) {
+                                activeScreen = "NEW_TIME"
+                            } else {
+                                showDatePicker = true
+                            }
                         }
                     } else {
                         Toast.makeText(context, "Ingresa un nombre y monto válido", Toast.LENGTH_SHORT).show()

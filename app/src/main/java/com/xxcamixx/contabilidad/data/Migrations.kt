@@ -47,3 +47,7 @@ val MIGRATION_22_23 = object : Migration(22, 23) { override fun migrate(db: Supp
 val MIGRATION_23_24 = object : Migration(23, 24) { override fun migrate(db: SupportSQLiteDatabase) { db.execSQL("CREATE TABLE IF NOT EXISTS `cierre_sessions` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `mode` TEXT NOT NULL, `name` TEXT NOT NULL, `totalIncomes` REAL NOT NULL, `totalExpenses` REAL NOT NULL, `timestamp` INTEGER NOT NULL, `country` TEXT NOT NULL)"); db.addColumnIfNotExists("transactions", "cierreId", "INTEGER DEFAULT NULL"); db.addColumnIfNotExists("fiadores", "cierreId", "INTEGER DEFAULT NULL"); db.addColumnIfNotExists("comercio_movements", "cierreId", "INTEGER DEFAULT NULL") } }
 
 val MIGRATION_24_25 = object : Migration(24, 25) { override fun migrate(db: SupportSQLiteDatabase) { db.addColumnIfNotExists("products", "category", "TEXT DEFAULT NULL") } }
+
+val MIGRATION_25_26 = object : Migration(25, 26) { override fun migrate(db: SupportSQLiteDatabase) { db.addColumnIfNotExists("products", "featureVector", "TEXT DEFAULT NULL") } }
+
+val MIGRATION_26_27 = object : Migration(26, 27) { override fun migrate(db: SupportSQLiteDatabase) { db.addColumnIfNotExists("comercio_products", "featureVector", "TEXT DEFAULT NULL") } }

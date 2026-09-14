@@ -3,6 +3,7 @@ package com.xxcamixx.contabilidad.ui.dialogs
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -19,6 +20,7 @@ import androidx.compose.ui.window.DialogProperties
 @Composable
 fun ImageSourceDialog(
     onDismiss: () -> Unit,
+    onSelectCamera: () -> Unit,
     onSelectGallery: () -> Unit,
     onSelectFileManager: () -> Unit
 ) {
@@ -48,7 +50,39 @@ fun ImageSourceDialog(
                     color = Color.Gray
                 )
 
-                // Opción 1: Galería
+                // Opción 1: Cámara del teléfono
+                Card(
+                    onClick = {
+                        onDismiss()
+                        onSelectCamera()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.CameraAlt,
+                            contentDescription = "Cámara",
+                            tint = Color(0xFFFFD700),
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Column {
+                            Text("Cámara de fotos", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text("Tomar una foto directamente con tu cámara", fontSize = 12.sp, color = Color.Gray)
+                        }
+                    }
+                }
+
+                // Opción 2: Galería
                 Card(
                     onClick = {
                         onDismiss()

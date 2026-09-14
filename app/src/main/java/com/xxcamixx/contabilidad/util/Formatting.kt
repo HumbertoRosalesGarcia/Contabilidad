@@ -224,20 +224,5 @@ fun loadBitmapFromUri(context: android.content.Context, uriString: String?): and
 }
 
 fun saveImageToInternalStorage(context: android.content.Context, uri: android.net.Uri): String {
-    return try {
-        try {
-            context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } catch (e: Exception) {}
-
-        val imagesDir = java.io.File(context.filesDir, "product_images").apply { if (!exists()) mkdirs() }
-        val destFile = java.io.File(imagesDir, "prod_${System.currentTimeMillis()}.jpg")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            destFile.outputStream().use { output ->
-                input.copyTo(output)
-            }
-        }
-        android.net.Uri.fromFile(destFile).toString()
-    } catch (e: Exception) {
-        uri.toString()
-    }
+    return ImageStorageManager.saveImageLocally(context, uri)
 }

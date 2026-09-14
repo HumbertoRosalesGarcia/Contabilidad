@@ -56,7 +56,33 @@ fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selecte
     var usdPurchase by remember { mutableStateOf("") }
     var usdPrice by remember { mutableStateOf("") }
 
-    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? -> if (uri != null) { try { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (e: Exception) { e.printStackTrace() }; draftState.imageUri = uri.toString() } }
+    var showImageSourceDialog by remember { mutableStateOf(false) }
+    var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        val uri = tempCameraUri
+        if (success && uri != null) {
+            val saved = com.xxcamixx.contabilidad.util.saveImageToInternalStorage(context, uri)
+            draftState.imageUri = saved
+        }
+    }
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            val saved = com.xxcamixx.contabilidad.util.saveImageToInternalStorage(context, uri)
+            draftState.imageUri = saved
+        }
+    }
+    val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            val saved = com.xxcamixx.contabilidad.util.saveImageToInternalStorage(context, uri)
+            draftState.imageUri = saved
+        }
+    }
+
     if (showDatePicker) { CustomDatePickerDialog(initialDateMillis = draftState.expiryDateMillis ?: System.currentTimeMillis(), onDismiss = { showDatePicker = false }, onDateSelected = { selected -> draftState.expiryDateMillis = selected; showDatePicker = false }) }
 
     // MODIFICADO: Lógica de carga sin pérdida por redondeo visual
@@ -94,17 +120,101 @@ fun AddProductDialog(isEditMode: Boolean, draftState: ProductDraftState, selecte
         }
     }
 
+    if (showImageSourceDialog) {
+        ImageSourceDialog(
+            onDismiss = { showImageSourceDialog = false },
+            onSelectCamera = {
+                try {
+                    val (_, uri) = com.xxcamixx.contabilidad.util.ImageStorageManager.createCameraTempUri(context)
+                    tempCameraUri = uri
+                    cameraLauncher.launch(uri)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            },
+            onSelectGallery = { galleryLauncher.launch("image/*") },
+            onSelectFileManager = { filePickerLauncher.launch(arrayOf("image/*")) }
+        )
+    }
+
     AlertDialog(
         onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false),
         title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(if (isEditMode) "Editar Producto ✏️" else "Nuevo Producto \uD83C\uDFF7️", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Box(modifier = Modifier.fillMaxWidth().height(150.dp).background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(12.dp)).clickable { imagePickerLauncher.launch(arrayOf("image/*")) }, contentAlignment = Alignment.Center) {
+                var isExtractingFeatures by remember { mutableStateOf(false) }
+                Box(modifier = Modifier.fillMaxWidth().height(150.dp).background(Color.Gray.copy(alpha = 0.2f), RoundedCornerShape(12.dp)).clickable { showImageSourceDialog = true }, contentAlignment = Alignment.Center) {
                     var bitmap by remember(draftState.imageUri) { mutableStateOf<android.graphics.Bitmap?>(null) }
-                    LaunchedEffect(draftState.imageUri) { if (draftState.imageUri != null) { val loadedBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) { android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(draftState.imageUri!!))) } else { @Suppress("DEPRECATION") android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(draftState.imageUri!!)) } } catch (e: Exception) { null } }; bitmap = loadedBitmap } else { bitmap = null } }
-                    if (draftState.imageUri != null) { if (bitmap != null) { Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Imagen del producto", modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop) } else { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary) } } else { Column(horizontalAlignment = Alignment.CenterHorizontally) { Icon(Icons.Filled.Image, contentDescription = "Añadir foto", modifier = Modifier.size(48.dp), tint = Color.Gray); Text("Añadir foto del producto", color = Color.Gray, fontSize = 12.sp) } }
+                    LaunchedEffect(draftState.imageUri) {
+                        if (draftState.imageUri != null) {
+                            val loadedBitmap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                try {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                                        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, Uri.parse(draftState.imageUri!!)))
+                                    } else {
+                                        @Suppress("DEPRECATION")
+                                        android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, Uri.parse(draftState.imageUri!!))
+                                    }
+                                } catch (e: Exception) { null }
+                            }
+                            bitmap = loadedBitmap
+
+                            // Extracción automática del vector de características visuales
+                            if (loadedBitmap != null) {
+                                isExtractingFeatures = true
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    val vec = com.xxcamixx.contabilidad.ai.ImageFeatureExtractor.extractFeatures(context, loadedBitmap)
+                                    if (vec != null) {
+                                        draftState.featureVector = com.xxcamixx.contabilidad.ai.ImageFeatureExtractor.vectorToString(vec)
+                                    }
+                                }
+                                isExtractingFeatures = false
+                            }
+                        } else {
+                            bitmap = null
+                            draftState.featureVector = null
+                        }
+                    }
+                    if (draftState.imageUri != null) {
+                        if (bitmap != null) {
+                            Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Imagen del producto", modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp)), contentScale = ContentScale.Crop)
+                        } else {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        }
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Filled.Image, contentDescription = "Añadir foto", modifier = Modifier.size(48.dp), tint = Color.Gray)
+                            Text("Añadir foto del producto", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
                 }
+
+                if (draftState.imageUri != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (draftState.featureVector != null) Color(0xFF1B5E20).copy(alpha = 0.25f) else Color(0xFF33333A),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (draftState.featureVector != null) Color(0xFF4CAF50) else Color.Gray)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            if (isExtractingFeatures) {
+                                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Aprendiendo características visuales...", fontSize = 11.sp, color = Color(0xFFD4AF37))
+                            } else if (draftState.featureVector != null) {
+                                Text("✨ IA lista para Escaneo y Carrito Automático", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF81C784))
+                            } else {
+                                Text("Foto lista", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(value = draftState.name, onValueChange = { input -> draftState.name = input.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() } }, label = { Text("Nombre del Producto") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, capitalization = KeyboardCapitalization.Sentences))
                 Spacer(modifier = Modifier.height(16.dp))

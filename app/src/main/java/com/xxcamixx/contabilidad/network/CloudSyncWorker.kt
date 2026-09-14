@@ -17,12 +17,25 @@ class CloudSyncWorker(appContext: Context, workerParams: WorkerParameters) : Cor
         val userId = inputData.getString("USER_ID") ?: return Result.failure()
         val db = AppDatabase.getDatabase(applicationContext, userId).financeDao()
         return try {
-            val transactions = db.getBackupTransactions()
+            val transactions = db.getBackupTransactions().map { it.copy(imageUri = null) }
             val reminders = db.getBackupReminders()
             val fiadores = db.getBackupFiadores()
-            val products = db.getBackupProducts()
+            val products = db.getBackupProducts().map { it.copy(imageUri = null) }
+            val comercioProducts = db.getBackupComercioProducts().map { it.copy(imageUri = null) }
+            val comercioPedidos = db.getBackupComercioPedidos().map { it.copy(imageUri = null) }
+            val comercioMovements = db.getBackupComercioMovements()
+            val cierreSessions = db.getBackupCierreSessions()
 
-            val newData = BackupData(transactions, reminders, fiadores, products)
+            val newData = BackupData(
+                transactions = transactions,
+                reminders = reminders,
+                fiadores = fiadores,
+                products = products,
+                comercioProducts = comercioProducts,
+                comercioPedidos = comercioPedidos,
+                comercioMovements = comercioMovements,
+                cierreSessions = cierreSessions
+            )
             val timeString = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
             val newRecord = BackupRecord(UUID.randomUUID().toString(), "Automático - $timeString", System.currentTimeMillis(), newData)
 

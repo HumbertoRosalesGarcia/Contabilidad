@@ -3,6 +3,7 @@ package com.xxcamixx.contabilidad.ui.screens
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -38,23 +39,35 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.FolderSpecial
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ExitToApp
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import com.xxcamixx.contabilidad.ui.components.tour.CoachMarkOverlay
+import com.xxcamixx.contabilidad.ui.components.tour.TourStep
+import com.xxcamixx.contabilidad.ui.components.tour.TourTarget
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -124,10 +137,12 @@ import com.xxcamixx.contabilidad.ui.dialogs.AddProductDialog
 import com.xxcamixx.contabilidad.ui.dialogs.AddToCartDialog
 import com.xxcamixx.contabilidad.ui.dialogs.AdminChatListDialog
 import com.xxcamixx.contabilidad.ui.dialogs.AutoSyncSetupDialog
+import com.xxcamixx.contabilidad.ui.dialogs.BackendViewerDialog
 import com.xxcamixx.contabilidad.ui.dialogs.CalendarDialog
 import com.xxcamixx.contabilidad.ui.dialogs.ChatDialog
 import com.xxcamixx.contabilidad.ui.dialogs.ComercioPedidosHistoryDialog
 import com.xxcamixx.contabilidad.ui.dialogs.CheckoutDialog
+import com.xxcamixx.contabilidad.ui.dialogs.VisualProductScannerDialog
 import com.xxcamixx.contabilidad.ui.dialogs.DeleteQuantityDialog
 import com.xxcamixx.contabilidad.ui.dialogs.ExpenseBreakdownDialog
 import com.xxcamixx.contabilidad.ui.dialogs.FiadorDialog
@@ -196,6 +211,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var showAllExpensesDialog by remember { mutableStateOf(false) }
     var showAllIncomesDialog by remember { mutableStateOf(false) }
     var showCierresDialog by remember { mutableStateOf(false) }
+    var showBackendViewerDialog by remember { mutableStateOf(false) }
+    var showImageStorageDialog by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -376,6 +393,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     val shoppingCart = remember { mutableStateListOf<Pair<Product, Int>>() }
     var showCheckoutDialog by remember { mutableStateOf(false) }
+    var showVisualScannerDialog by remember { mutableStateOf(false) }
     var productToAddToCart by remember { mutableStateOf<Product?>(null) }
     var productToDelete by remember { mutableStateOf<Product?>(null) }
     var showDeleteQtyDialog by remember { mutableStateOf(false) }
@@ -419,9 +437,21 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     var productForQuickImageUpdate by remember { mutableStateOf<Product?>(null) }
     var showQuickImageSourceDialog by remember { mutableStateOf(false) }
 
+    var tempQuickCameraUri by remember { mutableStateOf<Uri?>(null) }
+    val quickCameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        val capturedUri = tempQuickCameraUri
+        if (success && capturedUri != null && productForQuickImageUpdate != null) {
+            val savedUri = com.xxcamixx.contabilidad.util.saveImageToInternalStorage(context, capturedUri)
+            val updatedProduct = productForQuickImageUpdate!!.copy(imageUri = savedUri)
+            viewModel.editProduct(updatedProduct, context) {}
+        }
+        productForQuickImageUpdate = null
+    }
+
     val quickGalleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null && productForQuickImageUpdate != null) {
-            val updatedProduct = productForQuickImageUpdate!!.copy(imageUri = uri.toString())
+            val savedUri = com.xxcamixx.contabilidad.util.saveImageToInternalStorage(context, uri)
+            val updatedProduct = productForQuickImageUpdate!!.copy(imageUri = savedUri)
             viewModel.editProduct(updatedProduct, context) {}
         }
         productForQuickImageUpdate = null
@@ -431,7 +461,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         if (uri != null && productForQuickImageUpdate != null) {
             try {
                 context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val updatedProduct = productForQuickImageUpdate!!.copy(imageUri = uri.toString())
+                val savedUri = com.xxcamixx.contabilidad.util.saveImageToInternalStorage(context, uri)
+                val updatedProduct = productForQuickImageUpdate!!.copy(imageUri = savedUri)
                 viewModel.editProduct(updatedProduct, context) {}
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -466,6 +497,20 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
 
     LaunchedEffect(customToastMessage ?: "") { if (customToastMessage != null) { delay(3000L); customToastMessage = null } }
     LaunchedEffect(undoMessage ?: "") { if (undoMessage != null) { delay(5000L); undoMessage = null; undoAction = null } }
+    LaunchedEffect(products) {
+        products.forEach { p ->
+            if (p.imageUri != null && p.featureVector == null) {
+                viewModel.ensureProductFeatureVector(p, context)
+            }
+        }
+    }
+    LaunchedEffect(comercioProducts) {
+        comercioProducts.forEach { cp ->
+            if (cp.imageUri != null && cp.featureVector == null) {
+                viewModel.ensureComercioProductFeatureVector(cp, context)
+            }
+        }
+    }
 
     BackHandler {
         if (showInventoryScreen) {
@@ -479,9 +524,132 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
     }
 
+    // --- ESTADOS DEL PRODUCT TOUR (ONBOARDING GUIADO) ---
+    val tourPrefs = remember(viewModel.userId) {
+        context.getSharedPreferences("TourPrefs_${viewModel.userId}", Context.MODE_PRIVATE)
+    }
+    var isTourActive by remember { mutableStateOf(false) }
+    var currentTourStepIndex by remember { mutableStateOf(0) }
+    val tourTargetsBounds = remember { mutableStateMapOf<TourTarget, Rect>() }
+
+    val tourSteps = remember {
+        listOf(
+            // MODO 1: PERSONAL
+            TourStep(
+                target = TourTarget.PROFILE,
+                title = "Tu Perfil y Cuenta",
+                description = "Toca tu nombre para personalizar tu foto, cambiar tu nombre, consultar la tasa de cambio del día y verificar el tiempo activo de tu cuenta.",
+                icon = Icons.Filled.Person
+            ),
+            TourStep(
+                target = TourTarget.CALENDAR,
+                title = "Calendario y Deudores",
+                description = "Gestiona tus fechas importantes, programa recordatorios de pago y administra tu lista de personas y clientes fiados con facilidad.",
+                icon = Icons.Filled.DateRange
+            ),
+            TourStep(
+                target = TourTarget.MENU,
+                title = "Menú y Cierres de Caja",
+                description = "Aquí encuentras los Cierres automáticos y manuales de caja, las Opciones generales, configuración de sonidos y copias de seguridad en la nube.",
+                icon = Icons.Filled.MoreVert
+            ),
+            TourStep(
+                target = TourTarget.DASHBOARD,
+                title = "Resumen Financiero",
+                description = "Monitorea tu balance total, tus ingresos y tus egresos con el detalle separado de dinero en efectivo y transferencias digitales.",
+                icon = Icons.Filled.AccountBalanceWallet
+            ),
+            TourStep(
+                target = TourTarget.FAB_ADD,
+                title = "Registrar Movimiento",
+                description = "Usa este botón flotante cada vez que quieras registrar un nuevo ingreso o gasto personal en pocos segundos.",
+                icon = Icons.Filled.Add
+            ),
+            TourStep(
+                target = TourTarget.BOTTOM_NAV,
+                title = "Modos de Trabajo",
+                description = "Alterna cómodamente entre tus finanzas Personales, la gestión de Pedidos a clientes y el inventario de ventas de tu Tienda.",
+                icon = Icons.Filled.Layers
+            ),
+
+            // MODO 2: PEDIDOS
+            TourStep(
+                target = TourTarget.PEDIDOS_METRICS,
+                title = "Panel de Pedidos 📦",
+                description = "Monitorea en tiempo real el dinero invertido, las ganancias netas y el total de ventas acumuladas en todos tus pedidos.",
+                icon = Icons.Filled.AccountBalanceWallet
+            ),
+            TourStep(
+                target = TourTarget.PEDIDOS_ADD_BTN,
+                title = "Crear Nuevo Pedido",
+                description = "Crea un nuevo pedido con el nombre de tu cliente o proveedor y organiza los productos que vas a despachar.",
+                icon = Icons.Filled.Add
+            ),
+            TourStep(
+                target = TourTarget.PEDIDOS_TABS,
+                title = "Estantes y Ventas",
+                description = "Alterna fácilmente entre los productos organizados por estante y el historial de ventas despachadas.",
+                icon = Icons.Filled.Layers
+            ),
+            TourStep(
+                target = TourTarget.PEDIDOS_CART_FAB,
+                title = "Carrito de Pedidos",
+                description = "Accede a tu carrito en cualquier momento para agregar cantidades, despachar pedidos y registrar pagos al instante.",
+                icon = Icons.Filled.ShoppingCart
+            ),
+
+            // MODO 3: TIENDA
+            TourStep(
+                target = TourTarget.TIENDA_METRICS,
+                title = "Resumen de tu Tienda 🏪",
+                description = "Visualiza el valor monetario total de tu inventario en tiempo real y la ganancia neta obtenida por tus ventas.",
+                icon = Icons.Filled.AccountBalanceWallet
+            ),
+            TourStep(
+                target = TourTarget.TIENDA_INVENTORY_BTN,
+                title = "Inventario de Productos",
+                description = "Agrega y edita tus productos, ajusta precios de costo y venta, códigos de barra y alertas de stock bajo.",
+                icon = Icons.Filled.Storefront
+            ),
+            TourStep(
+                target = TourTarget.TIENDA_SCANNER_BTN,
+                title = "Escáner Visual IA 📸",
+                description = "¡Reconocimiento inteligente! Enfoca la cámara a tus productos y la IA los sumará automáticamente al carrito sin tocar la pantalla.",
+                icon = Icons.Filled.CameraAlt
+            ),
+            TourStep(
+                target = TourTarget.TIENDA_CHECKOUT_BAR,
+                title = "Historial de Ventas y Cobros",
+                description = "Consulta todas las transacciones realizadas en la tienda, clientes fiados y despacha pedidos con cálculo de vuelto.",
+                icon = Icons.Filled.ShoppingCart
+            )
+        )
+    }
+
+    // Sincronizar automáticamente la pestaña activa con el paso del tour
+    LaunchedEffect(currentTourStepIndex, isTourActive) {
+        if (isTourActive) {
+            when (currentTourStepIndex) {
+                in 0..5 -> if (currentTab != 0) currentTab = 0
+                in 6..9 -> if (currentTab != 1) currentTab = 1
+                in 10..13 -> if (currentTab != 2) currentTab = 2
+            }
+        }
+    }
+
+    LaunchedEffect(viewModel.userId) {
+        delay(1000L)
+        val hasCompleted = tourPrefs.getBoolean("tour_completed", false)
+        if (!hasCompleted && currentRole != "BLOQUEADO_SISTEMA") {
+            isTourActive = true
+            currentTourStepIndex = 0
+        }
+    }
+
     val crownEmoji = when (normalizedRole) { "INVITADO", "INVITADO_PRUEBA", "MADERA" -> "🪵"; "PRUEBA", "INVITADO-GOLD" -> "⏳"; "BÁSICO", "BRONCE" -> "🥉"; "PREMIUM", "PLATA" -> "🥈"; "GOLD" -> "🥇"; "ADMIN" -> "👑"; else -> "🪵" }
 
-    Scaffold(
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (!showInventoryScreen) {
@@ -509,7 +677,13 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     TopAppBar(
                         title = {
                             val firstName = localUserName.split(" ").first()
-                            Column(modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { showProfileDialog = true }.padding(horizontal = 4.dp, vertical = 2.dp)) {
+                            Column(
+                                modifier = Modifier
+                                    .onGloballyPositioned { tourTargetsBounds[TourTarget.PROFILE] = it.boundsInWindow() }
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { showProfileDialog = true }
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                            ) {
                                 Text(text = if (currentTab == 0) "Hola, $firstName $crownEmoji" else "Tienda de $firstName 🏪", fontWeight = FontWeight.Bold, fontSize = 20.sp)
                                 if (viewModel.selectedCountry == "Venezuela" && viewModel.bcvRate > 0) {
                                     Text(text = "Tasa BCV: ${formatBs(viewModel.bcvRate)}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f))
@@ -527,10 +701,16 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                     )
                                 }
                             }
-                            IconButton(onClick = { showCalendarDialog = true }) { Icon(Icons.Filled.DateRange, "Calendario") }
+                            IconButton(
+                                onClick = { showCalendarDialog = true },
+                                modifier = Modifier.onGloballyPositioned { tourTargetsBounds[TourTarget.CALENDAR] = it.boundsInWindow() }
+                            ) { Icon(Icons.Filled.DateRange, "Calendario") }
 
                             Box {
-                                IconButton(onClick = { showMenu = true }) { Icon(Icons.Filled.MoreVert, "Menú") }
+                                IconButton(
+                                    onClick = { showMenu = true },
+                                    modifier = Modifier.onGloballyPositioned { tourTargetsBounds[TourTarget.MENU] = it.boundsInWindow() }
+                                ) { Icon(Icons.Filled.MoreVert, "Menú") }
                                 if (unreadCount > 0) {
                                     Box(modifier = Modifier.align(Alignment.TopEnd).padding(end = 8.dp, top = 8.dp).size(12.dp).clip(CircleShape).background(Color.Red), contentAlignment = Alignment.Center) {
                                         Text(unreadCount.toString(), color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
@@ -541,6 +721,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
                                 if (currentRole == "ADMIN") {
                                     DropdownMenuItem(text = { Text("🛠️ Panel de Administrador") }, onClick = { showAdminPanelDialog = true; showMenu = false })
+                                    DropdownMenuItem(text = { Text("🖥️ Backend") }, onClick = { showBackendViewerDialog = true; showMenu = false })
                                     DropdownMenuItem(text = { Row(verticalAlignment = Alignment.CenterVertically) { Text("💬 Mensajes de Clientes"); if (unreadCount > 0) { Spacer(modifier = Modifier.width(8.dp)); Box(modifier = Modifier.size(20.dp).clip(CircleShape).background(Color.Red), contentAlignment = Alignment.Center) { Text(unreadCount.toString(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold) } } } }, onClick = { showAdminChatList = true; showMenu = false })
                                     Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp)
                                 } else {
@@ -587,22 +768,31 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         },
         bottomBar = {
             if (!showInventoryScreen && currentRole != "BLOQUEADO_SISTEMA") {
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) {
+                NavigationBar(
+                    modifier = Modifier.onGloballyPositioned { tourTargetsBounds[TourTarget.BOTTOM_NAV] = it.boundsInWindow() },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 8.dp
+                ) {
                     NavigationBarItem(icon = { Icon(Icons.Filled.Person, "Personal") }, label = { Text("Personal") }, selected = currentTab == 0, onClick = { currentTab = 0 }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
                     NavigationBarItem(icon = { Icon(Icons.Filled.ShoppingCart, "Pedidos") }, label = { Text("Pedidos") }, selected = currentTab == 1, onClick = { currentTab = 1 }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
-                            NavigationBarItem(icon = { Icon(Icons.Filled.Storefront, "Tienda") }, label = { Text("Tienda") }, selected = currentTab == 2, onClick = { currentTab = 2 }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
+                    NavigationBarItem(icon = { Icon(Icons.Filled.Storefront, "Tienda") }, label = { Text("Tienda") }, selected = currentTab == 2, onClick = { currentTab = 2 }, colors = NavigationBarItemDefaults.colors(selectedIconColor = MaterialTheme.colorScheme.primary, selectedTextColor = MaterialTheme.colorScheme.primary))
                 }
             }
         },
         floatingActionButton = {
             if (!showInventoryScreen && currentTab == 0 && currentRole != "BLOQUEADO_SISTEMA") {
-                FloatingActionButton(onClick = {
-                    if (currentRole == "INVITADO_PRUEBA") {
-                        Toast.makeText(context, "Modo Restringido: Solo puedes visualizar información.", Toast.LENGTH_SHORT).show()
-                    } else {
-                        showAddDialog = true
-                    }
-                }, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary) {
+                FloatingActionButton(
+                    onClick = {
+                        if (currentRole == "INVITADO_PRUEBA") {
+                            Toast.makeText(context, "Modo Restringido: Solo puedes visualizar información.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            showAddDialog = true
+                        }
+                    },
+                    modifier = Modifier.onGloballyPositioned { tourTargetsBounds[TourTarget.FAB_ADD] = it.boundsInWindow() },
+                    containerColor = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary
+                ) {
                     Icon(Icons.Filled.Add, "Agregar")
                 }
             }
@@ -760,23 +950,30 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     onAddImageClick = {
                         productForQuickImageUpdate = it
                         showQuickImageSourceDialog = true
-                    }
+                    },
+                    onOpenScanner = { showVisualScannerDialog = true }
                 )
             } else {
                 Crossfade(targetState = currentTab, label = "TabSwitch") { tab ->
                     if (tab == 0) {
                         Column(modifier = Modifier.fillMaxSize()) {
-                            DashboardCard(
-                                balance = balance,
-                                income = totalIncome,
-                                expense = totalExpense,
-                                cashExpense = personalCashExpense,
-                                digitalExpense = personalDigitalExpense,
-                                onCashClick = { showCashExpensesDialog = true },
-                                onDigitalClick = { showDigitalExpensesDialog = true },
-                                onIncomeClick = { showAllIncomesDialog = true },
-                                onExpenseClick = { showAllExpensesDialog = true }
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onGloballyPositioned { tourTargetsBounds[TourTarget.DASHBOARD] = it.boundsInWindow() }
+                            ) {
+                                DashboardCard(
+                                    balance = balance,
+                                    income = totalIncome,
+                                    expense = totalExpense,
+                                    cashExpense = personalCashExpense,
+                                    digitalExpense = personalDigitalExpense,
+                                    onCashClick = { showCashExpensesDialog = true },
+                                    onDigitalClick = { showDigitalExpensesDialog = true },
+                                    onIncomeClick = { showAllIncomesDialog = true },
+                                    onExpenseClick = { showAllExpensesDialog = true }
+                                )
+                            }
                             AnimatedVisibility(visible = viewModel.minBalanceThreshold > 0 && balance < viewModel.minBalanceThreshold) {
                                 Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).background(Color(0xFFD32F2F), RoundedCornerShape(8.dp)).padding(12.dp)) {
                                     Text("⚠️ ¡Alerta! Tu saldo está por debajo del límite crítico (${formatMoneyMain(viewModel.minBalanceThreshold, viewModel.selectedCountry)}).", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -839,7 +1036,21 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 }
                             }
                         }
-                    } else if (tab == 1) { ComercioScreen(viewModel, comercioPedidos, comercioProducts, comercioMovements, viewModel.selectedCountry, viewModel.bcvRate, onOpenHistory = { showComercioPedidosHistoryDialog = true }, showSearch = showComercioSearch, onToggleSearch = { showComercioSearch = !showComercioSearch }, onEditFiador = { fiadorToEdit = it; showFiadorDialog = true }) } else {
+                    } else if (tab == 1) {
+                        ComercioScreen(
+                            viewModel,
+                            comercioPedidos,
+                            comercioProducts,
+                            comercioMovements,
+                            viewModel.selectedCountry,
+                            viewModel.bcvRate,
+                            onOpenHistory = { showComercioPedidosHistoryDialog = true },
+                            showSearch = showComercioSearch,
+                            onToggleSearch = { showComercioSearch = !showComercioSearch },
+                            onEditFiador = { fiadorToEdit = it; showFiadorDialog = true },
+                            onPositionTourTarget = { target, coords -> tourTargetsBounds[target] = coords.boundsInWindow() }
+                        )
+                    } else {
                         StoreScreen(
                             products = products,
                             transactions = transactions,
@@ -851,6 +1062,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             bcvRate = viewModel.bcvRate,
                             onOpenInventory = { showInventoryScreen = true },
                             onOpenCheckout = { showCheckoutDialog = true },
+                            onOpenScanner = { showVisualScannerDialog = true },
                             onResetProfitsClick = { showResetProfitsDialog = true },
                             onDeleteVentas = { list -> viewModel.deleteTransactionsList(list) },
                             showPremiumToast = {
@@ -868,7 +1080,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 viewModel.restoreFiador(nameToRestore, totalAmount, paidAmount, context) { msg ->
                                     customToastMessage = msg
                                 }
-                            }
+                            },
+                            onPositionTourTarget = { target, coords -> tourTargetsBounds[target] = coords.boundsInWindow() }
                         )
                     }
                 }
@@ -1227,28 +1440,25 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
 
         if (showQuickImageSourceDialog) {
-            AlertDialog(
-                onDismissRequest = {
+            com.xxcamixx.contabilidad.ui.dialogs.ImageSourceDialog(
+                onDismiss = {
                     showQuickImageSourceDialog = false
                     productForQuickImageUpdate = null
                 },
-                title = { Text("Elegir origen") },
-                text = { Text("¿Desde dónde deseas seleccionar la imagen?") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showQuickImageSourceDialog = false
-                        quickFileLauncher.launch(arrayOf("image/*"))
-                    }) {
-                        Text("Archivos")
+                onSelectCamera = {
+                    try {
+                        val (_, uri) = com.xxcamixx.contabilidad.util.ImageStorageManager.createCameraTempUri(context)
+                        tempQuickCameraUri = uri
+                        quickCameraLauncher.launch(uri)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
                 },
-                dismissButton = {
-                    TextButton(onClick = {
-                        showQuickImageSourceDialog = false
-                        quickGalleryLauncher.launch("image/*")
-                    }) {
-                        Text("Galería")
-                    }
+                onSelectGallery = {
+                    quickGalleryLauncher.launch("image/*")
+                },
+                onSelectFileManager = {
+                    quickFileLauncher.launch(arrayOf("image/*"))
                 }
             )
         }
@@ -1283,7 +1493,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             imageUri = productDraftState.imageUri,
                             category = productDraftState.category,
                             context = context,
-                            onConfigured = { msg -> customToastMessage = msg }
+                            onConfigured = { msg -> customToastMessage = msg },
+                            featureVector = productDraftState.featureVector
                         )
                     } else {
                         viewModel.editProduct(
@@ -1296,7 +1507,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 expirationDateInMillis = expDate,
                                 minStock = minStock,
                                 imageUri = productDraftState.imageUri,
-                                category = productDraftState.category
+                                category = productDraftState.category,
+                                featureVector = productDraftState.featureVector ?: productToEdit!!.featureVector
                             ),
                             context = context,
                             onConfigured = { msg -> customToastMessage = msg }
@@ -1363,6 +1575,26 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                     showCheckoutDialog = false
                     showFiadorDialog = true
                 }
+            )
+        }
+
+        // --- 6.10.1. ESCÁNER VISUAL DE PRODUCTOS (IA / AUTO-CARRITO) ---
+        if (showVisualScannerDialog) {
+            VisualProductScannerDialog(
+                products = products,
+                shoppingCart = shoppingCart,
+                selectedCountry = viewModel.selectedCountry,
+                onAddToCart = { prod, qty ->
+                    val existing = shoppingCart.find { it.first.id == prod.id }
+                    if (existing != null) {
+                        val idx = shoppingCart.indexOf(existing)
+                        shoppingCart[idx] = existing.copy(second = existing.second + qty)
+                    } else {
+                        shoppingCart.add(Pair(prod, qty))
+                    }
+                },
+                onOpenCheckout = { showCheckoutDialog = true },
+                onDismiss = { showVisualScannerDialog = false }
             )
         }
 
@@ -1919,7 +2151,49 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         }
                         Divider(color = Color.Gray.copy(alpha = 0.2f))
 
-                        // --- 4. MONEDA DE LA APP (Mantenido intacto) ---
+                        // --- 4. TOUR GUIADO DE LA APP ---
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showOptionsDialog = false
+                                    currentTab = 0
+                                    currentTourStepIndex = 0
+                                    isTourActive = true
+                                }
+                                .padding(vertical = 16.dp)
+                        ) {
+                            Icon(Icons.Filled.School, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Tour Guiado (Tutorial)", fontSize = 16.sp)
+                                Text("Ver guía paso a paso con recuadros interactivos", fontSize = 12.sp, color = Color.Gray)
+                            }
+                        }
+                        Divider(color = Color.Gray.copy(alpha = 0.2f))
+
+                        // --- 5. RUTA DE IMÁGENES (100% LOCAL) ---
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showOptionsDialog = false
+                                    showImageStorageDialog = true
+                                }
+                                .padding(vertical = 16.dp)
+                        ) {
+                            Icon(Icons.Filled.FolderSpecial, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Ruta de Imágenes (100% Local)", fontSize = 16.sp)
+                                Text("Configura la carpeta de fotos e IA en tu teléfono (cero servidor)", fontSize = 12.sp, color = Color.Gray)
+                            }
+                        }
+                        Divider(color = Color.Gray.copy(alpha = 0.2f))
+
+                        // --- 5. MONEDA DE LA APP (Mantenido intacto) ---
                         Spacer(Modifier.height(16.dp))
                         Text("Moneda de la Aplicación", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.Gray)
                         Spacer(Modifier.height(8.dp))
@@ -1937,6 +2211,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
 
         if (showAdminChatList && currentRole == "ADMIN") { AdminChatListDialog(onDismiss = { showAdminChatList = false }, onSelectClient = { email -> chatTargetEmail = email; showAdminChatList = false; showChatDialog = true }) }
+        if (showBackendViewerDialog && currentRole == "ADMIN") { BackendViewerDialog(onDismiss = { showBackendViewerDialog = false }) }
         if (showChatDialog) { ChatDialog(currentUserEmail = viewModel.userId, targetClientEmail = chatTargetEmail, isAdmin = (currentRole == "ADMIN"), onDismiss = { showChatDialog = false }) }
 
         val isCurrentGoldOrSuperior = normalizedRole == "GOLD" || normalizedRole == "ADMIN" || normalizedRole == "PRUEBA" || normalizedRole == "INVITADO-GOLD" || normalizedRole.contains("GOLD")
@@ -2009,5 +2284,39 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 onRemove = { viewModel.removeCategory(it) }
             )
         }
-    }
-}
+
+        if (showImageStorageDialog) {
+            com.xxcamixx.contabilidad.ui.dialogs.ImageStorageSettingsDialog(
+                onDismiss = { showImageStorageDialog = false }
+            )
+        }
+    } // Cierra Scaffold
+
+    // --- OVERLAY INTERACTIVO DEL PRODUCT TOUR (ONBOARDING) ---
+    CoachMarkOverlay(
+        visible = isTourActive,
+        steps = tourSteps,
+        currentStepIndex = currentTourStepIndex,
+        targetsBounds = tourTargetsBounds,
+        onNext = {
+            if (currentTourStepIndex < tourSteps.size - 1) {
+                currentTourStepIndex++
+            }
+        },
+        onPrev = {
+            if (currentTourStepIndex > 0) {
+                currentTourStepIndex--
+            }
+        },
+        onSkip = {
+            isTourActive = false
+            tourPrefs.edit().putBoolean("tour_completed", true).apply()
+        },
+        onFinish = {
+            isTourActive = false
+            tourPrefs.edit().putBoolean("tour_completed", true).apply()
+            Toast.makeText(context, "¡Listo! Ya conoces las funciones principales 🎉", Toast.LENGTH_SHORT).show()
+        }
+    )
+} // Cierra Box
+} // Cierra FinanceScreen

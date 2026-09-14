@@ -46,7 +46,7 @@ fun AddComercioProductDialog(
     country: String,
     bcvRate: Double,
     onDismiss: () -> Unit,
-    onSave: (name: String, unit: String, quantity: Double, cost: Double, salePrice: Double, imageUri: String?) -> Unit
+    onSave: (name: String, unit: String, quantity: Double, cost: Double, salePrice: Double, imageUri: String?, featureVector: String?) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var unit by remember { mutableStateOf("Uds") }
@@ -54,6 +54,7 @@ fun AddComercioProductDialog(
     var costStr by remember { mutableStateOf("") }
     var salePriceStr by remember { mutableStateOf("") }
     var imageUri by remember { mutableStateOf<String?>(null) }
+    var featureVector by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -64,10 +65,21 @@ fun AddComercioProductDialog(
         if (uri != null) {
             coroutineScope.launch(Dispatchers.IO) {
                 val savedUri = saveImageToInternalStorage(context, uri)
+                val vec = if (savedUri != null) com.xxcamixx.contabilidad.ai.ImageFeatureExtractor.extractFeaturesFromUri(context, savedUri) else null
+                val vecStr = if (vec != null) com.xxcamixx.contabilidad.ai.ImageFeatureExtractor.vectorToString(vec) else null
                 withContext(Dispatchers.Main) {
                     imageUri = savedUri
+                    featureVector = vecStr
                 }
             }
+        }
+    }
+
+    var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        val uri = tempCameraUri
+        if (success && uri != null) {
+            onImagePicked(uri)
         }
     }
 
@@ -82,6 +94,15 @@ fun AddComercioProductDialog(
     if (showImageSourceDialog) {
         ImageSourceDialog(
             onDismiss = { showImageSourceDialog = false },
+            onSelectCamera = {
+                try {
+                    val (_, uri) = com.xxcamixx.contabilidad.util.ImageStorageManager.createCameraTempUri(context)
+                    tempCameraUri = uri
+                    cameraLauncher.launch(uri)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            },
             onSelectGallery = { galleryPickerLauncher.launch("image/*") },
             onSelectFileManager = { filePickerLauncher.launch(arrayOf("image/*")) }
         )
@@ -379,7 +400,7 @@ fun AddComercioProductDialog(
                         val c = costStr.toDoubleOrNull() ?: 0.0
                         val sp = salePriceStr.toDoubleOrNull() ?: 0.0
                         if (name.isNotBlank() && q > 0 && c > 0 && sp > 0) {
-                            onSave(name, unit, q, c, sp, imageUri)
+                            onSave(name, unit, q, c, sp, imageUri, featureVector)
                             onDismiss()
                         }
                     },

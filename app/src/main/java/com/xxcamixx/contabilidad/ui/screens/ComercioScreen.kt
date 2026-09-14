@@ -47,10 +47,15 @@ import com.xxcamixx.contabilidad.ui.dialogs.AddComercioProductDialog
 import com.xxcamixx.contabilidad.ui.dialogs.EditComercioProductDialog
 import com.xxcamixx.contabilidad.ui.dialogs.ExpandedImageDialog
 import com.xxcamixx.contabilidad.ui.dialogs.CustomDatePickerDialog
+import androidx.compose.foundation.BorderStroke
 import com.xxcamixx.contabilidad.ui.dialogs.CustomTimePickerDialog
 import com.xxcamixx.contabilidad.ui.dialogs.ImageSourceDialog
+import com.xxcamixx.contabilidad.ui.dialogs.VisualComercioScannerDialog
 import com.xxcamixx.contabilidad.ui.components.PaymentInputRow
 import com.xxcamixx.contabilidad.util.AmountVisualTransformation
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import com.xxcamixx.contabilidad.ui.components.tour.TourTarget
 import com.xxcamixx.contabilidad.util.cleanDecimalInput
 import com.xxcamixx.contabilidad.util.loadBitmapFromUri
 import com.xxcamixx.contabilidad.util.saveImageToInternalStorage
@@ -175,7 +180,8 @@ fun ComercioScreen(
     onOpenHistory: () -> Unit = {},
     showSearch: Boolean = true,
     onToggleSearch: () -> Unit = {},
-    onEditFiador: (com.xxcamixx.contabilidad.model.Fiador) -> Unit = {}
+    onEditFiador: (com.xxcamixx.contabilidad.model.Fiador) -> Unit = {},
+    onPositionTourTarget: (TourTarget, LayoutCoordinates) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -218,6 +224,7 @@ fun ComercioScreen(
     // Cart
     val cart = remember { mutableStateListOf<Triple<ComercioProduct, Double, Double>>() }
     var showCartDialog by remember { mutableStateOf(false) }
+    var showVisualComercioScanner by remember { mutableStateOf(false) }
     var productToCart by remember { mutableStateOf<ComercioProduct?>(null) }
 
     val fiadores by viewModel.fiadores.collectAsState(initial = emptyList())
@@ -237,7 +244,8 @@ fun ComercioScreen(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 10.dp),
+                    .padding(bottom = 10.dp)
+                    .onGloballyPositioned { onPositionTourTarget(TourTarget.PEDIDOS_METRICS, it) },
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
             ) {
@@ -256,7 +264,9 @@ fun ComercioScreen(
                             ),
                             shape = RoundedCornerShape(10.dp),
                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            modifier = Modifier.height(34.dp)
+                            modifier = Modifier
+                                .height(34.dp)
+                                .onGloballyPositioned { onPositionTourTarget(TourTarget.PEDIDOS_ADD_BTN, it) }
                         ) {
                             Icon(Icons.Filled.Add, contentDescription = "Nuevo", modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
@@ -363,7 +373,8 @@ fun ComercioScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp),
+                    .padding(horizontal = 4.dp)
+                    .onGloballyPositioned { onPositionTourTarget(TourTarget.PEDIDOS_TABS, it) },
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1205,18 +1216,32 @@ fun ComercioScreen(
             }
         }
 
-        // Cart FAB
-        if (cart.isNotEmpty() && viewMode == "INVENTARIO") {
-            FloatingActionButton(
-                onClick = { showCartDialog = true },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Row(modifier = Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.ShoppingCart, contentDescription = "Carrito", tint = MaterialTheme.colorScheme.onPrimary)
-                    Spacer(Modifier.width(8.dp))
-                    Text("${cart.size}", color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.Bold)
+        // Cart FAB (Siempre visible en la parte inferior derecha)
+        FloatingActionButton(
+            onClick = { showCartDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .onGloballyPositioned { onPositionTourTarget(TourTarget.PEDIDOS_CART_FAB, it) },
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+        ) {
+            val totalCount = cart.sumOf { it.second }
+            if (cart.isNotEmpty()) {
+                BadgedBox(
+                    badge = {
+                        Badge(
+                            containerColor = Color.Red,
+                            contentColor = Color.White
+                        ) {
+                            Text(formatQty(totalCount), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                ) {
+                    Icon(Icons.Filled.ShoppingCart, contentDescription = "Carrito")
                 }
+            } else {
+                Icon(Icons.Filled.ShoppingCart, contentDescription = "Carrito")
             }
         }
     }
@@ -1789,7 +1814,7 @@ fun ComercioScreen(
             country = country,
             bcvRate = bcvRate,
             onDismiss = { productToEdit = null },
-            onSave = { name, unit, stock, cost, salePrice, imageUri ->
+            onSave = { name, unit, stock, cost, salePrice, imageUri, featureVector ->
                 val diff = stock - p.quantityInStock
                 viewModel.updateComercioProduct(p.copy(
                     name = name,
@@ -1798,7 +1823,8 @@ fun ComercioScreen(
                     totalPurchased = maxOf(0.0, p.totalPurchased + diff),
                     costPerUnit = cost,
                     salePricePerUnit = salePrice,
-                    imageUri = imageUri
+                    imageUri = imageUri,
+                    featureVector = featureVector ?: p.featureVector
                 ))
                 productToEdit = null
             }
@@ -1968,6 +1994,14 @@ fun ComercioScreen(
             }
         }
 
+        var tempPedidoCameraUri by remember { mutableStateOf<Uri?>(null) }
+        val pedidoCameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+            val uri = tempPedidoCameraUri
+            if (success && uri != null) {
+                onPedidoImagePicked(uri)
+            }
+        }
+
         val galleryPickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
             onPedidoImagePicked(uri)
         }
@@ -1979,6 +2013,15 @@ fun ComercioScreen(
         if (showPedidoImageSourceDialog) {
             ImageSourceDialog(
                 onDismiss = { showPedidoImageSourceDialog = false },
+                onSelectCamera = {
+                    try {
+                        val (_, uri) = com.xxcamixx.contabilidad.util.ImageStorageManager.createCameraTempUri(context)
+                        tempPedidoCameraUri = uri
+                        pedidoCameraLauncher.launch(uri)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                },
                 onSelectGallery = { galleryPickerLauncher.launch("image/*") },
                 onSelectFileManager = { filePickerLauncher.launch(arrayOf("image/*")) }
             )
@@ -2088,8 +2131,8 @@ fun ComercioScreen(
             country = country,
             bcvRate = bcvRate,
             onDismiss = { activePedidoForAdd = null },
-            onSave = { name, unit, qty, cost, sp, imageUri ->
-                viewModel.addComercioProduct(pedido.id, name, unit, qty, cost, sp, imageUri)
+            onSave = { name, unit, qty, cost, sp, imageUri, featureVector ->
+                viewModel.addComercioProduct(pedido.id, name, unit, qty, cost, sp, imageUri, featureVector)
                 expandedPedidos = expandedPedidos + pedido.id
             }
         )
@@ -2270,6 +2313,8 @@ fun ComercioScreen(
         var tempDueDateMillis by remember { mutableStateOf(System.currentTimeMillis() + 7 * 86400000L) }
         var showDatePicker by remember { mutableStateOf(false) }
         var showTimePicker by remember { mutableStateOf(false) }
+        var showManualProductSearchDialog by remember { mutableStateOf(false) }
+        var manualSearchQuery by remember { mutableStateOf("") }
 
         val cartTotal = cart.sumOf { it.second * it.third }
 
@@ -2349,10 +2394,102 @@ fun ComercioScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 480.dp),
+                        .heightIn(max = 540.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (step == 1) {
+                        // Opciones principales para agregar al carrito
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Opción 1: Escanear con Cámara IA
+                            Button(
+                                onClick = {
+                                    showCartDialog = false
+                                    showVisualComercioScanner = true
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFFFFD700),
+                                    contentColor = Color.Black
+                                )
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        Icons.Filled.CameraAlt,
+                                        contentDescription = null,
+                                        tint = Color.Black,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Column(horizontalAlignment = Alignment.Start) {
+                                        Text(
+                                            text = "Escanear IA",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = Color.Black
+                                        )
+                                        Text(
+                                            text = "Cámara en vivo",
+                                            fontSize = 9.sp,
+                                            color = Color.Black.copy(alpha = 0.8f)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Opción 2: Buscar Manualmente
+                            Button(
+                                onClick = {
+                                    showManualProductSearchDialog = true
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                border = BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.5f))
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Search,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFFD700),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Column(horizontalAlignment = Alignment.Start) {
+                                        Text(
+                                            text = "Buscar Manual",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = Color.White
+                                        )
+                                        Text(
+                                            text = "Buscador y stock",
+                                            fontSize = 9.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         OutlinedTextField(
                             value = customerName,
                             onValueChange = { customerName = it },
@@ -2362,44 +2499,108 @@ fun ComercioScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
 
-                        Text("Productos a vender:", fontSize = 12.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold)
+                        if (cart.isEmpty()) {
+                            Text(
+                                "El carrito está vacío. Escanea con la cámara o toca 'Buscar Manual' para agregar productos.",
+                                fontSize = 12.sp,
+                                color = Color(0xFF9E9E9E),
+                                modifier = Modifier.padding(vertical = 12.dp)
+                            )
+                        } else {
+                            Text("Productos en el carrito (${cart.size}):", fontSize = 12.sp, color = Color(0xFF9E9E9E), fontWeight = FontWeight.SemiBold)
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false)
+                                    .heightIn(max = 200.dp)
+                            ) {
+                                items(cart.toList()) { item ->
+                                    val prod = item.first
+                                    val qty = item.second
+                                    val unitPrice = item.third
+                                    val availMore = prod.quantityInStock - cart.filter { it.first.id == prod.id }.sumOf { it.second }
 
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f, fill = false)
-                                .heightIn(max = 200.dp)
-                        ) {
-                            items(cart.toList()) { item ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            "${item.first.name} (${formatQty(item.second)}${item.first.unit})",
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(
-                                                formatMoneyMain(item.second * item.third, country),
-                                                color = Color(0xFF2196F3),
-                                                fontWeight = FontWeight.SemiBold
+                                                "${prod.name} (${prod.unit})",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
-                                            val secT = formatMoneySec(item.second * item.third, country, bcvRate)
-                                            if (secT.isNotEmpty()) {
-                                                Text(secT, color = Color.Gray, fontSize = 10.sp)
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    formatMoneyMain(qty * unitPrice, country),
+                                                    color = Color(0xFFFFD700),
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    fontSize = 12.sp
+                                                )
+                                                val secT = formatMoneySec(qty * unitPrice, country, bcvRate)
+                                                if (secT.isNotEmpty()) {
+                                                    Text(secT, color = Color(0xFF9E9E9E), fontSize = 10.sp)
+                                                }
+                                            }
+                                        }
+
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            IconButton(
+                                                onClick = {
+                                                    val idx = cart.indexOf(item)
+                                                    if (idx >= 0) {
+                                                        if (qty > 1.0) {
+                                                            cart[idx] = Triple(prod, qty - 1.0, unitPrice)
+                                                        } else {
+                                                            cart.removeAt(idx)
+                                                        }
+                                                    }
+                                                },
+                                                modifier = Modifier.size(30.dp)
+                                            ) {
+                                                Icon(Icons.Filled.Remove, contentDescription = "Menos", modifier = Modifier.size(16.dp))
+                                            }
+
+                                            Text(
+                                                formatQty(qty),
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 13.sp,
+                                                modifier = Modifier.padding(horizontal = 4.dp)
+                                            )
+
+                                            IconButton(
+                                                onClick = {
+                                                    val idx = cart.indexOf(item)
+                                                    if (idx >= 0 && availMore >= 1.0) {
+                                                        cart[idx] = Triple(prod, qty + 1.0, unitPrice)
+                                                    }
+                                                },
+                                                enabled = availMore >= 1.0,
+                                                modifier = Modifier.size(30.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.Add,
+                                                    contentDescription = "Más",
+                                                    modifier = Modifier.size(16.dp),
+                                                    tint = if (availMore >= 1.0) MaterialTheme.colorScheme.primary else Color(0xFF9E9E9E)
+                                                )
+                                            }
+
+                                            IconButton(
+                                                onClick = { cart.remove(item) },
+                                                modifier = Modifier.size(30.dp)
+                                            ) {
+                                                Icon(Icons.Filled.Delete, contentDescription = "Quitar", tint = Color.Red, modifier = Modifier.size(16.dp))
                                             }
                                         }
                                     }
-                                    IconButton(onClick = { cart.remove(item) }) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "Quitar", tint = Color.Red)
-                                    }
+                                    Divider(color = Color(0xFFB8860B).copy(alpha = 0.2f))
                                 }
-                                Divider(color = Color.LightGray.copy(alpha = 0.3f))
                             }
                         }
 
@@ -2425,7 +2626,7 @@ fun ComercioScreen(
                                     )
                                     val secTotal = formatMoneySec(cartTotal, country, bcvRate)
                                     if (secTotal.isNotEmpty()) {
-                                        Text(secTotal, fontSize = 11.sp, color = Color.Gray)
+                                        Text(secTotal, fontSize = 11.sp, color = Color(0xFF9E9E9E))
                                     }
                                 }
                             }
@@ -2724,9 +2925,242 @@ fun ComercioScreen(
             },
             dismissButton = null
         )
+
+        if (showManualProductSearchDialog) {
+            val candidateProducts = remember(products, manualSearchQuery, cart.toList()) {
+                val q = manualSearchQuery.trim().lowercase()
+                products.filter { p ->
+                    p.quantityInStock > 0 && (q.isEmpty() || p.name.lowercase().contains(q))
+                }
+            }
+
+            AlertDialog(
+                onDismissRequest = { showManualProductSearchDialog = false },
+                properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true),
+                containerColor = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(20.dp),
+                title = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Search, contentDescription = null, tint = Color(0xFFFFD700))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Buscar Productos", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        }
+                        IconButton(onClick = { showManualProductSearchDialog = false }, modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cerrar")
+                        }
+                    }
+                },
+                text = {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = manualSearchQuery,
+                            onValueChange = { manualSearchQuery = it },
+                            placeholder = { Text("Buscar por nombre...", fontSize = 13.sp) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            trailingIcon = {
+                                if (manualSearchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { manualSearchQuery = "" }) {
+                                        Icon(Icons.Filled.Close, contentDescription = "Limpiar", modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+
+                        if (candidateProducts.isEmpty()) {
+                            Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (manualSearchQuery.isEmpty()) "No hay productos con stock disponible." else "No se encontraron productos para \"$manualSearchQuery\"",
+                                    fontSize = 13.sp,
+                                    color = Color(0xFF9E9E9E),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                items(candidateProducts) { p ->
+                                    val availableStock = getAvailableStock(p)
+                                    val inCartQty = cart.find { it.first.id == p.id }?.second ?: 0.0
+
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(10.dp),
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                        )
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(p.name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Spacer(Modifier.height(2.dp))
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(
+                                                        "${formatQty(availableStock)} ${p.unit} disp.",
+                                                        fontSize = 11.sp,
+                                                        color = if (availableStock > 0) Color(0xFF9E9E9E) else Color.Red
+                                                    )
+                                                    Text(
+                                                        formatMoneyMain(p.salePricePerUnit, country),
+                                                        fontSize = 12.sp,
+                                                        color = Color(0xFFFFD700),
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                                if (inCartQty > 0) {
+                                                    val inCartTotal = inCartQty * p.salePricePerUnit
+                                                    val secTotal = formatMoneySec(inCartTotal, country, bcvRate)
+                                                    val secStr = if (secTotal.isNotEmpty()) " ($secTotal)" else ""
+                                                    Text(
+                                                        "En carrito: ${formatQty(inCartQty)} • Total: ${formatMoneyMain(inCartTotal, country)}$secStr",
+                                                        fontSize = 11.sp,
+                                                        color = Color(0xFF81C784),
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+
+                                            val addStep = if (p.unit == "Uds") 1.0 else if (availableStock >= 1.0) 1.0 else availableStock
+                                            if (inCartQty > 0) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    IconButton(
+                                                        onClick = {
+                                                            val existingIdx = cart.indexOfFirst { it.first.id == p.id }
+                                                            if (existingIdx >= 0) {
+                                                                val old = cart[existingIdx]
+                                                                if (old.second > 1.0) {
+                                                                    cart[existingIdx] = Triple(old.first, old.second - 1.0, old.third)
+                                                                } else {
+                                                                    cart.removeAt(existingIdx)
+                                                                }
+                                                            }
+                                                        },
+                                                        modifier = Modifier.size(30.dp)
+                                                    ) {
+                                                        Icon(Icons.Filled.Remove, contentDescription = "Menos", modifier = Modifier.size(16.dp))
+                                                    }
+
+                                                    Button(
+                                                        onClick = {
+                                                            if (availableStock > 0.0 && addStep > 0.0) {
+                                                                val existingIdx = cart.indexOfFirst { it.first.id == p.id }
+                                                                if (existingIdx >= 0) {
+                                                                    val old = cart[existingIdx]
+                                                                    cart[existingIdx] = Triple(old.first, old.second + addStep, old.third)
+                                                                } else {
+                                                                    cart.add(Triple(p, addStep, p.salePricePerUnit))
+                                                                }
+                                                            }
+                                                        },
+                                                        enabled = availableStock > 0.0,
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black),
+                                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                        modifier = Modifier.height(34.dp)
+                                                    ) {
+                                                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                                        Spacer(Modifier.width(2.dp))
+                                                        Text(if (p.unit == "Uds") "+1" else "+${formatQty(addStep)}", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                                    }
+                                                }
+                                            } else {
+                                                Button(
+                                                    onClick = {
+                                                        if (availableStock > 0.0 && addStep > 0.0) {
+                                                            cart.add(Triple(p, addStep, p.salePricePerUnit))
+                                                        }
+                                                    },
+                                                    enabled = availableStock > 0.0,
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                    modifier = Modifier.height(36.dp)
+                                                ) {
+                                                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                    Spacer(Modifier.width(4.dp))
+                                                    Text(if (p.unit == "Uds") "+1" else "+${formatQty(addStep)}", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    val manualCartTotal = cart.sumOf { it.second * it.third }
+                    Button(
+                        onClick = { showManualProductSearchDialog = false },
+                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFD700), contentColor = Color.Black)
+                    ) {
+                        Text(
+                            if (cart.isEmpty()) "Listo / Volver al Carrito 🛒"
+                            else "Listo / Volver al Carrito (${formatMoneyMain(manualCartTotal, country)}) 🛒",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+                },
+                dismissButton = null
+            )
+        }
     }
 
     if (expandedImageUri != null) {
         ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null })
+    }
+
+    if (showVisualComercioScanner) {
+        VisualComercioScannerDialog(
+            products = products,
+            cart = cart,
+            country = country,
+            bcvRate = bcvRate,
+            onAddToCart = { prod, qty ->
+                val avail = getAvailableStock(prod)
+                if (avail >= qty && qty > 0.0) {
+                    val existingIdx = cart.indexOfFirst { it.first.id == prod.id }
+                    if (existingIdx >= 0) {
+                        val old = cart[existingIdx]
+                        cart[existingIdx] = Triple(old.first, old.second + qty, old.third)
+                    } else {
+                        cart.add(Triple(prod, qty, prod.salePricePerUnit))
+                    }
+                }
+            },
+            onOpenCart = {
+                showVisualComercioScanner = false
+                showCartDialog = true
+            },
+            onDismiss = { showVisualComercioScanner = false }
+        )
     }
 }

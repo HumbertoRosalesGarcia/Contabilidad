@@ -544,7 +544,35 @@ fun ScheduledRemindersDialog(reminders: List<Reminder>, onDismiss: () -> Unit, o
 
 @Composable
 fun ScheduledFiadoresDialog(fiadores: List<Fiador>, onDismiss: () -> Unit, onDelete: (Fiador) -> Unit, onEdit: (Fiador) -> Unit, onCreateNew: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Quien me debe 🤝", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { if (fiadores.isEmpty()) { Text("No tienes personas que te deban dinero.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp)) } else { LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) { itemsIndexed(fiadores) { index, fiador -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(text = "${index + 1}.", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.width(28.dp)); Column(modifier = Modifier.weight(1f)) { val phoneStr = if(fiador.phone.isNotBlank()) " 📞 ${fiador.phone}" else ""; val remaining = fiador.amount - fiador.paidAmount; Text(fiador.name + phoneStr, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text("Resta: ${formatCOP(remaining)} (Total: ${formatCOP(fiador.amount)}) - ${fiador.reason}", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary); Text(formatDate(fiador.targetDateInMillis), fontSize = 12.sp, color = Color.Gray) }; IconButton(onClick = { onEdit(fiador) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = Color.Blue.copy(alpha = 0.7f)) }; IconButton(onClick = { onDelete(fiador) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(alpha = 0.7f)) } }; if (index < fiadores.size - 1) { Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp) } } } } }, confirmButton = { Button(onClick = onCreateNew) { Text("Agregar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } })
+    var fiadorToDelete by remember { mutableStateOf<Fiador?>(null) }
+
+    if (fiadorToDelete != null) {
+        val targetFiador = fiadorToDelete!!
+        AlertDialog(
+            onDismissRequest = { fiadorToDelete = null },
+            title = { Text("¿Eliminar deudor?", fontWeight = FontWeight.Bold) },
+            text = { Text("¿Estás seguro de que deseas eliminar a \"${targetFiador.name}\"? Esta acción no se puede deshacer.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val toDelete = targetFiador
+                        fiadorToDelete = null
+                        onDelete(toDelete)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Red, contentColor = Color.White)
+                ) {
+                    Text("Eliminar", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { fiadorToDelete = null }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Quien me debe 🤝", fontWeight = FontWeight.Bold) }, containerColor = MaterialTheme.colorScheme.surface, text = { if (fiadores.isEmpty()) { Text("No tienes personas que te deban dinero.", color = Color.Gray, modifier = Modifier.padding(vertical = 16.dp)) } else { LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) { itemsIndexed(fiadores) { index, fiador -> Row(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(text = "${index + 1}.", fontWeight = FontWeight.Bold, fontSize = 16.sp, modifier = Modifier.width(28.dp)); Column(modifier = Modifier.weight(1f)) { val phoneStr = if(fiador.phone.isNotBlank()) " 📞 ${fiador.phone}" else ""; val remaining = fiador.amount - fiador.paidAmount; Text(fiador.name + phoneStr, fontWeight = FontWeight.Bold, fontSize = 16.sp); Text("Resta: ${formatCOP(remaining)} (Total: ${formatCOP(fiador.amount)}) - ${fiador.reason}", fontSize = 13.sp, color = MaterialTheme.colorScheme.primary); Text(formatDate(fiador.targetDateInMillis), fontSize = 12.sp, color = Color.Gray) }; IconButton(onClick = { onEdit(fiador) }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Edit, contentDescription = "Editar", tint = Color.Blue.copy(alpha = 0.7f)) }; IconButton(onClick = { fiadorToDelete = fiador }, modifier = Modifier.size(36.dp)) { Icon(Icons.Filled.Delete, contentDescription = "Eliminar", tint = Color.Red.copy(alpha = 0.7f)) } }; if (index < fiadores.size - 1) { Divider(color = Color.Gray.copy(alpha = 0.2f), thickness = 1.dp) } } } } }, confirmButton = { Button(onClick = onCreateNew) { Text("Agregar") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

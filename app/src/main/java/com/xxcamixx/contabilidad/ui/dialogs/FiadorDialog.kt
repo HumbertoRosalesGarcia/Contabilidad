@@ -67,7 +67,7 @@ fun FiadorDialog(
     var name by remember { mutableStateOf(initialFiador?.name ?: initialName) }
     var phone by remember { mutableStateOf(initialFiador?.phone ?: "") }
     var tempDateMillis by remember { mutableStateOf<Long?>(initialFiador?.targetDateInMillis ?: preselectedDate) }
-    var activeScreen by remember { mutableStateOf(if (initialFiador == null && preselectedDate == null) "NEW_INFO" else if (initialFiador == null && preselectedDate != null) "NEW_TIME" else "EDIT_OPTIONS") }
+    var activeScreen by remember { mutableStateOf(if (initialFiador == null) "NEW_INFO" else "EDIT_OPTIONS") }
     var isEditDateOnly by remember { mutableStateOf(false) }
 
     val cartItems = remember { mutableStateListOf<Pair<Product, Int>>().apply { if (initialFiador == null) addAll(initialCart) } }
@@ -334,7 +334,12 @@ fun FiadorDialog(
                             if (activeScreen == "EDIT_INFO") {
                                 onConfirmEdit(initialFiador!!.copy(name = capName, phone = phone), tempDateMillis!!)
                             } else {
-                                name = capName; showDatePicker = true
+                                name = capName
+                                if (preselectedDate != null) {
+                                    activeScreen = "NEW_TIME"
+                                } else {
+                                    showDatePicker = true
+                                }
                             }
                         }
                     } else {

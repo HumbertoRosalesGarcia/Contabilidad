@@ -17,6 +17,7 @@ class ProductDraftState {
     var expiryDateMillis by mutableStateOf<Long?>(null)
     var imageUri by mutableStateOf<String?>(null)
     var category by mutableStateOf<String?>(null)
+    var featureVector by mutableStateOf<String?>(null)
 
     fun clear() {
         name = ""
@@ -29,6 +30,7 @@ class ProductDraftState {
         expiryDateMillis = null
         imageUri = null
         category = null
+        featureVector = null
     }
 
     fun loadFrom(product: Product) {
@@ -56,5 +58,6 @@ class ProductDraftState {
         expiryDateMillis = product.expirationDateInMillis
         imageUri = product.imageUri
         category = product.category
+        featureVector = product.featureVector
     }
 }

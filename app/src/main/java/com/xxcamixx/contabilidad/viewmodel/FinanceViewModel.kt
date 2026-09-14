@@ -33,6 +33,7 @@ import com.xxcamixx.contabilidad.model.ComercioMovement
 import com.xxcamixx.contabilidad.model.Reminder
 import com.xxcamixx.contabilidad.model.Transaction
 import com.xxcamixx.contabilidad.model.CierreSession
+import com.xxcamixx.contabilidad.network.AutoCierreWorker
 import com.xxcamixx.contabilidad.network.CloudSyncWorker
 import com.xxcamixx.contabilidad.network.RetrofitInstance
 import com.xxcamixx.contabilidad.receiver.ReminderReceiver
@@ -71,24 +72,51 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
 
     fun createCierreSession(mode: String, name: String, totalIncomes: Double, totalExpenses: Double) {
         viewModelScope.launch {
-            val session = CierreSession(
-                mode = mode,
-                name = name,
-                totalIncomes = totalIncomes,
-                totalExpenses = totalExpenses,
-                country = selectedCountry
-            )
-            val sessionId = dao.insertCierreSession(session).toInt()
+            if (mode == "TODOS") {
+                val modes = listOf("PERSONAL", "TIENDA", "PEDIDOS")
+                for (m in modes) {
+                    val session = CierreSession(
+                        mode = m,
+                        name = "$name ($m)",
+                        totalIncomes = totalIncomes,
+                        totalExpenses = totalExpenses,
+                        country = selectedCountry
+                    )
+                    val sessionId = dao.insertCierreSession(session).toInt()
+                    when (m) {
+                        "PERSONAL" -> {
+                            dao.updatePersonalTransactionsWithCierre(selectedCountry, sessionId)
+                            dao.updateFiadoresWithCierre(selectedCountry, sessionId, "PERSONAL")
+                        }
+                        "TIENDA" -> {
+                            dao.updateTiendaTransactionsWithCierre(selectedCountry, sessionId)
+                            dao.updateFiadoresWithCierre(selectedCountry, sessionId, "TIENDA")
+                        }
+                        "PEDIDOS" -> {
+                            dao.updateComercioMovementsWithCierre(selectedCountry, sessionId)
+                        }
+                    }
+                }
+            } else {
+                val session = CierreSession(
+                    mode = mode,
+                    name = name,
+                    totalIncomes = totalIncomes,
+                    totalExpenses = totalExpenses,
+                    country = selectedCountry
+                )
+                val sessionId = dao.insertCierreSession(session).toInt()
 
-            // Mark items as closed depending on mode
-            if (mode == "PERSONAL") {
-                dao.updatePersonalTransactionsWithCierre(selectedCountry, sessionId)
-                dao.updateFiadoresWithCierre(selectedCountry, sessionId, "PERSONAL")
-            } else if (mode == "TIENDA") {
-                dao.updateTiendaTransactionsWithCierre(selectedCountry, sessionId)
-                dao.updateFiadoresWithCierre(selectedCountry, sessionId, "TIENDA")
-            } else if (mode == "PEDIDOS") {
-                dao.updateComercioMovementsWithCierre(selectedCountry, sessionId)
+                // Mark items as closed depending on mode
+                if (mode == "PERSONAL") {
+                    dao.updatePersonalTransactionsWithCierre(selectedCountry, sessionId)
+                    dao.updateFiadoresWithCierre(selectedCountry, sessionId, "PERSONAL")
+                } else if (mode == "TIENDA") {
+                    dao.updateTiendaTransactionsWithCierre(selectedCountry, sessionId)
+                    dao.updateFiadoresWithCierre(selectedCountry, sessionId, "TIENDA")
+                } else if (mode == "PEDIDOS") {
+                    dao.updateComercioMovementsWithCierre(selectedCountry, sessionId)
+                }
             }
         }
     }
@@ -166,10 +194,18 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     var autoSyncHour by mutableStateOf(userPrefs.getInt("syncHour", 2)); private set
     var autoSyncMinute by mutableStateOf(userPrefs.getInt("syncMinute", 0)); private set
 
+    var autoCierreEnabled by mutableStateOf(userPrefs.getBoolean("autoCierreEnabled", false)); private set
+    var autoCierreFrequency by mutableStateOf(userPrefs.getString("autoCierreFrequency", "DIARIO") ?: "DIARIO"); private set
+    var autoCierreHour by mutableStateOf(userPrefs.getInt("autoCierreHour", 23)); private set
+    var autoCierreMinute by mutableStateOf(userPrefs.getInt("autoCierreMinute", 59)); private set
+    var autoCierreMode by mutableStateOf(userPrefs.getString("autoCierreMode", "TODOS") ?: "TODOS"); private set
+
     var pocketDebt by mutableStateOf(userPrefs.getFloat("pocketDebt_${_selectedCountryFlow.value}", if (_selectedCountryFlow.value == "Colombia") userPrefs.getFloat("pocketDebt", 0f) else 0f).toDouble()); private set
 
     init {
         scheduleAutoSync(application, autoSyncFrequency, autoSyncHour, autoSyncMinute)
+        scheduleAutoCierre(application, autoCierreEnabled, autoCierreFrequency, autoCierreHour, autoCierreMinute)
+        checkPendingAutoCierre()
         if (selectedCountry == "Venezuela") fetchBcvRate()
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -242,31 +278,131 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
+    fun updateAutoCierreSchedule(enabled: Boolean, frequency: String, hour: Int, minute: Int, mode: String) {
+        autoCierreEnabled = enabled
+        autoCierreFrequency = frequency
+        autoCierreHour = hour
+        autoCierreMinute = minute
+        autoCierreMode = mode
+
+        userPrefs.edit()
+            .putBoolean("autoCierreEnabled", enabled)
+            .putString("autoCierreFrequency", frequency)
+            .putInt("autoCierreHour", hour)
+            .putInt("autoCierreMinute", minute)
+            .putString("autoCierreMode", mode)
+            .apply()
+
+        scheduleAutoCierre(getApplication<Application>(), enabled, frequency, hour, minute)
+    }
+
+    private fun scheduleAutoCierre(application: Application, enabled: Boolean, frequency: String, hour: Int, minute: Int) {
+        val workManager = WorkManager.getInstance(application)
+        val workName = "AutoCierre_$userId"
+
+        if (!enabled || userId == "guest_user") {
+            workManager.cancelUniqueWork(workName)
+        } else {
+            val now = Calendar.getInstance()
+            val target = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, hour)
+                set(Calendar.MINUTE, minute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            if (target.before(now)) {
+                target.add(Calendar.DAY_OF_MONTH, 1)
+            }
+            val initialDelay = target.timeInMillis - now.timeInMillis
+
+            val intervalDays = when (frequency) {
+                "SEMANAL" -> 7L
+                "MENSUAL" -> 30L
+                else -> 1L
+            }
+
+            val autoCierreRequest = PeriodicWorkRequestBuilder<AutoCierreWorker>(intervalDays, TimeUnit.DAYS)
+                .setInitialDelay(initialDelay, TimeUnit.MILLISECONDS)
+                .setInputData(workDataOf("USER_ID" to userId))
+                .build()
+
+            workManager.enqueueUniquePeriodicWork(workName, ExistingPeriodicWorkPolicy.REPLACE, autoCierreRequest)
+        }
+    }
+
+    fun checkPendingAutoCierre() {
+        if (!autoCierreEnabled) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val lastClosureTime = userPrefs.getLong("lastAutoCierreTimestamp", 0L)
+            val now = System.currentTimeMillis()
+            val calendarNow = Calendar.getInstance()
+            val currentHour = calendarNow.get(Calendar.HOUR_OF_DAY)
+            val currentMinute = calendarNow.get(Calendar.MINUTE)
+
+            val scheduledPassedToday = (currentHour > autoCierreHour) || (currentHour == autoCierreHour && currentMinute >= autoCierreMinute)
+
+            if (lastClosureTime > 0L) {
+                val diffMillis = now - lastClosureTime
+                val diffHours = diffMillis / (1000 * 60 * 60)
+                val isDue = when (autoCierreFrequency) {
+                    "DIARIO" -> diffHours >= 18 && scheduledPassedToday
+                    "SEMANAL" -> diffHours >= (24 * 6) && scheduledPassedToday
+                    "MENSUAL" -> diffHours >= (24 * 27) && scheduledPassedToday
+                    else -> diffHours >= 18 && scheduledPassedToday
+                }
+                if (!isDue) return@launch
+            } else {
+                if (!scheduledPassedToday) return@launch
+            }
+
+            try {
+                val dateStr = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
+                val modesToClose = if (autoCierreMode == "TODOS") listOf("PERSONAL", "TIENDA", "PEDIDOS") else listOf(autoCierreMode)
+
+                for (m in modesToClose) {
+                    val sessionName = "Cierre Automático $m - $dateStr"
+                    val session = CierreSession(
+                        mode = m,
+                        name = sessionName,
+                        totalIncomes = 0.0,
+                        totalExpenses = 0.0,
+                        timestamp = now,
+                        country = selectedCountry
+                    )
+                    val sessionId = dao.insertCierreSession(session).toInt()
+
+                    when (m) {
+                        "PERSONAL" -> {
+                            dao.updatePersonalTransactionsWithCierre(selectedCountry, sessionId)
+                            dao.updateFiadoresWithCierre(selectedCountry, sessionId, "PERSONAL")
+                        }
+                        "TIENDA" -> {
+                            dao.updateTiendaTransactionsWithCierre(selectedCountry, sessionId)
+                            dao.updateFiadoresWithCierre(selectedCountry, sessionId, "TIENDA")
+                        }
+                        "PEDIDOS" -> {
+                            dao.updateComercioMovementsWithCierre(selectedCountry, sessionId)
+                        }
+                    }
+                }
+                userPrefs.edit().putLong("lastAutoCierreTimestamp", now).apply()
+            } catch (_: Exception) {}
+        }
+    }
+
     fun manualBackup(backupName: String, onResult: (String) -> Unit) {
         isSyncing = true
         syncMessage = "Guardando tus cuentas actuales..."
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val app = getApplication<Application>()
-                val transactions = dao.getBackupTransactions().map {
-                    val b64 = com.xxcamixx.contabilidad.util.uriToBase64(app, it.imageUri)
-                    if (b64 != null) it.copy(imageUri = b64) else it
-                }
+                val transactions = dao.getBackupTransactions().map { it.copy(imageUri = null) }
                 val reminders = dao.getBackupReminders()
                 val fiadores = dao.getBackupFiadores()
-                val products = dao.getBackupProducts().map {
-                    val b64 = com.xxcamixx.contabilidad.util.uriToBase64(app, it.imageUri)
-                    if (b64 != null) it.copy(imageUri = b64) else it
-                }
-                val comercioProducts = dao.getBackupComercioProducts().map {
-                    val b64 = com.xxcamixx.contabilidad.util.uriToBase64(app, it.imageUri)
-                    if (b64 != null) it.copy(imageUri = b64) else it
-                }
-                val comercioPedidos = dao.getBackupComercioPedidos().map {
-                    val b64 = com.xxcamixx.contabilidad.util.uriToBase64(app, it.imageUri)
-                    if (b64 != null) it.copy(imageUri = b64) else it
-                }
+                val products = dao.getBackupProducts().map { it.copy(imageUri = null) }
+                val comercioProducts = dao.getBackupComercioProducts().map { it.copy(imageUri = null) }
+                val comercioPedidos = dao.getBackupComercioPedidos().map { it.copy(imageUri = null) }
                 val comercioMovements = dao.getBackupComercioMovements()
+                val cierreSessions = dao.getBackupCierreSessions()
 
                 val currentData = BackupData(
                     transactions = transactions,
@@ -275,7 +411,8 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     products = products,
                     comercioProducts = comercioProducts,
                     comercioPedidos = comercioPedidos,
-                    comercioMovements = comercioMovements
+                    comercioMovements = comercioMovements,
+                    cierreSessions = cierreSessions
                 )
                 val newRecord = BackupRecord(UUID.randomUUID().toString(), backupName, System.currentTimeMillis(), currentData)
                 val remotePayload = RetrofitInstance.api.getBackup(userId)
@@ -358,6 +495,13 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     dao.insertComercioMovement(oldMov.copy(id = 0, productId = targetProdId, country = safeCountry))
                 }
 
+                // Restauración de Cierres de Sesión
+                dao.deleteAllCierreSessions()
+                record.data.cierreSessions.forEach { oldCierre ->
+                    val safeCountry = (oldCierre.country as String?) ?: "Colombia"
+                    dao.insertCierreSession(oldCierre.copy(id = 0, country = safeCountry))
+                }
+
                 launch(Dispatchers.Main) { onResult("¡Respaldo '${record.name}' restaurado! ☁️📥"); isSyncing = false; syncMessage = "" }
             } catch (e: Exception) { launch(Dispatchers.Main) { onResult("Error al restaurar los datos: ${e.message}"); isSyncing = false; syncMessage = "" } }
         }
@@ -378,9 +522,20 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     fun deletePersonalTransactions() { viewModelScope.launch { dao.deletePersonalTransactions(selectedCountry) } }
     fun resetAllProfits() { viewModelScope.launch { dao.resetAllProfits(selectedCountry) }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
 
-    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, category: String?, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri, country = selectedCountry, category = category)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(context, touchSoundUri) }
+    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, category: String?, context: Context, onConfigured: (String) -> Unit, featureVector: String? = null) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri, country = selectedCountry, category = category, featureVector = featureVector)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(context, touchSoundUri) }
     fun editProduct(product: Product, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateProduct(product); cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER"); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto actualizado") }; AppSounds.play(context, touchSoundUri) }
     fun deleteProductEntirely(product: Product, context: Context) { viewModelScope.launch { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") }; AppSounds.play(context, touchSoundUri) }
+
+    fun ensureProductFeatureVector(product: Product, context: Context) {
+        if (product.featureVector != null || product.imageUri == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val vec = com.xxcamixx.contabilidad.ai.ImageFeatureExtractor.extractFeaturesFromUri(context, product.imageUri)
+            if (vec != null) {
+                val vecStr = com.xxcamixx.contabilidad.ai.ImageFeatureExtractor.vectorToString(vec)
+                dao.updateProduct(product.copy(featureVector = vecStr))
+            }
+        }
+    }
 
     fun processCartSale(cartItems: List<Pair<Product, Int>>, buyerName: String, paymentSummary: String, netCash: Double, netDigital: Double, context: Context, onSold: (String) -> Unit) {
         viewModelScope.launch {
@@ -479,11 +634,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 dao.insertTransaction(Transaction(description = desc, amount = initialDigital, isIncome = true, note = finalNote, cashAmount = 0.0, digitalAmount = initialDigital, profit = digitalProfit, country = selectedCountry))
             }
 
-            if (initialCash == 0.0 && initialDigital == 0.0) {
-                val desc = if (isStore) "Venta a crédito ($name)" else "Ingreso a crédito ($name)"
-                val finalNote = if (itemsNote.isNotEmpty()) "Venta fiada sin abono inicial\n$itemsNote" else "Venta fiada sin abono inicial"
-                dao.insertTransaction(Transaction(description = desc, amount = 0.0, isIncome = true, note = finalNote, cashAmount = 0.0, digitalAmount = 0.0, profit = 0.0, country = selectedCountry))
-            }
+
 
             if (isStore) {
                 cartItems.forEach { (product, qty) ->
@@ -740,18 +891,30 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
-    fun addComercioProduct(pedidoId: Int, name: String, unit: String, quantity: Double, cost: Double, salePrice: Double, imageUri: String? = null) {
+    fun addComercioProduct(pedidoId: Int, name: String, unit: String, quantity: Double, cost: Double, salePrice: Double, imageUri: String? = null, featureVector: String? = null) {
         if(pedidoId == 0) return
         viewModelScope.launch(Dispatchers.IO) {
             val productId = dao.insertComercioProduct(ComercioProduct(
                 pedidoId = pedidoId, name = name, unit = unit, quantityInStock = quantity, totalPurchased = quantity,
-                costPerUnit = cost, salePricePerUnit = salePrice, country = selectedCountry, imageUri = imageUri
+                costPerUnit = cost, salePricePerUnit = salePrice, country = selectedCountry, imageUri = imageUri,
+                featureVector = featureVector
             ))
             dao.insertComercioMovement(ComercioMovement(
                 productId = productId.toInt(), productName = name, type = "COMPRA",
                 quantity = quantity, pricePerUnit = cost, total = quantity * cost,
                 note = "Pedido inicial", country = selectedCountry
             ))
+        }
+    }
+
+    fun ensureComercioProductFeatureVector(product: ComercioProduct, context: Context) {
+        if (product.featureVector != null || product.imageUri == null) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val vec = com.xxcamixx.contabilidad.ai.ImageFeatureExtractor.extractFeaturesFromUri(context, product.imageUri)
+            if (vec != null) {
+                val vecStr = com.xxcamixx.contabilidad.ai.ImageFeatureExtractor.vectorToString(vec)
+                dao.updateComercioProduct(product.copy(featureVector = vecStr))
+            }
         }
     }
 

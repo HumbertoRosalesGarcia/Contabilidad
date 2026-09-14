@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.Card
@@ -70,7 +71,8 @@ fun InventoryScreen(
     onDeleteClick: (Product) -> Unit,
     onLongDeleteClick: (Product) -> Unit,
     onInfoClick: (Product) -> Unit,
-    onAddImageClick: (Product) -> Unit
+    onAddImageClick: (Product) -> Unit,
+    onOpenScanner: () -> Unit = {}
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf("A-Z") }
@@ -85,9 +87,25 @@ fun InventoryScreen(
             Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { focusManager.clearFocus(); onBack() }) { Icon(Icons.Filled.ArrowBack, contentDescription = "Atrás", tint = MaterialTheme.colorScheme.onPrimary) }
                 Text("Inventario \uD83D\uDCE6", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.weight(1f))
+                IconButton(onClick = { focusManager.clearFocus(); onOpenScanner() }) {
+                    Icon(Icons.Filled.CameraAlt, contentDescription = "Escáner Visual IA", tint = MaterialTheme.colorScheme.onPrimary)
+                }
             }
             Spacer(modifier = Modifier.height(16.dp))
-            OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("Buscar en el inventario...") }, leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Buscar") }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), singleLine = true, shape = RoundedCornerShape(12.dp))
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Buscar en el inventario...") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Buscar") },
+                trailingIcon = {
+                    IconButton(onClick = { focusManager.clearFocus(); onOpenScanner() }) {
+                        Icon(Icons.Filled.CameraAlt, contentDescription = "Escanear Producto", tint = MaterialTheme.colorScheme.primary)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp)
+            )
             Spacer(modifier = Modifier.height(12.dp))
             ScrollableTabRow(selectedTabIndex = listOf("A-Z", "Poco Stock", "Vencimiento", "Precio", "Recientes").indexOf(sortBy), modifier = Modifier.fillMaxWidth(), edgePadding = 16.dp, containerColor = Color.Transparent, divider = {}, indicator = {}) {
                 listOf("A-Z", "Poco Stock", "Vencimiento", "Precio", "Recientes").forEach { tab ->

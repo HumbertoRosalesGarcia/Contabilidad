@@ -16,5 +16,6 @@ data class ComercioProduct(
     val salePricePerUnit: Double = 0.0,
     val country: String = "Colombia",
     val imageUri: String? = null,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val featureVector: String? = null
 )

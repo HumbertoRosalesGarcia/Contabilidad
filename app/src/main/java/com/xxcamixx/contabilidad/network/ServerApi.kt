@@ -27,4 +27,9 @@ interface ServerApi {
 
     // NUEVO ENDPOINT BCV
     @GET("api/bcv") suspend fun getBcvRate(): BcvResponse
+
+    // PANEL BACKEND ADMINISTRADOR
+    @GET("api/admin/backups-summary") suspend fun getBackupsSummary(): com.xxcamixx.contabilidad.model.BackupsSummaryResponse
+    @GET("api/admin/server-stats") suspend fun getServerStats(): com.xxcamixx.contabilidad.model.ServerStatsResponse
+    @GET("api/admin/disk-explorer") suspend fun getDiskContents(@Query("path") path: String? = null): com.xxcamixx.contabilidad.model.DiskExplorerResponse
 }
