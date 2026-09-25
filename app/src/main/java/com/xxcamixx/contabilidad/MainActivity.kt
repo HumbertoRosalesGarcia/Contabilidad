@@ -1,4 +1,4 @@
-﻿package com.xxcamixx.contabilidad
+package com.xxcamixx.contabilidad
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -28,6 +28,10 @@ import com.xxcamixx.contabilidad.ui.screens.TechSplashScreen
 import com.xxcamixx.contabilidad.util.scheduleNextChatSync
 import com.xxcamixx.contabilidad.viewmodel.FinanceViewModel
 import com.xxcamixx.contabilidad.viewmodel.FinanceViewModelFactory
+import com.xxcamixx.contabilidad.util.ImageStorageManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 val CustomDarkColorScheme = darkColorScheme(
     primary = Color(0xFFBB86FC),
@@ -53,6 +57,11 @@ class MainActivity : ComponentActivity() {
         windowInsetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
 
         scheduleNextChatSync(this)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                ImageStorageManager.getDefaultStorageDir(applicationContext)
+            } catch (_: Exception) {}
+        }
 
         setContent {
             val systemTheme = isSystemInDarkTheme()
@@ -80,7 +89,7 @@ class MainActivity : ComponentActivity() {
                         })
                     } else {
                         val viewModel: FinanceViewModel = viewModel(key = loggedInUserId, factory = FinanceViewModelFactory(application, loggedInUserId!!))
-                        FinanceScreen(
+                        FinanceScreen(  
                             viewModel = viewModel, userName = loggedInUser ?: "Usuario", initialRole = userRole, initialConsumedSeconds = consumedSeconds, initialPlanDuration = planDuration,
                             onLogout = { authPrefs.edit().remove("userName").remove("userId").remove("userRole").remove("consumedSeconds").remove("planDuration").apply(); loggedInUser = null; loggedInUserId = null; userRole = "INVITADO" },
                             isDarkTheme = isDarkTheme, onThemeToggle = { isDarkTheme = !isDarkTheme }

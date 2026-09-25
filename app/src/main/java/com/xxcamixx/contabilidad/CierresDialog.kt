@@ -36,6 +36,15 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 import android.widget.Toast
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.geometry.Rect
+import com.xxcamixx.contabilidad.ui.components.tour.CoachMarkOverlay
+import com.xxcamixx.contabilidad.ui.components.tour.TourCatalog
+import com.xxcamixx.contabilidad.ui.components.tour.TourManager
+import com.xxcamixx.contabilidad.ui.components.tour.TourTarget
+import com.xxcamixx.contabilidad.ui.components.tour.TourZone
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,6 +78,19 @@ fun CierresDialog(
     var isPm by remember(initialHour24) { mutableStateOf(initialHour24 >= 12) }
     var selectedMinute by remember(initialMinute) { mutableStateOf(initialMinute) }
 
+    val cierresTourSteps = remember { TourCatalog.getStepsForZone(TourZone.CIERRES) }
+    var currentCierresTourStepIndex by remember { mutableStateOf(0) }
+    var isCierresTourActive by remember { mutableStateOf(false) }
+    val cierresTourTargetsBounds = remember { mutableStateMapOf<TourTarget, Rect>() }
+
+    LaunchedEffect(Unit) {
+        delay(600L)
+        if (viewModel.userId.isNotEmpty() && !TourManager.isZoneSeen(context, viewModel.userId, TourZone.CIERRES)) {
+            currentCierresTourStepIndex = 0
+            isCierresTourActive = true
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -81,41 +103,43 @@ fun CierresDialog(
             color = MaterialTheme.colorScheme.background,
             border = BorderStroke(1.dp, Color(0xFF2C2C32))
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Cierres de Sesión", style = MaterialTheme.typography.titleLarge)
-                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar") }
-                }
+            Box(modifier = Modifier.fillMaxSize()) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Cierres de Sesión", style = MaterialTheme.typography.titleLarge)
+                        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "Cerrar") }
+                    }
 
-                TabRow(selectedTabIndex = currentTab) {
-                    Tab(selected = currentTab == 0, onClick = { currentTab = 0 }, text = { Text("Sesiones") })
-                    Tab(selected = currentTab == 1, onClick = { currentTab = 1 }, text = { Text("Deudas Pendientes") })
-                }
+                    TabRow(selectedTabIndex = currentTab) {
+                        Tab(selected = currentTab == 0, onClick = { currentTab = 0 }, text = { Text("Sesiones") })
+                        Tab(selected = currentTab == 1, onClick = { currentTab = 1 }, text = { Text("Deudas Pendientes") })
+                    }
 
-                if (currentTab == 0) {
-                    val arrowRotation by animateFloatAsState(
-                        targetValue = if (isAutoCierreExpanded) 180f else 0f,
-                        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
-                        label = "arrowRotation"
-                    )
+                    if (currentTab == 0) {
+                        val arrowRotation by animateFloatAsState(
+                            targetValue = if (isAutoCierreExpanded) 180f else 0f,
+                            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
+                            label = "arrowRotation"
+                        )
 
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                            .padding(horizontal = 16.dp),
-                        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
-                    ) {
-                        item {
-                            // Sección Desplegable de Cierre Automático
-                            Card(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E22)),
-                                border = BorderStroke(1.dp, Color(0xFF33333A))
-                            ) {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .padding(horizontal = 16.dp),
+                            contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+                        ) {
+                            item {
+                                // Sección Desplegable de Cierre Automático
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                        .onGloballyPositioned { cierresTourTargetsBounds[TourTarget.CIERRES_AUTO_SCHEDULE] = it.boundsInWindow() },
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E22)),
+                                    border = BorderStroke(1.dp, Color(0xFF33333A))
+                                ) {
                                 Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
                                     // Cabecera Desplegable
                                     Row(
@@ -474,7 +498,8 @@ fun CierresDialog(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
+                                    .padding(vertical = 4.dp)
+                                    .onGloballyPositioned { cierresTourTargetsBounds[TourTarget.CIERRES_MANUAL_BTN] = it.boundsInWindow() },
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 val manualModes = listOf(
@@ -520,7 +545,13 @@ fun CierresDialog(
                             )
 
                             // Lista de cierres previos
-                            Text("Historial de Cierres", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+                            Text(
+                                "Historial de Cierres",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier
+                                    .padding(bottom = 8.dp)
+                                    .onGloballyPositioned { cierresTourTargetsBounds[TourTarget.CIERRES_HISTORY_LIST] = it.boundsInWindow() }
+                            )
                         }
 
                         items(cierres) { cierre ->
@@ -547,7 +578,25 @@ fun CierresDialog(
                     }
                 }
             }
+
+            CoachMarkOverlay(
+                visible = isCierresTourActive && cierresTourSteps.isNotEmpty(),
+                steps = cierresTourSteps,
+                currentStepIndex = currentCierresTourStepIndex,
+                targetsBounds = cierresTourTargetsBounds,
+                onNext = { if (currentCierresTourStepIndex < cierresTourSteps.size - 1) currentCierresTourStepIndex++ },
+                onPrev = { if (currentCierresTourStepIndex > 0) currentCierresTourStepIndex-- },
+                onSkip = {
+                    if (viewModel.userId.isNotEmpty()) TourManager.markZoneSeen(context, viewModel.userId, TourZone.CIERRES)
+                    isCierresTourActive = false
+                },
+                onFinish = {
+                    if (viewModel.userId.isNotEmpty()) TourManager.markZoneSeen(context, viewModel.userId, TourZone.CIERRES)
+                    isCierresTourActive = false
+                }
+            )
         }
+    }
     }
 
     if (showConfirmation) {

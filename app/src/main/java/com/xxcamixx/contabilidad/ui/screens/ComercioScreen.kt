@@ -55,7 +55,14 @@ import com.xxcamixx.contabilidad.ui.components.PaymentInputRow
 import com.xxcamixx.contabilidad.util.AmountVisualTransformation
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.geometry.Rect
+import com.xxcamixx.contabilidad.ui.components.tour.CoachMarkOverlay
+import com.xxcamixx.contabilidad.ui.components.tour.TourCatalog
+import com.xxcamixx.contabilidad.ui.components.tour.TourManager
 import com.xxcamixx.contabilidad.ui.components.tour.TourTarget
+import com.xxcamixx.contabilidad.ui.components.tour.TourZone
+import kotlinx.coroutines.delay
 import com.xxcamixx.contabilidad.util.cleanDecimalInput
 import com.xxcamixx.contabilidad.util.loadBitmapFromUri
 import com.xxcamixx.contabilidad.util.saveImageToInternalStorage
@@ -234,10 +241,21 @@ fun ComercioScreen(
 
     val existingProductIds = remember(products) { products.map { it.id }.toSet() }
     val validMovements = remember(movements, existingProductIds) { movements.filter { it.productId in existingProductIds } }
+    val salesMovements = remember(validMovements) { validMovements.filter { it.type == "VENTA" } }
 
     val totalInvested = remember(products) { products.sumOf { it.totalPurchased * it.costPerUnit } }
-    val totalSold = remember(validMovements) { validMovements.filter { it.type == "VENTA" }.sumOf { it.total } }
-    val totalProfit = remember(products) { products.sumOf { it.totalSold * (it.salePricePerUnit - it.costPerUnit) } }
+    val totalSold = remember(salesMovements, products) {
+        val fromMov = salesMovements.sumOf { it.total }
+        if (fromMov > 0.0) fromMov else products.sumOf { it.totalSold * it.salePricePerUnit }
+    }
+    val totalProfit = remember(salesMovements, products) {
+        val fromMov = salesMovements.sumOf { m ->
+            val p = products.find { it.id == m.productId || it.name.equals(m.productName, ignoreCase = true) }
+            val cost = p?.costPerUnit ?: 0.0
+            m.total - (cost * m.quantity)
+        }
+        if (salesMovements.isNotEmpty()) fromMov else products.sumOf { it.totalSold * (it.salePricePerUnit - it.costPerUnit) }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize().padding(8.dp)) {
@@ -1048,9 +1066,20 @@ fun ComercioScreen(
                                                     Text("⏳", fontSize = 18.sp)
                                                 }
                                                 Spacer(modifier = Modifier.width(10.dp))
-                                                Column {
-                                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                        Text(f.name, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    ) {
+                                                        Text(
+                                                            f.name,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontSize = 14.sp,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                            modifier = Modifier.weight(1f, fill = false)
+                                                        )
                                                         Surface(
                                                             color = Color(0xFFFF9800),
                                                             shape = RoundedCornerShape(4.dp)
@@ -1060,7 +1089,8 @@ fun ComercioScreen(
                                                                 color = Color.White,
                                                                 fontSize = 9.sp,
                                                                 fontWeight = FontWeight.Bold,
-                                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                                softWrap = false,
+                                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                                             )
                                                         }
                                                     }
@@ -1069,9 +1099,9 @@ fun ComercioScreen(
                                                     }
                                                     Text("Productos: ${f.reason}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                        Text("Total: ${formatMoneyMain(f.amount, country)}", fontSize = 11.sp, color = Color.Gray)
+                                                        Text("Total: ${formatMoneyMain(f.amount, country)}", fontSize = 11.sp, color = Color.Gray, softWrap = false)
                                                         if (f.paidAmount > 0) {
-                                                            Text("Abonado: ${formatMoneyMain(f.paidAmount, country)}", fontSize = 11.sp, color = Color(0xFF4CAF50))
+                                                            Text("Abonado: ${formatMoneyMain(f.paidAmount, country)}", fontSize = 11.sp, color = Color(0xFF4CAF50), softWrap = false)
                                                         }
                                                     }
                                                     Text("Fecha límite de cobro: ${formatDateOnly(f.targetDateInMillis)}", fontSize = 10.sp, color = Color.Gray)
@@ -1083,10 +1113,11 @@ fun ComercioScreen(
                                                     formatMoneyMain(restante, country),
                                                     fontWeight = FontWeight.Bold,
                                                     color = Color.Red,
-                                                    fontSize = 14.sp
+                                                    fontSize = 14.sp,
+                                                    softWrap = false
                                                 )
                                                 val secD = formatMoneySec(restante, country, bcvRate)
-                                                if (secD.isNotEmpty()) Text(secD, fontSize = 10.sp, color = Color.Gray)
+                                                if (secD.isNotEmpty()) Text(secD, fontSize = 10.sp, color = Color.Gray, softWrap = false)
                                             }
                                         }
                                     }
@@ -1157,9 +1188,20 @@ fun ComercioScreen(
                                                             )
                                                         }
                                                         Spacer(modifier = Modifier.width(10.dp))
-                                                        Column {
-                                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                                Text(headerTitle, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                                                            Row(
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                                modifier = Modifier.fillMaxWidth()
+                                                            ) {
+                                                                Text(
+                                                                    headerTitle,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    fontSize = 14.sp,
+                                                                    maxLines = 1,
+                                                                    overflow = TextOverflow.Ellipsis,
+                                                                    modifier = Modifier.weight(1f, fill = false)
+                                                                )
                                                                 Surface(
                                                                     color = Color(0xFF4CAF50).copy(alpha = 0.15f),
                                                                     shape = RoundedCornerShape(4.dp)
@@ -1169,7 +1211,8 @@ fun ComercioScreen(
                                                                         color = Color(0xFF2E7D32),
                                                                         fontSize = 9.sp,
                                                                         fontWeight = FontWeight.Bold,
-                                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                                        softWrap = false,
+                                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                                                                     )
                                                                 }
                                                             }
@@ -1180,9 +1223,9 @@ fun ComercioScreen(
                                                         }
                                                     }
                                                     Column(horizontalAlignment = Alignment.End) {
-                                                        Text(formatMoneyMain(groupTotal, country), fontWeight = FontWeight.Bold, color = Color(0xFF2196F3), fontSize = 14.sp)
+                                                        Text(formatMoneyMain(groupTotal, country), fontWeight = FontWeight.Bold, color = Color(0xFF2196F3), fontSize = 14.sp, softWrap = false)
                                                         val secT = formatMoneySec(groupTotal, country, bcvRate)
-                                                        if (secT.isNotEmpty()) Text(secT, fontSize = 10.sp, color = Color.Gray)
+                                                        if (secT.isNotEmpty()) Text(secT, fontSize = 10.sp, color = Color.Gray, softWrap = false)
                                                     }
                                                 }
 
@@ -1199,8 +1242,8 @@ fun ComercioScreen(
                                                                 horizontalArrangement = Arrangement.SpaceBetween,
                                                                 verticalAlignment = Alignment.CenterVertically
                                                             ) {
-                                                                Text("• ${m.productName} (${formatQty(m.quantity)})", fontSize = 13.sp)
-                                                                Text(formatMoneyMain(m.total, country), fontSize = 13.sp, color = Color.Gray)
+                                                                Text("• ${m.productName} (${formatQty(m.quantity)})", fontSize = 13.sp, modifier = Modifier.weight(1f).padding(end = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                                                Text(formatMoneyMain(m.total, country), fontSize = 13.sp, color = Color.Gray, softWrap = false, textAlign = TextAlign.End)
                                                             }
                                                         }
                                                     }
@@ -1271,15 +1314,32 @@ fun ComercioScreen(
                         Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                             Text(pedido.name, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(formatMoneyMain(pedidoCost, country), color = Color(0xFFE53935))
-                                Text(formatMoneySec(pedidoCost, country, bcvRate), color = Color.Gray)
+                                Text(formatMoneyMain(pedidoCost, country), color = Color(0xFFE53935), softWrap = false)
+                                val sec = formatMoneySec(pedidoCost, country, bcvRate)
+                                if (sec.isNotEmpty()) Text(sec, color = Color.Gray, softWrap = false)
                             }
                             Column(modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 8.dp)) {
                                 pedidoProducts.forEach { p ->
                                     val pCost = p.costPerUnit * p.totalPurchased
-                                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("• ${p.name} (${formatQty(p.totalPurchased)})", fontSize = 12.sp)
-                                        Text(formatMoneyMain(pCost, country), fontSize = 12.sp, color = Color.Gray)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            "• ${p.name} (${formatQty(p.totalPurchased)})",
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            formatMoneyMain(pCost, country),
+                                            fontSize = 12.sp,
+                                            color = Color.Gray,
+                                            softWrap = false,
+                                            textAlign = TextAlign.End
+                                        )
                                     }
                                 }
                             }
@@ -1319,20 +1379,42 @@ fun ComercioScreen(
                 LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
                     items(pedidos) { pedido ->
                         val pedidoProducts = products.filter { it.pedidoId == pedido.id }
-                        val pedidoSales = pedidoProducts.sumOf { it.totalSold * it.salePricePerUnit }
+                        val pedidoMovements = salesMovements.filter { m -> pedidoProducts.any { it.id == m.productId } }
+                        val pedidoSales = if (pedidoMovements.isNotEmpty()) pedidoMovements.sumOf { it.total } else pedidoProducts.sumOf { it.totalSold * it.salePricePerUnit }
 
                         Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                             Text(pedido.name, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(formatMoneyMain(pedidoSales, country), color = Color(0xFF2196F3))
-                                Text(formatMoneySec(pedidoSales, country, bcvRate), color = Color.Gray)
+                                Text(formatMoneyMain(pedidoSales, country), color = Color(0xFF2196F3), softWrap = false)
+                                val sec = formatMoneySec(pedidoSales, country, bcvRate)
+                                if (sec.isNotEmpty()) Text(sec, color = Color.Gray, softWrap = false)
                             }
                             Column(modifier = Modifier.fillMaxWidth().padding(start = 8.dp, top = 8.dp)) {
-                                pedidoProducts.filter { it.totalSold > 0 }.forEach { p ->
-                                    val pSales = p.salePricePerUnit * p.totalSold
-                                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("• ${p.name} (${formatQty(p.totalSold)} vendidas)", fontSize = 12.sp)
-                                        Text(formatMoneyMain(pSales, country), fontSize = 12.sp, color = Color.Gray)
+                                pedidoProducts.forEach { p ->
+                                    val pMovements = pedidoMovements.filter { it.productId == p.id }
+                                    val pSoldQty = if (pMovements.isNotEmpty()) pMovements.sumOf { it.quantity } else p.totalSold
+                                    val pSales = if (pMovements.isNotEmpty()) pMovements.sumOf { it.total } else (p.totalSold * p.salePricePerUnit)
+                                    if (pSoldQty > 0) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                "• ${p.name} (${formatQty(pSoldQty)} vendidas)",
+                                                fontSize = 12.sp,
+                                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                formatMoneyMain(pSales, country),
+                                                fontSize = 12.sp,
+                                                color = Color.Gray,
+                                                softWrap = false,
+                                                textAlign = TextAlign.End
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1427,7 +1509,7 @@ fun ComercioScreen(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                                                 Box(
                                                     modifier = Modifier
                                                         .size(36.dp)
@@ -1438,7 +1520,7 @@ fun ComercioScreen(
                                                     Text(details.badgeIcon, fontSize = 17.sp)
                                                 }
                                                 Spacer(Modifier.width(10.dp))
-                                                Column {
+                                                Column(modifier = Modifier.weight(1f)) {
                                                     Text(
                                                         details.customerName,
                                                         fontWeight = FontWeight.Bold,
@@ -1456,7 +1538,8 @@ fun ComercioScreen(
                                                     "+ ${formatMoneyMain(totalGanancia, country)}",
                                                     fontWeight = FontWeight.ExtraBold,
                                                     color = if (totalGanancia >= 0) Color(0xFF4CAF50) else Color.Red,
-                                                    fontSize = 15.sp
+                                                    fontSize = 15.sp,
+                                                    softWrap = false
                                                 )
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                                     Text(
@@ -1576,13 +1659,25 @@ fun ComercioScreen(
                                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                                                     ) {
                                                         Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                                                Text(m.productName, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                                            Row(
+                                                                modifier = Modifier.fillMaxWidth(),
+                                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                                verticalAlignment = Alignment.CenterVertically
+                                                            ) {
+                                                                Text(
+                                                                    m.productName,
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    fontSize = 13.sp,
+                                                                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                                                    maxLines = 1,
+                                                                    overflow = TextOverflow.Ellipsis
+                                                                )
                                                                 Text(
                                                                     "+ ${formatMoneyMain(gananciaItem, country)}",
                                                                     fontWeight = FontWeight.Bold,
                                                                     color = if (gananciaItem >= 0) Color(0xFF4CAF50) else Color.Red,
-                                                                    fontSize = 13.sp
+                                                                    fontSize = 13.sp,
+                                                                    softWrap = false
                                                                 )
                                                             }
 
@@ -2316,6 +2411,23 @@ fun ComercioScreen(
         var showManualProductSearchDialog by remember { mutableStateOf(false) }
         var manualSearchQuery by remember { mutableStateOf("") }
 
+        var isCartTourActive by remember { mutableStateOf(false) }
+        var currentCartTourStepIndex by remember { mutableStateOf(0) }
+        val cartTourTargetsBounds = remember { mutableStateMapOf<TourTarget, Rect>() }
+        val cartTourSteps = remember { TourCatalog.getStepsForZone(TourZone.CART_PEDIDOS) }
+
+        LaunchedEffect(step) {
+            if (step == 1) {
+                delay(600L)
+                if (!TourManager.isZoneSeen(context, viewModel.userId, TourZone.CART_PEDIDOS)) {
+                    currentCartTourStepIndex = 0
+                    isCartTourActive = true
+                }
+            } else {
+                isCartTourActive = false
+            }
+        }
+
         val cartTotal = cart.sumOf { it.second * it.third }
 
         var checkoutCurrency by remember { mutableStateOf("USD") }
@@ -2391,113 +2503,122 @@ fun ComercioScreen(
                 }
             },
             text = {
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 540.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .heightIn(max = 540.dp)
                 ) {
-                    if (step == 1) {
-                        // Opciones principales para agregar al carrito
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Opción 1: Escanear con Cámara IA
-                            Button(
-                                onClick = {
-                                    showCartDialog = false
-                                    showVisualComercioScanner = true
-                                },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFFFFD700),
-                                    contentColor = Color.Black
-                                )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 540.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (step == 1) {
+                            // Opciones principales para agregar al carrito
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        Icons.Filled.CameraAlt,
-                                        contentDescription = null,
-                                        tint = Color.Black,
-                                        modifier = Modifier.size(20.dp)
+                                // Opción 1: Escanear con Cámara IA
+                                Button(
+                                    onClick = {
+                                        showCartDialog = false
+                                        showVisualComercioScanner = true
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .onGloballyPositioned { cartTourTargetsBounds[TourTarget.CART_SCAN_BTN] = it.boundsInWindow() },
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFFFFD700),
+                                        contentColor = Color.Black
                                     )
-                                    Spacer(Modifier.width(6.dp))
-                                    Column(horizontalAlignment = Alignment.Start) {
-                                        Text(
-                                            text = "Escanear IA",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = Color.Black
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.CameraAlt,
+                                            contentDescription = null,
+                                            tint = Color.Black,
+                                            modifier = Modifier.size(20.dp)
                                         )
-                                        Text(
-                                            text = "Cámara en vivo",
-                                            fontSize = 9.sp,
-                                            color = Color.Black.copy(alpha = 0.8f)
+                                        Spacer(Modifier.width(6.dp))
+                                        Column(horizontalAlignment = Alignment.Start) {
+                                            Text(
+                                                text = "Escanear IA",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = Color.Black
+                                            )
+                                            Text(
+                                                text = "Cámara en vivo",
+                                                fontSize = 9.sp,
+                                                color = Color.Black.copy(alpha = 0.8f)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Opción 2: Buscar Manualmente
+                                Button(
+                                    onClick = {
+                                        showManualProductSearchDialog = true
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .onGloballyPositioned { cartTourTargetsBounds[TourTarget.CART_SEARCH_BTN] = it.boundsInWindow() },
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    ),
+                                    border = BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Search,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFFD700),
+                                            modifier = Modifier.size(20.dp)
                                         )
+                                        Spacer(Modifier.width(6.dp))
+                                        Column(horizontalAlignment = Alignment.Start) {
+                                            Text(
+                                                text = "Buscar Manual",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 12.sp,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = "Buscador y stock",
+                                                fontSize = 9.sp,
+                                                color = Color.Gray
+                                            )
+                                        }
                                     }
                                 }
                             }
 
-                            // Opción 2: Buscar Manualmente
-                            Button(
-                                onClick = {
-                                    showManualProductSearchDialog = true
-                                },
+                            OutlinedTextField(
+                                value = customerName,
+                                onValueChange = { customerName = it },
+                                label = { Text("Nombre del cliente (Opcional)") },
+                                placeholder = { Text("Ej: Humberto") },
+                                singleLine = true,
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                ),
-                                border = BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.5f))
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Search,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFFD700),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Column(horizontalAlignment = Alignment.Start) {
-                                        Text(
-                                            text = "Buscar Manual",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = Color.White
-                                        )
-                                        Text(
-                                            text = "Buscador y stock",
-                                            fontSize = 9.sp,
-                                            color = Color.Gray
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        OutlinedTextField(
-                            value = customerName,
-                            onValueChange = { customerName = it },
-                            label = { Text("Nombre del cliente (Opcional)") },
-                            placeholder = { Text("Ej: Humberto") },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                                    .fillMaxWidth()
+                                    .onGloballyPositioned { cartTourTargetsBounds[TourTarget.CART_CUSTOMER_FIELD] = it.boundsInWindow() }
+                            )
 
                         if (cart.isEmpty()) {
                             Text(
@@ -2606,7 +2727,10 @@ fun ComercioScreen(
 
                         // Tarjeta con el total a pagar
                         Card(
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                                .onGloballyPositioned { cartTourTargetsBounds[TourTarget.CART_TOTAL_PAY] = it.boundsInWindow() },
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f))
                         ) {
                             Row(
@@ -2811,6 +2935,24 @@ fun ComercioScreen(
                             }
                         }
                     }
+                }
+
+                CoachMarkOverlay(
+                        visible = isCartTourActive && cartTourSteps.isNotEmpty(),
+                        steps = cartTourSteps,
+                        currentStepIndex = currentCartTourStepIndex,
+                        targetsBounds = cartTourTargetsBounds,
+                        onNext = { if (currentCartTourStepIndex < cartTourSteps.size - 1) currentCartTourStepIndex++ },
+                        onPrev = { if (currentCartTourStepIndex > 0) currentCartTourStepIndex-- },
+                        onSkip = {
+                            TourManager.markZoneSeen(context, viewModel.userId, TourZone.CART_PEDIDOS)
+                            isCartTourActive = false
+                        },
+                        onFinish = {
+                            TourManager.markZoneSeen(context, viewModel.userId, TourZone.CART_PEDIDOS)
+                            isCartTourActive = false
+                        }
+                    )
                 }
             },
             confirmButton = {

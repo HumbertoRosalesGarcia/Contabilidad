@@ -37,10 +37,30 @@ import com.xxcamixx.contabilidad.util.formatMoneySec
 import kotlinx.coroutines.delay
 import java.util.Locale
 import kotlin.math.abs
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalContext
+import com.xxcamixx.contabilidad.ui.components.tour.CoachMarkOverlay
+import com.xxcamixx.contabilidad.ui.components.tour.TourCatalog
+import com.xxcamixx.contabilidad.ui.components.tour.TourManager
+import com.xxcamixx.contabilidad.ui.components.tour.TourTarget
+import com.xxcamixx.contabilidad.ui.components.tour.TourZone
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Product>, totalStoreCash: Double, totalStoreDigital: Double, selectedCountry: String, bcvRate: Double, onDismiss: () -> Unit, onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double, Double) -> Unit, onFiarVenta: (String, Double, Double) -> Unit) {
+fun CheckoutDialog(
+    cartItems: MutableList<Pair<Product, Int>>,
+    products: List<Product>,
+    totalStoreCash: Double,
+    totalStoreDigital: Double,
+    selectedCountry: String,
+    bcvRate: Double,
+    userId: String = "",
+    onDismiss: () -> Unit,
+    onConfirmSale: (List<Pair<Product, Int>>, String, String, Double, Double, Double) -> Unit,
+    onFiarVenta: (String, Double, Double) -> Unit
+) {
     var step by remember { mutableStateOf(1) }
     var buyerName by remember { mutableStateOf("") }
     var isDivided by remember { mutableStateOf(false) }
@@ -64,6 +84,20 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
     val inputMultiplier = if (isBsInput && bcvRate > 0) 1 / bcvRate else 1.0
     val sym = if (isBsInput) "Bs" else "$"
     val visualTrans = if (selectedCountry == "Venezuela") VisualTransformation.None else AmountVisualTransformation()
+
+    val context = LocalContext.current
+    val checkoutTourSteps = remember { TourCatalog.getStepsForZone(TourZone.CHECKOUT_TIENDA) }
+    var currentCheckoutTourStepIndex by remember { mutableStateOf(0) }
+    var isCheckoutTourActive by remember { mutableStateOf(false) }
+    val checkoutTourTargetsBounds = remember { mutableStateMapOf<TourTarget, Rect>() }
+
+    LaunchedEffect(Unit) {
+        delay(600L)
+        if (userId.isNotEmpty() && !TourManager.isZoneSeen(context, userId, TourZone.CHECKOUT_TIENDA)) {
+            currentCheckoutTourStepIndex = 0
+            isCheckoutTourActive = true
+        }
+    }
 
     if (itemToEdit != null) {
         var editQtyRaw by remember { mutableStateOf(itemToEdit!!.second.second.toString()) }
@@ -105,20 +139,25 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
         },
         containerColor = MaterialTheme.colorScheme.surface,
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                if (showProductSearch) {
-                    OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("Nombre del producto...") }, leadingIcon = { Icon(Icons.Filled.Search, null) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    val filteredProducts = products.filter { it.name.contains(searchQuery, ignoreCase = true) && it.stock > 0 }
-                    LazyColumn(modifier = Modifier.heightIn(max = 250.dp)) {
-                        items(filteredProducts) { p ->
-                            Row(modifier = Modifier.fillMaxWidth().clickable { productToSelectQty = p }.padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(modifier = Modifier.weight(1f)) { Text(p.name, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("Stock: ${p.stock} ${p.unit}", color = Color.Gray, fontSize = 12.sp) }; Text(formatCOP(p.price), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
-                            Divider(color = Color.Gray.copy(alpha = 0.2f))
+            Box(modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (showProductSearch) {
+                        OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, placeholder = { Text("Nombre del producto...") }, leadingIcon = { Icon(Icons.Filled.Search, null) }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val filteredProducts = products.filter { it.name.contains(searchQuery, ignoreCase = true) && it.stock > 0 }
+                        LazyColumn(modifier = Modifier.heightIn(max = 250.dp)) {
+                            items(filteredProducts) { p ->
+                                Row(modifier = Modifier.fillMaxWidth().clickable { productToSelectQty = p }.padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Column(modifier = Modifier.weight(1f)) { Text(p.name, fontWeight = FontWeight.Bold, fontSize = 14.sp); Text("Stock: ${p.stock} ${p.unit}", color = Color.Gray, fontSize = 12.sp) }; Text(formatCOP(p.price), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+                                Divider(color = Color.Gray.copy(alpha = 0.2f))
+                            }
                         }
-                    }
-                } else if (step == 1) {
-                    if (cartItems.isEmpty()) { Text("El carrito está vacío.", modifier = Modifier.padding(16.dp)) } else {
-                        LazyColumn(modifier = Modifier.heightIn(max = 180.dp)) {
+                    } else if (step == 1) {
+                        if (cartItems.isEmpty()) { Text("El carrito está vacío.", modifier = Modifier.padding(16.dp)) } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .heightIn(max = 180.dp)
+                                    .onGloballyPositioned { checkoutTourTargetsBounds[TourTarget.CHECKOUT_PRODUCTS_LIST] = it.boundsInWindow() }
+                            ) {
                             itemsIndexed(cartItems) { index, item ->
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                                     Text("${item.second}x ${item.first.name}", modifier = Modifier.weight(1f), fontSize = 14.sp, maxLines=1, overflow = TextOverflow.Ellipsis)
@@ -160,41 +199,79 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
                         Spacer(modifier = Modifier.height(8.dp))
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { isDivided = !isDivided; pocketChange = false }) { Switch(checked = isDivided, onCheckedChange = { isDivided = it; pocketChange = false }, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, uncheckedThumbColor = Color.White, checkedTrackColor = MaterialTheme.colorScheme.primary, uncheckedTrackColor = Color.Gray, uncheckedBorderColor = Color.Transparent)); Spacer(modifier = Modifier.width(8.dp)); Text(if (isDivided) "Pago Dividido Múltiple" else "Pago Único", fontWeight = FontWeight.Bold) }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    if (!isDivided) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) { FilterChip(selected = simpleMethod == "Efectivo", onClick = { simpleMethod = "Efectivo" }, label = { Text("Efectivo") }); FilterChip(selected = simpleMethod == "Digital", onClick = { simpleMethod = "Digital" }, label = { Text("Digital") }) }
-                        PaymentInputRow("Monto Recibido", simpleReceivedRaw, sym, visualTrans, selectedCountry) { simpleReceivedRaw = it }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onGloballyPositioned { checkoutTourTargetsBounds[TourTarget.CHECKOUT_PAYMENT_METHODS] = it.boundsInWindow() }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { isDivided = !isDivided; pocketChange = false }) { Switch(checked = isDivided, onCheckedChange = { isDivided = it; pocketChange = false }, colors = SwitchDefaults.colors(checkedThumbColor = Color.White, uncheckedThumbColor = Color.White, checkedTrackColor = MaterialTheme.colorScheme.primary, uncheckedTrackColor = Color.Gray, uncheckedBorderColor = Color.Transparent)); Spacer(modifier = Modifier.width(8.dp)); Text(if (isDivided) "Pago Dividido Múltiple" else "Pago Único", fontWeight = FontWeight.Bold) }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (!isDivided) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) { FilterChip(selected = simpleMethod == "Efectivo", onClick = { simpleMethod = "Efectivo" }, label = { Text("Efectivo") }); FilterChip(selected = simpleMethod == "Digital", onClick = { simpleMethod = "Digital" }, label = { Text("Digital") }) }
+                            PaymentInputRow("Monto Recibido", simpleReceivedRaw, sym, visualTrans, selectedCountry) { simpleReceivedRaw = it }
 
-                        val rec = (simpleReceivedRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier
-                        val change = rec - totalCOP
+                            val rec = (simpleReceivedRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier
+                            val change = rec - totalCOP
 
-                        if (change > 0) {
-                            Text("Vuelto a devolver: ${formatMoneyMain(change, selectedCountry)} ${formatMoneySec(change, selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) { Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it }); Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
-                            if (pocketChange) { Text("El vuelto se dará de tu bolsillo personal. La ganancia ingresará completa a la tienda y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) } else { val hasEnoughFunds = if (simpleMethod == "Efectivo") change <= totalStoreCash else change <= totalStoreDigital; if (!hasEnoughFunds) { Text("⚠️ Fondos insuficientes en ${if(simpleMethod == "Efectivo") "Caja" else "Banco"}. La caja quedará en negativo.", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp) } else { Text("El vuelto saldrá de: $simpleMethod", fontWeight = FontWeight.Bold, color = Color(0xFF2196F3), fontSize = 12.sp) } }
-                        } else if (change < 0) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (rec > 0) { Text("Falta: ${formatMoneyMain(abs(change), selectedCountry)} ${formatMoneySec(abs(change), selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { val cash = if (simpleMethod == "Efectivo") rec else 0.0; val digital = if (simpleMethod == "Digital") rec else 0.0; onFiarVenta(buyerName, cash, digital) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (rec > 0) "Fiar el restante \uD83D\uDDD3️" else "Fiar esta venta \uD83D\uDDD3️", fontWeight = FontWeight.Bold) } }
-                        } else if (change == 0.0 && rec > 0) { Text("Pago exacto ✅", color = Color(0xFF2196F3), fontWeight = FontWeight.Bold) }
-                    } else {
-                        PaymentInputRow("Efectivo Recibido", cashRaw, sym, visualTrans, selectedCountry) { cashRaw = it }
-                        PaymentInputRow("Digital Recibido", digitalRaw, sym, visualTrans, selectedCountry) { digitalRaw = it }
-                        val cV = (cashRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier
-                        val qV = (digitalRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier
-                        val receivedCOP = cV + qV
-                        val changeCOP = receivedCOP - totalCOP
+                            if (change > 0) {
+                                Text("Vuelto a devolver: ${formatMoneyMain(change, selectedCountry)} ${formatMoneySec(change, selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) { Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it }); Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                                if (pocketChange) { Text("El vuelto se dará de tu bolsillo personal. La ganancia ingresará completa a la tienda y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray, modifier = Modifier.padding(start = 8.dp)) } else { val hasEnoughFunds = if (simpleMethod == "Efectivo") change <= totalStoreCash else change <= totalStoreDigital; if (!hasEnoughFunds) { Text("⚠️ Fondos insuficientes en ${if(simpleMethod == "Efectivo") "Caja" else "Banco"}. La caja quedará en negativo.", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 12.sp) } else { Text("El vuelto saldrá de: $simpleMethod", fontWeight = FontWeight.Bold, color = Color(0xFF2196F3), fontSize = 12.sp) } }
+                            } else if (change < 0) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (rec > 0) { Text("Falta: ${formatMoneyMain(abs(change), selectedCountry)} ${formatMoneySec(abs(change), selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { val cash = if (simpleMethod == "Efectivo") rec else 0.0; val digital = if (simpleMethod == "Digital") rec else 0.0; onFiarVenta(buyerName, cash, digital) }, modifier = Modifier.onGloballyPositioned { checkoutTourTargetsBounds[TourTarget.CHECKOUT_FIAR_BTN] = it.boundsInWindow() }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (rec > 0) "Fiar el restante \uD83D\uDDD3️" else "Fiar esta venta \uD83D\uDDD3️", fontWeight = FontWeight.Bold) } }
+                            } else if (change == 0.0 && rec > 0) { Text("Pago exacto ✅", color = Color(0xFF2196F3), fontWeight = FontWeight.Bold) }
+                        } else {
+                            PaymentInputRow("Efectivo Recibido", cashRaw, sym, visualTrans, selectedCountry) { cashRaw = it }
+                            PaymentInputRow("Digital Recibido", digitalRaw, sym, visualTrans, selectedCountry) { digitalRaw = it }
+                            val cV = (cashRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier
+                            val qV = (digitalRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier
+                            val receivedCOP = cV + qV
+                            val changeCOP = receivedCOP - totalCOP
 
-                        if (changeCOP > 0) {
-                            Text("Vuelto a devolver: ${formatMoneyMain(changeCOP, selectedCountry)} ${formatMoneySec(changeCOP, selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) { Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it }); Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
-                            if (pocketChange) { Text("El vuelto se dará de tu bolsillo. La ganancia ingresará intacta y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray) } else { Text("¿De dónde darás el vuelto?", fontSize = 12.sp, color = Color.Gray); PaymentInputRow("Vuelto Efectivo", cashChangeRaw, sym, visualTrans, selectedCountry) { cashChangeRaw = it }; PaymentInputRow("Vuelto Digital", digitalChangeRaw, sym, visualTrans, selectedCountry) { digitalChangeRaw = it }; val cc = (cashChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dc = (digitalChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; if (cc + dc != changeCOP) { Text("La suma del vuelto no cuadra con ${formatMoneyMain(changeCOP, selectedCountry)}", color = Color.Red, fontSize = 11.sp) } else if (cc > totalStoreCash) { Text("⚠️ Caja quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else if (dc > totalStoreDigital) { Text("⚠️ Banco quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else { Text("Vuelto distribuido correctamente ✅", color = Color(0xFF2196F3), fontSize = 11.sp, fontWeight = FontWeight.Bold) } }
-                        } else if (changeCOP < 0) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (receivedCOP > 0) { Text("Falta dinero: ${formatMoneyMain(abs(changeCOP), selectedCountry)} ${formatMoneySec(abs(changeCOP), selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { onFiarVenta(buyerName, cV, qV) }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (receivedCOP > 0) "Fiar el restante \uD83D\uDDD3️" else "Fiar esta venta \uD83D\uDDD3️", fontWeight = FontWeight.Bold) } }
-                        } else if (changeCOP == 0.0 && receivedCOP > 0) { Text("Pago completo y exacto ✅", color = Color(0xFF2196F3), fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                            if (changeCOP > 0) {
+                                Text("Vuelto a devolver: ${formatMoneyMain(changeCOP, selectedCountry)} ${formatMoneySec(changeCOP, selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().clickable { pocketChange = !pocketChange }) { Checkbox(checked = pocketChange, onCheckedChange = { pocketChange = it }); Text("Sacar vuelto de mi bolsillo", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                                if (pocketChange) { Text("El vuelto se dará de tu bolsillo. La ganancia ingresará intacta y la tienda te deberá el vuelto.", fontSize = 12.sp, color = Color.Gray) } else { Text("¿De dónde darás el vuelto?", fontSize = 12.sp, color = Color.Gray); PaymentInputRow("Vuelto Efectivo", cashChangeRaw, sym, visualTrans, selectedCountry) { cashChangeRaw = it }; PaymentInputRow("Vuelto Digital", digitalChangeRaw, sym, visualTrans, selectedCountry) { digitalChangeRaw = it }; val cc = (cashChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dc = (digitalChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; if (cc + dc != changeCOP) { Text("La suma del vuelto no cuadra con ${formatMoneyMain(changeCOP, selectedCountry)}", color = Color.Red, fontSize = 11.sp) } else if (cc > totalStoreCash) { Text("⚠️ Caja quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else if (dc > totalStoreDigital) { Text("⚠️ Banco quedará en negativo al dar el vuelto.", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold) } else { Text("Vuelto distribuido correctamente ✅", color = Color(0xFF2196F3), fontSize = 11.sp, fontWeight = FontWeight.Bold) } }
+                            } else if (changeCOP < 0) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) { if (receivedCOP > 0) { Text("Falta dinero: ${formatMoneyMain(abs(changeCOP), selectedCountry)} ${formatMoneySec(abs(changeCOP), selectedCountry, bcvRate)}", color = Color.Red, fontWeight = FontWeight.Bold, fontSize = 14.sp) } else { Text("Cobro pendiente", color = Color.Gray, fontSize = 14.sp) }; Spacer(modifier = Modifier.height(12.dp)); Button(onClick = { onFiarVenta(buyerName, cV, qV) }, modifier = Modifier.onGloballyPositioned { checkoutTourTargetsBounds[TourTarget.CHECKOUT_FIAR_BTN] = it.boundsInWindow() }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text(if (receivedCOP > 0) "Fiar el restante \uD83D\uDDD3️" else "Fiar esta venta \uD83D\uDDD3️", fontWeight = FontWeight.Bold) } }
+                            } else if (changeCOP == 0.0 && receivedCOP > 0) { Text("Pago completo y exacto ✅", color = Color(0xFF2196F3), fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                        }
                     }
                 }
+            }
+
+            CoachMarkOverlay(
+                    visible = isCheckoutTourActive && checkoutTourSteps.isNotEmpty(),
+                    steps = checkoutTourSteps,
+                    currentStepIndex = currentCheckoutTourStepIndex,
+                    targetsBounds = checkoutTourTargetsBounds,
+                    onNext = {
+                        if (currentCheckoutTourStepIndex < checkoutTourSteps.size - 1) {
+                            currentCheckoutTourStepIndex++
+                            if (currentCheckoutTourStepIndex >= 1 && step == 1) {
+                                step = 2
+                            }
+                        }
+                    },
+                    onPrev = {
+                        if (currentCheckoutTourStepIndex > 0) {
+                            currentCheckoutTourStepIndex--
+                            if (currentCheckoutTourStepIndex == 0 && step == 2) {
+                                step = 1
+                            }
+                        }
+                    },
+                    onSkip = {
+                        if (userId.isNotEmpty()) TourManager.markZoneSeen(context, userId, TourZone.CHECKOUT_TIENDA)
+                        isCheckoutTourActive = false
+                    },
+                    onFinish = {
+                        if (userId.isNotEmpty()) TourManager.markZoneSeen(context, userId, TourZone.CHECKOUT_TIENDA)
+                        isCheckoutTourActive = false
+                    }
+                )
             }
         },
         confirmButton = {
@@ -203,7 +280,11 @@ fun CheckoutDialog(cartItems: MutableList<Pair<Product, Int>>, products: List<Pr
             } else if (step == 2) {
                 var isEnabled = false
                 if (!isDivided) { val rec = (simpleReceivedRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; if (rec >= totalCOP) { isEnabled = true } } else { val cV = (cashRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dV = (digitalRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val changeCOP = (cV + dV) - totalCOP; if (changeCOP == 0.0) isEnabled = true; if (changeCOP > 0.0) { if (pocketChange) { isEnabled = true } else { val cc = (cashChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dc = (digitalChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; if (abs(cc + dc - changeCOP) < 0.01) isEnabled = true } } }
-                Button(onClick = { var netC = 0.0; var netD = 0.0; var summary = ""; var pocketDebtAmount = 0.0; if (!isDivided) { val rec = (simpleReceivedRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val change = rec - totalCOP; if (simpleMethod == "Efectivo") { netC = totalCOP; summary = "Pago Efectivo: ${formatMoneyMain(rec, selectedCountry)}" + if(change>0) " | Vuelto: ${formatMoneyMain(change, selectedCountry)}" + if(pocketChange) " (De bolsillo)" else "" else "" } else { netD = totalCOP; summary = "Pago Digital: ${formatMoneyMain(rec, selectedCountry)}" + if(change>0) " | Vuelto: ${formatMoneyMain(change, selectedCountry)}" + if(pocketChange) " (De bolsillo)" else "" else "" }; if (pocketChange && change > 0) { pocketDebtAmount = change } } else { val cV = (cashRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dV = (digitalRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val changeCOP = (cV + dV) - totalCOP; if (pocketChange) { netC = cV; netD = dV; summary = "Efectivo recibido: ${formatMoneyMain(cV, selectedCountry)} | Digital recibido: ${formatMoneyMain(dV, selectedCountry)}"; if (changeCOP > 0) { summary += "\nVuelto: ${formatMoneyMain(changeCOP, selectedCountry)} (De bolsillo)"; pocketDebtAmount = changeCOP } } else { val cc = (cashChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dc = (digitalChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; netC = cV - cc; netD = dV - dc; summary = "Efectivo recibido: ${formatMoneyMain(cV, selectedCountry)} | Digital recibido: ${formatMoneyMain(dV, selectedCountry)}"; if (cc > 0 || dc > 0) { summary += "\nVuelto Efectivo: ${formatMoneyMain(cc, selectedCountry)} | Vuelto Digital: ${formatMoneyMain(dc, selectedCountry)}" } } }; onConfirmSale(cartItems.toList(), buyerName.trim(), summary, netC, netD, pocketDebtAmount) }, enabled = isEnabled) { Text("Confirmar Venta") }
+                Button(
+                    onClick = { var netC = 0.0; var netD = 0.0; var summary = ""; var pocketDebtAmount = 0.0; if (!isDivided) { val rec = (simpleReceivedRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val change = rec - totalCOP; if (simpleMethod == "Efectivo") { netC = totalCOP; summary = "Pago Efectivo: ${formatMoneyMain(rec, selectedCountry)}" + if(change>0) " | Vuelto: ${formatMoneyMain(change, selectedCountry)}" + if(pocketChange) " (De bolsillo)" else "" else "" } else { netD = totalCOP; summary = "Pago Digital: ${formatMoneyMain(rec, selectedCountry)}" + if(change>0) " | Vuelto: ${formatMoneyMain(change, selectedCountry)}" + if(pocketChange) " (De bolsillo)" else "" else "" }; if (pocketChange && change > 0) { pocketDebtAmount = change } } else { val cV = (cashRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dV = (digitalRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val changeCOP = (cV + dV) - totalCOP; if (pocketChange) { netC = cV; netD = dV; summary = "Efectivo recibido: ${formatMoneyMain(cV, selectedCountry)} | Digital recibido: ${formatMoneyMain(dV, selectedCountry)}"; if (changeCOP > 0) { summary += "\nVuelto: ${formatMoneyMain(changeCOP, selectedCountry)} (De bolsillo)"; pocketDebtAmount = changeCOP } } else { val cc = (cashChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; val dc = (digitalChangeRaw.toDoubleOrNull() ?: 0.0) * inputMultiplier; netC = cV - cc; netD = dV - dc; summary = "Efectivo recibido: ${formatMoneyMain(cV, selectedCountry)} | Digital recibido: ${formatMoneyMain(dV, selectedCountry)}"; if (cc > 0 || dc > 0) { summary += "\nVuelto Efectivo: ${formatMoneyMain(cc, selectedCountry)} | Vuelto Digital: ${formatMoneyMain(dc, selectedCountry)}" } } }; onConfirmSale(cartItems.toList(), buyerName.trim(), summary, netC, netD, pocketDebtAmount) },
+                    modifier = Modifier.onGloballyPositioned { checkoutTourTargetsBounds[TourTarget.CHECKOUT_CONFIRM_BTN] = it.boundsInWindow() },
+                    enabled = isEnabled
+                ) { Text("Confirmar Venta") }
             }
         },
         dismissButton = {

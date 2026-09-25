@@ -66,8 +66,11 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import com.xxcamixx.contabilidad.ui.components.tour.CoachMarkOverlay
+import com.xxcamixx.contabilidad.ui.components.tour.TourCatalog
+import com.xxcamixx.contabilidad.ui.components.tour.TourManager
 import com.xxcamixx.contabilidad.ui.components.tour.TourStep
 import com.xxcamixx.contabilidad.ui.components.tour.TourTarget
+import com.xxcamixx.contabilidad.ui.components.tour.TourZone
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -524,125 +527,24 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
     }
 
-    // --- ESTADOS DEL PRODUCT TOUR (ONBOARDING GUIADO) ---
-    val tourPrefs = remember(viewModel.userId) {
-        context.getSharedPreferences("TourPrefs_${viewModel.userId}", Context.MODE_PRIVATE)
-    }
-    var isTourActive by remember { mutableStateOf(false) }
+    // --- ESTADOS DEL PRODUCT TOUR (ONBOARDING GUIADO POR ZONAS) ---
+    var activeTourZone by remember { mutableStateOf<TourZone?>(null) }
     var currentTourStepIndex by remember { mutableStateOf(0) }
     val tourTargetsBounds = remember { mutableStateMapOf<TourTarget, Rect>() }
 
-    val tourSteps = remember {
-        listOf(
-            // MODO 1: PERSONAL
-            TourStep(
-                target = TourTarget.PROFILE,
-                title = "Tu Perfil y Cuenta",
-                description = "Toca tu nombre para personalizar tu foto, cambiar tu nombre, consultar la tasa de cambio del día y verificar el tiempo activo de tu cuenta.",
-                icon = Icons.Filled.Person
-            ),
-            TourStep(
-                target = TourTarget.CALENDAR,
-                title = "Calendario y Deudores",
-                description = "Gestiona tus fechas importantes, programa recordatorios de pago y administra tu lista de personas y clientes fiados con facilidad.",
-                icon = Icons.Filled.DateRange
-            ),
-            TourStep(
-                target = TourTarget.MENU,
-                title = "Menú y Cierres de Caja",
-                description = "Aquí encuentras los Cierres automáticos y manuales de caja, las Opciones generales, configuración de sonidos y copias de seguridad en la nube.",
-                icon = Icons.Filled.MoreVert
-            ),
-            TourStep(
-                target = TourTarget.DASHBOARD,
-                title = "Resumen Financiero",
-                description = "Monitorea tu balance total, tus ingresos y tus egresos con el detalle separado de dinero en efectivo y transferencias digitales.",
-                icon = Icons.Filled.AccountBalanceWallet
-            ),
-            TourStep(
-                target = TourTarget.FAB_ADD,
-                title = "Registrar Movimiento",
-                description = "Usa este botón flotante cada vez que quieras registrar un nuevo ingreso o gasto personal en pocos segundos.",
-                icon = Icons.Filled.Add
-            ),
-            TourStep(
-                target = TourTarget.BOTTOM_NAV,
-                title = "Modos de Trabajo",
-                description = "Alterna cómodamente entre tus finanzas Personales, la gestión de Pedidos a clientes y el inventario de ventas de tu Tienda.",
-                icon = Icons.Filled.Layers
-            ),
-
-            // MODO 2: PEDIDOS
-            TourStep(
-                target = TourTarget.PEDIDOS_METRICS,
-                title = "Panel de Pedidos 📦",
-                description = "Monitorea en tiempo real el dinero invertido, las ganancias netas y el total de ventas acumuladas en todos tus pedidos.",
-                icon = Icons.Filled.AccountBalanceWallet
-            ),
-            TourStep(
-                target = TourTarget.PEDIDOS_ADD_BTN,
-                title = "Crear Nuevo Pedido",
-                description = "Crea un nuevo pedido con el nombre de tu cliente o proveedor y organiza los productos que vas a despachar.",
-                icon = Icons.Filled.Add
-            ),
-            TourStep(
-                target = TourTarget.PEDIDOS_TABS,
-                title = "Estantes y Ventas",
-                description = "Alterna fácilmente entre los productos organizados por estante y el historial de ventas despachadas.",
-                icon = Icons.Filled.Layers
-            ),
-            TourStep(
-                target = TourTarget.PEDIDOS_CART_FAB,
-                title = "Carrito de Pedidos",
-                description = "Accede a tu carrito en cualquier momento para agregar cantidades, despachar pedidos y registrar pagos al instante.",
-                icon = Icons.Filled.ShoppingCart
-            ),
-
-            // MODO 3: TIENDA
-            TourStep(
-                target = TourTarget.TIENDA_METRICS,
-                title = "Resumen de tu Tienda 🏪",
-                description = "Visualiza el valor monetario total de tu inventario en tiempo real y la ganancia neta obtenida por tus ventas.",
-                icon = Icons.Filled.AccountBalanceWallet
-            ),
-            TourStep(
-                target = TourTarget.TIENDA_INVENTORY_BTN,
-                title = "Inventario de Productos",
-                description = "Agrega y edita tus productos, ajusta precios de costo y venta, códigos de barra y alertas de stock bajo.",
-                icon = Icons.Filled.Storefront
-            ),
-            TourStep(
-                target = TourTarget.TIENDA_SCANNER_BTN,
-                title = "Escáner Visual IA 📸",
-                description = "¡Reconocimiento inteligente! Enfoca la cámara a tus productos y la IA los sumará automáticamente al carrito sin tocar la pantalla.",
-                icon = Icons.Filled.CameraAlt
-            ),
-            TourStep(
-                target = TourTarget.TIENDA_CHECKOUT_BAR,
-                title = "Historial de Ventas y Cobros",
-                description = "Consulta todas las transacciones realizadas en la tienda, clientes fiados y despacha pedidos con cálculo de vuelto.",
-                icon = Icons.Filled.ShoppingCart
-            )
-        )
-    }
-
-    // Sincronizar automáticamente la pestaña activa con el paso del tour
-    LaunchedEffect(currentTourStepIndex, isTourActive) {
-        if (isTourActive) {
-            when (currentTourStepIndex) {
-                in 0..5 -> if (currentTab != 0) currentTab = 0
-                in 6..9 -> if (currentTab != 1) currentTab = 1
-                in 10..13 -> if (currentTab != 2) currentTab = 2
-            }
+    // Detección contextual automática al navegar a cada pestaña (Personal, Pedidos, Tienda)
+    LaunchedEffect(currentTab, viewModel.userId, currentRole) {
+        if (currentRole == "BLOQUEADO_SISTEMA") return@LaunchedEffect
+        delay(800L) // Tiempo para que la vista renderice y posicione sus elementos
+        val zoneForTab = when (currentTab) {
+            0 -> TourZone.PERSONAL
+            1 -> TourZone.PEDIDOS
+            2 -> TourZone.TIENDA
+            else -> null
         }
-    }
-
-    LaunchedEffect(viewModel.userId) {
-        delay(1000L)
-        val hasCompleted = tourPrefs.getBoolean("tour_completed", false)
-        if (!hasCompleted && currentRole != "BLOQUEADO_SISTEMA") {
-            isTourActive = true
+        if (zoneForTab != null && !TourManager.isZoneSeen(context, viewModel.userId, zoneForTab)) {
             currentTourStepIndex = 0
+            activeTourZone = zoneForTab
         }
     }
 
@@ -951,7 +853,8 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                         productForQuickImageUpdate = it
                         showQuickImageSourceDialog = true
                     },
-                    onOpenScanner = { showVisualScannerDialog = true }
+                    onOpenScanner = { showVisualScannerDialog = true },
+                    userId = viewModel.userId
                 )
             } else {
                 Crossfade(targetState = currentTab, label = "TabSwitch") { tab ->
@@ -1550,6 +1453,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 totalStoreDigital = totalStoreDigital,
                 selectedCountry = viewModel.selectedCountry,
                 bcvRate = viewModel.bcvRate,
+                userId = viewModel.userId,
                 onDismiss = { showCheckoutDialog = false },
                 onConfirmSale = { items, buyer, summary, netCash, netDigital, pocketDebtAmount ->
                     viewModel.processCartSale(
@@ -1757,6 +1661,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                 reminders = currentTabReminders,
                 fiadores = currentTabFiadores,
                 products = if (currentTab == 2) products else emptyList(),
+                userId = viewModel.userId,
                 onDismiss = { showCalendarDialog = false },
                 onDayClick = { dayMillis, _ ->
                     preselectedDateForEvent = dayMillis
@@ -2158,9 +2063,15 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                                 .fillMaxWidth()
                                 .clickable {
                                     showOptionsDialog = false
-                                    currentTab = 0
+                                    TourManager.resetAllZones(context, viewModel.userId)
                                     currentTourStepIndex = 0
-                                    isTourActive = true
+                                    activeTourZone = when (currentTab) {
+                                        0 -> TourZone.PERSONAL
+                                        1 -> TourZone.PEDIDOS
+                                        2 -> TourZone.TIENDA
+                                        else -> TourZone.PERSONAL
+                                    }
+                                    Toast.makeText(context, "Tutorial reiniciado para todas las pantallas y modales 🎉", Toast.LENGTH_SHORT).show()
                                 }
                                 .padding(vertical = 16.dp)
                         ) {
@@ -2168,7 +2079,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
                             Spacer(Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Tour Guiado (Tutorial)", fontSize = 16.sp)
-                                Text("Ver guía paso a paso con recuadros interactivos", fontSize = 12.sp, color = Color.Gray)
+                                Text("Reiniciar guía interactiva en toda la aplicación", fontSize = 12.sp, color = Color.Gray)
                             }
                         }
                         Divider(color = Color.Gray.copy(alpha = 0.2f))
@@ -2211,7 +2122,7 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
         }
 
         if (showAdminChatList && currentRole == "ADMIN") { AdminChatListDialog(onDismiss = { showAdminChatList = false }, onSelectClient = { email -> chatTargetEmail = email; showAdminChatList = false; showChatDialog = true }) }
-        if (showBackendViewerDialog && currentRole == "ADMIN") { BackendViewerDialog(onDismiss = { showBackendViewerDialog = false }) }
+        if (showBackendViewerDialog && currentRole == "ADMIN") { BackendViewerDialog(viewModel = viewModel, onDismiss = { showBackendViewerDialog = false }) }
         if (showChatDialog) { ChatDialog(currentUserEmail = viewModel.userId, targetClientEmail = chatTargetEmail, isAdmin = (currentRole == "ADMIN"), onDismiss = { showChatDialog = false }) }
 
         val isCurrentGoldOrSuperior = normalizedRole == "GOLD" || normalizedRole == "ADMIN" || normalizedRole == "PRUEBA" || normalizedRole == "INVITADO-GOLD" || normalizedRole.contains("GOLD")
@@ -2293,13 +2204,14 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
     } // Cierra Scaffold
 
     // --- OVERLAY INTERACTIVO DEL PRODUCT TOUR (ONBOARDING) ---
+    val currentTourSteps = activeTourZone?.let { TourCatalog.getStepsForZone(it) } ?: emptyList()
     CoachMarkOverlay(
-        visible = isTourActive,
-        steps = tourSteps,
+        visible = activeTourZone != null && currentTourSteps.isNotEmpty(),
+        steps = currentTourSteps,
         currentStepIndex = currentTourStepIndex,
         targetsBounds = tourTargetsBounds,
         onNext = {
-            if (currentTourStepIndex < tourSteps.size - 1) {
+            if (currentTourStepIndex < currentTourSteps.size - 1) {
                 currentTourStepIndex++
             }
         },
@@ -2309,13 +2221,15 @@ fun FinanceScreen(viewModel: FinanceViewModel, userName: String, initialRole: St
             }
         },
         onSkip = {
-            isTourActive = false
-            tourPrefs.edit().putBoolean("tour_completed", true).apply()
+            activeTourZone?.let { TourManager.markZoneSeen(context, viewModel.userId, it) }
+            activeTourZone = null
         },
         onFinish = {
-            isTourActive = false
-            tourPrefs.edit().putBoolean("tour_completed", true).apply()
-            Toast.makeText(context, "¡Listo! Ya conoces las funciones principales 🎉", Toast.LENGTH_SHORT).show()
+            activeTourZone?.let {
+                TourManager.markZoneSeen(context, viewModel.userId, it)
+                Toast.makeText(context, "¡Listo! Ya conoces ${it.displayName} 🎉", Toast.LENGTH_SHORT).show()
+            }
+            activeTourZone = null
         }
     )
 } // Cierra Box

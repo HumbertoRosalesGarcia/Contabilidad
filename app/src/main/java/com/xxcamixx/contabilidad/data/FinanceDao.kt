@@ -72,7 +72,7 @@ interface FinanceDao {
     @Query("DELETE FROM comercio_products WHERE pedidoId = :pedidoId")
     suspend fun deleteComercioProductsByPedidoId(pedidoId: Int)
 
-    @Query("SELECT * FROM comercio_movements WHERE country = :country AND cierreId IS NULL ORDER BY timestamp DESC")
+    @Query("SELECT * FROM comercio_movements WHERE country = :country ORDER BY timestamp DESC")
     fun getAllComercioMovements(country: String): Flow<List<ComercioMovement>>
 
     @Insert suspend fun insertComercioProduct(product: ComercioProduct): Long

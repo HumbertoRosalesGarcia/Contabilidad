@@ -23,12 +23,32 @@ import com.xxcamixx.contabilidad.model.Fiador
 import com.xxcamixx.contabilidad.model.Product
 import com.xxcamixx.contabilidad.model.Reminder
 import com.xxcamixx.contabilidad.util.isSameDay
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalContext
+import com.xxcamixx.contabilidad.ui.components.tour.CoachMarkOverlay
+import com.xxcamixx.contabilidad.ui.components.tour.TourCatalog
+import com.xxcamixx.contabilidad.ui.components.tour.TourManager
+import com.xxcamixx.contabilidad.ui.components.tour.TourTarget
+import com.xxcamixx.contabilidad.ui.components.tour.TourZone
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
 @Composable
-fun CalendarDialog(currentTab: Int, reminders: List<Reminder>, fiadores: List<Fiador>, products: List<Product>, onDismiss: () -> Unit, onDayClick: (Long, Boolean) -> Unit, onViewReminders: () -> Unit, onViewFiadores: () -> Unit) {
+fun CalendarDialog(
+    currentTab: Int,
+    reminders: List<Reminder>,
+    fiadores: List<Fiador>,
+    products: List<Product>,
+    userId: String = "",
+    onDismiss: () -> Unit,
+    onDayClick: (Long, Boolean) -> Unit,
+    onViewReminders: () -> Unit,
+    onViewFiadores: () -> Unit
+) {
     var currentMonth by remember { mutableStateOf(Calendar.getInstance().apply { set(Calendar.DAY_OF_MONTH, 1) }) }
     val formatMonth = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
     val titleText = when (currentTab) {
@@ -37,37 +57,90 @@ fun CalendarDialog(currentTab: Int, reminders: List<Reminder>, fiadores: List<Fi
         else -> "Agenda de Tienda 🏪 🗓️"
     }
 
+    val context = LocalContext.current
+    val calendarTourSteps = remember { TourCatalog.getStepsForZone(TourZone.CALENDAR) }
+    var currentCalendarTourStepIndex by remember { mutableStateOf(0) }
+    var isCalendarTourActive by remember { mutableStateOf(false) }
+    val calendarTourTargetsBounds = remember { mutableStateMapOf<TourTarget, Rect>() }
+
+    LaunchedEffect(Unit) {
+        delay(600L)
+        if (userId.isNotEmpty() && !TourManager.isZoneSeen(context, userId, TourZone.CALENDAR)) {
+            currentCalendarTourStepIndex = 0
+            isCalendarTourActive = true
+        }
+    }
+
     AlertDialog(
         onDismissRequest = { }, properties = DialogProperties(dismissOnClickOutside = false), modifier = Modifier.fillMaxWidth().padding(16.dp), containerColor = MaterialTheme.colorScheme.surface,
         title = { Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(titleText, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), textAlign = TextAlign.Center); IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) { Icon(Icons.Filled.Close, "Cerrar") } } },
         text = {
-            Column {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = { val newCal = currentMonth.clone() as Calendar; newCal.add(Calendar.MONTH, -1); newCal.set(Calendar.DAY_OF_MONTH, 1); currentMonth = newCal }) { Icon(Icons.Filled.ChevronLeft, "Anterior") }; Text(text = formatMonth.format(currentMonth.time).replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold, fontSize = 16.sp); IconButton(onClick = { val newCal = currentMonth.clone() as Calendar; newCal.add(Calendar.MONTH, 1); newCal.set(Calendar.DAY_OF_MONTH, 1); currentMonth = newCal }) { Icon(Icons.Filled.ChevronRight, "Siguiente") } }
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth()) { listOf("Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb").forEach { Text(text = it, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)) } }
-                Spacer(modifier = Modifier.height(8.dp))
+            Box(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { IconButton(onClick = { val newCal = currentMonth.clone() as Calendar; newCal.add(Calendar.MONTH, -1); newCal.set(Calendar.DAY_OF_MONTH, 1); currentMonth = newCal }) { Icon(Icons.Filled.ChevronLeft, "Anterior") }; Text(text = formatMonth.format(currentMonth.time).replaceFirstChar { it.uppercase() }, fontWeight = FontWeight.Bold, fontSize = 16.sp); IconButton(onClick = { val newCal = currentMonth.clone() as Calendar; newCal.add(Calendar.MONTH, 1); newCal.set(Calendar.DAY_OF_MONTH, 1); currentMonth = newCal }) { Icon(Icons.Filled.ChevronRight, "Siguiente") } }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth()) { listOf("Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb").forEach { Text(text = it, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.Gray, textAlign = TextAlign.Center, modifier = Modifier.weight(1f)) } }
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                val daysInMonth = currentMonth.getActualMaximum(Calendar.DAY_OF_MONTH); val tempCal = currentMonth.clone() as Calendar; tempCal.set(Calendar.DAY_OF_MONTH, 1); val firstDayOfWeek = tempCal.get(Calendar.DAY_OF_WEEK) - 1; val totalCells = daysInMonth + firstDayOfWeek; val rows = (totalCells + 6) / 7
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    for (i in 0 until rows) {
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            for (j in 0..6) {
-                                val cellIndex = i * 7 + j; val dayNumber = cellIndex - firstDayOfWeek + 1
-                                if (dayNumber in 1..daysInMonth) {
-                                    val dayCal = currentMonth.clone() as Calendar; dayCal.set(Calendar.DAY_OF_MONTH, dayNumber)
-                                    val hasReminder = reminders.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }; val hasFiador = fiadores.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }; val hasProduct = if (currentTab == 2) products.any { it.expirationDateInMillis != null && isSameDay(it.expirationDateInMillis, dayCal.timeInMillis) } else false; val hasEvents = hasReminder || hasFiador || hasProduct
-                                    val bgColor = when { hasProduct -> Color(0xFFD32F2F); hasReminder -> Color(0xFF1976D2); hasFiador -> Color(0xFFFBC02D); else -> Color.Transparent }; val textColor = if (bgColor == Color.Transparent) MaterialTheme.colorScheme.onSurface else Color.White
-                                    Box(modifier = Modifier.weight(1f).aspectRatio(1f).padding(2.dp).clip(CircleShape).background(bgColor).clickable { onDayClick(dayCal.timeInMillis, hasEvents) }, contentAlignment = Alignment.Center) { Text(text = dayNumber.toString(), fontSize = 14.sp, fontWeight = if (hasEvents) FontWeight.Bold else FontWeight.Normal, color = textColor) }
-                                } else { Box(modifier = Modifier.weight(1f).aspectRatio(1f)) }
+                    val daysInMonth = currentMonth.getActualMaximum(Calendar.DAY_OF_MONTH); val tempCal = currentMonth.clone() as Calendar; tempCal.set(Calendar.DAY_OF_MONTH, 1); val firstDayOfWeek = tempCal.get(Calendar.DAY_OF_WEEK) - 1; val totalCells = daysInMonth + firstDayOfWeek; val rows = (totalCells + 6) / 7
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onGloballyPositioned { calendarTourTargetsBounds[TourTarget.CALENDAR_PICKER] = it.boundsInWindow() }
+                    ) {
+                        for (i in 0 until rows) {
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                for (j in 0..6) {
+                                    val cellIndex = i * 7 + j; val dayNumber = cellIndex - firstDayOfWeek + 1
+                                    if (dayNumber in 1..daysInMonth) {
+                                        val dayCal = currentMonth.clone() as Calendar; dayCal.set(Calendar.DAY_OF_MONTH, dayNumber)
+                                        val hasReminder = reminders.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }; val hasFiador = fiadores.any { isSameDay(it.targetDateInMillis, dayCal.timeInMillis) }; val hasProduct = if (currentTab == 2) products.any { it.expirationDateInMillis != null && isSameDay(it.expirationDateInMillis, dayCal.timeInMillis) } else false; val hasEvents = hasReminder || hasFiador || hasProduct
+                                        val bgColor = when { hasProduct -> Color(0xFFD32F2F); hasReminder -> Color(0xFF1976D2); hasFiador -> Color(0xFFFBC02D); else -> Color.Transparent }; val textColor = if (bgColor == Color.Transparent) MaterialTheme.colorScheme.onSurface else Color.White
+                                        Box(modifier = Modifier.weight(1f).aspectRatio(1f).padding(2.dp).clip(CircleShape).background(bgColor).clickable { onDayClick(dayCal.timeInMillis, hasEvents) }, contentAlignment = Alignment.Center) { Text(text = dayNumber.toString(), fontSize = 14.sp, fontWeight = if (hasEvents) FontWeight.Bold else FontWeight.Normal, color = textColor) }
+                                    } else { Box(modifier = Modifier.weight(1f).aspectRatio(1f)) }
+                                }
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(16.dp)); Divider(color = Color.Gray.copy(alpha = 0.2f))
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = onViewReminders,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .onGloballyPositioned { calendarTourTargetsBounds[TourTarget.CALENDAR_REMINDERS_BTN] = it.boundsInWindow() },
+                            contentPadding = PaddingValues(horizontal = 4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2), contentColor = Color.White)
+                        ) { Text("\uD83D\uDCB8 Mis Deudas", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
+                        Button(
+                            onClick = onViewFiadores,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .onGloballyPositioned { calendarTourTargetsBounds[TourTarget.CALENDAR_DEUDAS_LIST] = it.boundsInWindow() },
+                            contentPadding = PaddingValues(horizontal = 4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)
+                        ) { Text("\uD83D\uDCCB Mis Deudores", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
+                    }
                 }
-                Spacer(modifier = Modifier.height(16.dp)); Divider(color = Color.Gray.copy(alpha = 0.2f))
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onViewReminders, modifier = Modifier.weight(1f).height(48.dp), contentPadding = PaddingValues(horizontal = 4.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1976D2), contentColor = Color.White)) { Text("\uD83D\uDCB8 Mis Deudas", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
-                    Button(onClick = onViewFiadores, modifier = Modifier.weight(1f).height(48.dp), contentPadding = PaddingValues(horizontal = 4.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFBC02D), contentColor = Color.Black)) { Text("\uD83D\uDCCB Mis Deudores", fontWeight = FontWeight.Bold, fontSize = 12.sp, textAlign = TextAlign.Center) }
-                }
+
+                CoachMarkOverlay(
+                    visible = isCalendarTourActive && calendarTourSteps.isNotEmpty(),
+                    steps = calendarTourSteps,
+                    currentStepIndex = currentCalendarTourStepIndex,
+                    targetsBounds = calendarTourTargetsBounds,
+                    onNext = { if (currentCalendarTourStepIndex < calendarTourSteps.size - 1) currentCalendarTourStepIndex++ },
+                    onPrev = { if (currentCalendarTourStepIndex > 0) currentCalendarTourStepIndex-- },
+                    onSkip = {
+                        if (userId.isNotEmpty()) TourManager.markZoneSeen(context, userId, TourZone.CALENDAR)
+                        isCalendarTourActive = false
+                    },
+                    onFinish = {
+                        if (userId.isNotEmpty()) TourManager.markZoneSeen(context, userId, TourZone.CALENDAR)
+                        isCalendarTourActive = false
+                    }
+                )
             }
         },
         confirmButton = {}, dismissButton = { }

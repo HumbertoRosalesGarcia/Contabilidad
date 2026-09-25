@@ -118,6 +118,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     dao.updateComercioMovementsWithCierre(selectedCountry, sessionId)
                 }
             }
+            triggerAutoCloudSync()
         }
     }
 
@@ -211,6 +212,8 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             try {
                 dao.deleteOrphanComercioMovements()
             } catch (e: Exception) {}
+            checkAndAutoRestoreIfEmpty()
+            reconcileComercioMovementsIntegrity()
         }
     }
 
@@ -390,6 +393,111 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
+    private var autoSyncJob: kotlinx.coroutines.Job? = null
+
+    fun triggerAutoCloudSync(delayMs: Long = 1000L) {
+        if (userId.isBlank() || userId == "guest_user") return
+        autoSyncJob?.cancel()
+        autoSyncJob = viewModelScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.delay(delayMs)
+            try {
+                val transactions = dao.getBackupTransactions().map { it.copy(imageUri = null) }
+                val reminders = dao.getBackupReminders()
+                val fiadores = dao.getBackupFiadores()
+                val products = dao.getBackupProducts().map { it.copy(imageUri = null) }
+                val comercioProducts = dao.getBackupComercioProducts().map { it.copy(imageUri = null) }
+                val comercioPedidos = dao.getBackupComercioPedidos().map { it.copy(imageUri = null) }
+                val comercioMovements = dao.getBackupComercioMovements()
+                val cierreSessions = dao.getBackupCierreSessions()
+
+                val currentData = BackupData(
+                    transactions = transactions,
+                    reminders = reminders,
+                    fiadores = fiadores,
+                    products = products,
+                    comercioProducts = comercioProducts,
+                    comercioPedidos = comercioPedidos,
+                    comercioMovements = comercioMovements,
+                    cierreSessions = cierreSessions
+                )
+                val timeString = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
+                val autoRecord = BackupRecord(
+                    id = "auto_sync_latest",
+                    name = "Sincronización Automática ($timeString)",
+                    timestamp = System.currentTimeMillis(),
+                    data = currentData
+                )
+                val remotePayload = try { RetrofitInstance.api.getBackup(userId) } catch (_: Exception) { null }
+                val existingBackups = mutableListOf<BackupRecord>()
+                if (remotePayload != null && remotePayload.backups != null) {
+                    existingBackups.addAll(remotePayload.backups.filter { it.id != "auto_sync_latest" })
+                }
+                existingBackups.add(0, autoRecord)
+                if (existingBackups.size > 20) {
+                    existingBackups.removeAt(existingBackups.size - 1)
+                }
+                RetrofitInstance.api.uploadBackup(userId, CloudPayload(backups = existingBackups))
+                val now = System.currentTimeMillis()
+                userPrefs.edit().putLong("lastSync", now).apply()
+                launch(Dispatchers.Main) { lastSyncDate = now }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun checkAndAutoRestoreIfEmpty() {
+        if (userId.isBlank() || userId == "guest_user") return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val txCount = dao.getBackupTransactions().size
+                val prodCount = dao.getBackupProducts().size
+                val cProdCount = dao.getBackupComercioProducts().size
+                val pedCount = dao.getBackupComercioPedidos().size
+                if (txCount == 0 && prodCount == 0 && cProdCount == 0 && pedCount == 0) {
+                    val remotePayload = RetrofitInstance.api.getBackup(userId)
+                    val latest = remotePayload?.backups?.firstOrNull()
+                    if (latest != null) {
+                        restoreFromRecord(latest) {
+                            reconcileComercioMovementsIntegrity()
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun reconcileComercioMovementsIntegrity() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val cProducts = dao.getBackupComercioProducts()
+                val allMovements = dao.getBackupComercioMovements()
+
+                for (p in cProducts) {
+                    val soldMovementsQty = allMovements.filter { it.productId == p.id && it.type == "VENTA" }.sumOf { it.quantity }
+                    val missingQty = p.totalSold - soldMovementsQty
+                    if (missingQty > 0.0) {
+                        val unitPrice = if (p.salePricePerUnit > 0) p.salePricePerUnit else (p.costPerUnit * 1.3)
+                        val saleTotal = missingQty * unitPrice
+                        val time = if (p.id > 0) (System.currentTimeMillis() - 86400000L) else System.currentTimeMillis()
+                        dao.insertComercioMovement(
+                            ComercioMovement(
+                                productId = p.id,
+                                productName = p.name,
+                                type = "VENTA",
+                                quantity = missingQty,
+                                pricePerUnit = unitPrice,
+                                total = saleTotal,
+                                note = "Cliente: Venta registrada previa (${formatQty(missingQty)} ${p.unit}) | Pago: Efectivo",
+                                country = p.country ?: selectedCountry,
+                                timestamp = time
+                            )
+                        )
+                    }
+                }
+                triggerAutoCloudSync()
+            } catch (_: Exception) {}
+        }
+    }
+
     fun manualBackup(backupName: String, onResult: (String) -> Unit) {
         isSyncing = true
         syncMessage = "Guardando tus cuentas actuales..."
@@ -502,7 +610,12 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     dao.insertCierreSession(oldCierre.copy(id = 0, country = safeCountry))
                 }
 
-                launch(Dispatchers.Main) { onResult("¡Respaldo '${record.name}' restaurado! ☁️📥"); isSyncing = false; syncMessage = "" }
+                launch(Dispatchers.Main) {
+                    reconcileComercioMovementsIntegrity()
+                    onResult("¡Respaldo '${record.name}' restaurado! ☁️📥")
+                    isSyncing = false
+                    syncMessage = ""
+                }
             } catch (e: Exception) { launch(Dispatchers.Main) { onResult("Error al restaurar los datos: ${e.message}"); isSyncing = false; syncMessage = "" } }
         }
     }
@@ -512,19 +625,20 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val cash = if (method == "Efectivo") amount else 0.0
             val digital = if (method == "Digital") amount else 0.0
             dao.insertTransaction(Transaction(description = description, amount = amount, isIncome = isIncome, note = note, cashAmount = cash, digitalAmount = digital, country = selectedCountry, category = category, imageUri = imageUri))
+            triggerAutoCloudSync()
         }
         AppSounds.play(getApplication<Application>(), touchSoundUri)
     }
 
-    fun insertRawTransaction(transaction: Transaction) { viewModelScope.launch { val safeCountry = (transaction.country as String?) ?: selectedCountry; dao.insertTransaction(transaction.copy(id = 0, country = safeCountry)) } }
-    fun deleteTransaction(transaction: Transaction) { viewModelScope.launch { dao.deleteTransaction(transaction) }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
-    fun deleteTransactionsList(list: List<Transaction>) { viewModelScope.launch { list.forEach { dao.deleteTransaction(it) } }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
-    fun deletePersonalTransactions() { viewModelScope.launch { dao.deletePersonalTransactions(selectedCountry) } }
-    fun resetAllProfits() { viewModelScope.launch { dao.resetAllProfits(selectedCountry) }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
+    fun insertRawTransaction(transaction: Transaction) { viewModelScope.launch { val safeCountry = (transaction.country as String?) ?: selectedCountry; dao.insertTransaction(transaction.copy(id = 0, country = safeCountry)); triggerAutoCloudSync() } }
+    fun deleteTransaction(transaction: Transaction) { viewModelScope.launch { dao.deleteTransaction(transaction); triggerAutoCloudSync() }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
+    fun deleteTransactionsList(list: List<Transaction>) { viewModelScope.launch { list.forEach { dao.deleteTransaction(it) }; triggerAutoCloudSync() }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
+    fun deletePersonalTransactions() { viewModelScope.launch { dao.deletePersonalTransactions(selectedCountry); triggerAutoCloudSync() } }
+    fun resetAllProfits() { viewModelScope.launch { dao.resetAllProfits(selectedCountry); triggerAutoCloudSync() }; AppSounds.play(getApplication<Application>(), touchSoundUri) }
 
-    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, category: String?, context: Context, onConfigured: (String) -> Unit, featureVector: String? = null) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri, country = selectedCountry, category = category, featureVector = featureVector)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario") }; AppSounds.play(context, touchSoundUri) }
-    fun editProduct(product: Product, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateProduct(product); cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER"); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto actualizado") }; AppSounds.play(context, touchSoundUri) }
-    fun deleteProductEntirely(product: Product, context: Context) { viewModelScope.launch { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") }; AppSounds.play(context, touchSoundUri) }
+    fun addProduct(name: String, purchasePrice: Double, price: Double, stock: Int, unit: String, expirationDateInMillis: Long?, minStock: Int, imageUri: String?, category: String?, context: Context, onConfigured: (String) -> Unit, featureVector: String? = null) { viewModelScope.launch { val productId = dao.insertProduct(Product(name = name, purchasePrice = purchasePrice, price = price, stock = stock, unit = unit, expirationDateInMillis = expirationDateInMillis, minStock = minStock, imageUri = imageUri, country = selectedCountry, category = category, featureVector = featureVector)).toInt(); if (expirationDateInMillis != null) scheduleNotification(context, expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto $name ha alcanzado su fecha de caducidad.", productId + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto guardado en inventario"); triggerAutoCloudSync() }; AppSounds.play(context, touchSoundUri) }
+    fun editProduct(product: Product, context: Context, onConfigured: (String) -> Unit) { viewModelScope.launch { dao.updateProduct(product); cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER"); if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER"); onConfigured("Producto actualizado"); triggerAutoCloudSync() }; AppSounds.play(context, touchSoundUri) }
+    fun deleteProductEntirely(product: Product, context: Context) { viewModelScope.launch { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER"); triggerAutoCloudSync() }; AppSounds.play(context, touchSoundUri) }
 
     fun ensureProductFeatureVector(product: Product, context: Context) {
         if (product.featureVector != null || product.imageUri == null) return
@@ -543,10 +657,11 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             cartItems.forEach { (product, qty) -> val newStock = product.stock - qty; dao.updateProduct(product.copy(stock = newStock)); totalSaleCOP += (product.price * qty); totalProfitCOP += ((product.price - product.purchasePrice) * qty); itemNames.add("${qty}${product.unit} ${product.name}"); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") }
             val finalNote = buildString { if (buyerName.isNotBlank()) append("Cliente: $buyerName\n"); append("$paymentSummary\n"); append("Items: ${itemNames.joinToString(", ")}") }; val desc = if (cartItems.size == 1) "Venta: ${cartItems.first().first.name}" else "Venta: Varios Productos"
             dao.insertTransaction(Transaction(description = desc, amount = totalSaleCOP, isIncome = true, note = finalNote, profit = totalProfitCOP, cashAmount = netCash, digitalAmount = netDigital, country = selectedCountry)); onSold("Venta registrada exitosamente"); AppSounds.play(context, touchSoundUri)
+            triggerAutoCloudSync()
         }
     }
 
-    fun reduceProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val newStock = product.stock - qty; if (newStock <= 0) { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") } else { dao.updateProduct(product.copy(stock = newStock)); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") } }; AppSounds.play(context, touchSoundUri) }
+    fun reduceProductStock(product: Product, qty: Int, context: Context) { viewModelScope.launch { val newStock = product.stock - qty; if (newStock <= 0) { dao.deleteProduct(product); if (product.expirationDateInMillis != null) cancelAlarm(context, product.id + 200000, "EXPIRE_TRIGGER") } else { dao.updateProduct(product.copy(stock = newStock)); if (product.minStock > 0 && newStock <= product.minStock && product.stock > product.minStock) scheduleNotification(context, System.currentTimeMillis() + 1000L, "¡Stock Crítico! ⚠️", "El producto ${product.name} tiene solo $newStock unidades restantes.", product.id + 300000, "STOCK_TRIGGER") }; triggerAutoCloudSync() }; AppSounds.play(context, touchSoundUri) }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun restoreProductStock(product: Product, qty: Int, context: Context) {
@@ -557,6 +672,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 dao.insertProduct(product);
                 if (product.expirationDateInMillis != null) scheduleNotification(context, product.expirationDateInMillis, "¡Producto por Vencer! ⚠️", "El producto ${product.name} ha alcanzado su fecha de caducidad.", product.id + 200000, "EXPIRE_TRIGGER")
             }
+            triggerAutoCloudSync()
         }
     }
 
@@ -568,6 +684,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val textMsg = if (amount > 0) "$title: ${formatCOP(amount)}" else title
             val success = scheduleNotification(context, dateInMillis, "¡Hora de Pagar! ⏰", textMsg, reminderId, "ALARM_TRIGGER", voiceText)
             if (success) onConfigured("Alarma programada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}")
+            triggerAutoCloudSync()
         }
         AppSounds.play(context, touchSoundUri)
     }
@@ -580,11 +697,12 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val textMsg = if (reminder.amount > 0) "${reminder.title}: ${formatCOP(reminder.amount)}" else reminder.title
             val success = scheduleNotification(context, reminder.targetDateInMillis, "¡Hora de Pagar! ⏰", textMsg, reminder.id, "ALARM_TRIGGER", voiceText)
             if (success) onConfigured("Alarma actualizada para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(reminder.targetDateInMillis))}")
+            triggerAutoCloudSync()
         }
         AppSounds.play(context, touchSoundUri)
     }
 
-    fun deleteReminder(reminder: Reminder, context: Context) { viewModelScope.launch { dao.deleteReminder(reminder); cancelAlarm(context, reminder.id, "ALARM_TRIGGER") } }
+    fun deleteReminder(reminder: Reminder, context: Context) { viewModelScope.launch { dao.deleteReminder(reminder); cancelAlarm(context, reminder.id, "ALARM_TRIGGER"); triggerAutoCloudSync() } }
 
     private fun createFiadorVoiceText(name: String, amount: Double, reason: String, isStore: Boolean): String {
         val amountStr = amount.toLong().toString()
@@ -652,6 +770,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val voiceText = createFiadorVoiceText(name, remaining, reason, isStore)
             val success = scheduleNotification(context, dateInMillis, "¡Cobrar a $name! 💰", "Monto: ${formatCOP(remaining)} - $reason", fiadorId + 100000, "FIADOR_TRIGGER", voiceText)
             if (success) onConfigured("Recordatorio de fiador para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(dateInMillis))}")
+            triggerAutoCloudSync()
         }
         AppSounds.play(context, touchSoundUri)
     }
@@ -663,11 +782,12 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val voiceText = createFiadorVoiceText(fiador.name, remaining, fiador.reason, fiador.isStore)
             val success = scheduleNotification(context, fiador.targetDateInMillis, "¡Cobrar a ${fiador.name}! 💰", "Monto: ${formatCOP(remaining)} - ${fiador.reason}", fiador.id + 100000, "FIADOR_TRIGGER", voiceText)
             if (success) onConfigured("Recordatorio actualizado para las ${SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(fiador.targetDateInMillis))}")
+            triggerAutoCloudSync()
         }
         AppSounds.play(context, touchSoundUri)
     }
 
-    fun deleteFiador(fiador: Fiador, context: Context) { viewModelScope.launch { dao.deleteFiador(fiador); cancelAlarm(context, fiador.id + 100000, "FIADOR_TRIGGER") } }
+    fun deleteFiador(fiador: Fiador, context: Context) { viewModelScope.launch { dao.deleteFiador(fiador); cancelAlarm(context, fiador.id + 100000, "FIADOR_TRIGGER"); triggerAutoCloudSync() } }
 
     fun restoreFiador(name: String, totalAmount: Double, paidAmount: Double, context: Context, onResult: (String) -> Unit) {
         viewModelScope.launch {
@@ -689,6 +809,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             val voiceText = createFiadorVoiceText(name, remaining, "Deuda retomada manualmente", true)
             scheduleNotification(context, f.targetDateInMillis, "¡Cobrar a $name! 💰", "Monto: ${formatCOP(remaining)}", id + 100000, "FIADOR_TRIGGER", voiceText)
             launch(Dispatchers.Main) { onResult("Deuda de $name restaurada correctamente ♻️") }
+            triggerAutoCloudSync()
         }
         AppSounds.play(context, touchSoundUri)
     }
@@ -723,6 +844,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 scheduleNotification(context, fiador.targetDateInMillis, "¡Cobrar a ${fiador.name}! 💰", "Monto: ${formatCOP(remaining)} - ${fiador.reason}", fiador.id + 100000, "FIADOR_TRIGGER", voiceText)
                 launch(Dispatchers.Main) { onResult("Abono de ${formatCOP(abono)} registrado. Resta: ${formatCOP(remaining)}") }
             }
+            triggerAutoCloudSync()
             AppSounds.play(context, touchSoundUri)
         }
     }
@@ -762,23 +884,27 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     fun addComercioPedido(name: String, imageUri: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.insertComercioPedido(ComercioPedido(name = name, imageUri = imageUri, country = selectedCountry))
+            triggerAutoCloudSync()
         }
     }
 
     fun updateComercioPedido(pedido: ComercioPedido) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.updateComercioPedido(pedido)
+            triggerAutoCloudSync()
         }
     }
     fun deleteComercioProduct(product: ComercioProduct) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.deleteComercioMovementsByProductId(product.id)
             dao.deleteComercioProduct(product)
+            triggerAutoCloudSync()
         }
     }
     fun updateComercioProduct(product: ComercioProduct) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.updateComercioProduct(product)
+            triggerAutoCloudSync()
         }
     }
 
@@ -787,6 +913,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             dao.deleteComercioMovementsByPedidoId(pedido.id)
             dao.deleteComercioProductsByPedidoId(pedido.id)
             dao.deleteComercioPedido(pedido)
+            triggerAutoCloudSync()
         }
     }
 
@@ -888,6 +1015,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     scheduleNotification(context, targetDate, "¡Cobrar a $fiadorName! 💰", "Monto: ${formatCOP(remainingDebt)} - $productNames", fiadorId + 100000, "FIADOR_TRIGGER", voiceText)
                 }
             }
+            triggerAutoCloudSync()
         }
     }
 
@@ -904,6 +1032,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 quantity = quantity, pricePerUnit = cost, total = quantity * cost,
                 note = "Pedido inicial", country = selectedCountry
             ))
+            triggerAutoCloudSync()
         }
     }
 
@@ -931,6 +1060,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 quantity = quantity, pricePerUnit = salePrice, total = quantity * salePrice,
                 country = selectedCountry
             ))
+            triggerAutoCloudSync()
         }
     }
 
@@ -951,6 +1081,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 quantity = quantity, pricePerUnit = newCost, total = quantity * newCost,
                 note = note, country = selectedCountry
             ))
+            triggerAutoCloudSync()
         }
     }
 
@@ -970,6 +1101,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 quantity = quantity, pricePerUnit = newCost, total = quantity * newCost,
                 note = "Reabastecimiento", country = selectedCountry
             ))
+            triggerAutoCloudSync()
         }
     }
 
@@ -1004,6 +1136,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     note = "Ajuste de inventario (-)", country = selectedCountry
                 ))
             }
+            triggerAutoCloudSync()
         }
     }
 

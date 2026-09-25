@@ -36,6 +36,13 @@ fun ImageStorageSettingsDialog(
     var stats by remember { mutableStateOf(ImageStorageManager.getSavedImagesCountAndSize(context)) }
     val isCustom = remember(currentPath) { ImageStorageManager.getCustomStorageUri(context) != null }
 
+    LaunchedEffect(Unit) {
+        // Asegurar que la carpeta MiNegocio se cree en la raíz correspondiente
+        ImageStorageManager.getDefaultStorageDir(context)
+        currentPath = ImageStorageManager.getStorageLocationDescription(context)
+        stats = ImageStorageManager.getSavedImagesCountAndSize(context)
+    }
+
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
     ) { treeUri: Uri? ->
@@ -201,21 +208,19 @@ fun ImageStorageSettingsDialog(
                         Text("Elegir Carpeta en el Teléfono", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
 
-                    if (isCustom) {
-                        OutlinedButton(
-                            onClick = {
-                                ImageStorageManager.setCustomStorage(context, null, null)
-                                currentPath = ImageStorageManager.getStorageLocationDescription(context)
-                                stats = ImageStorageManager.getSavedImagesCountAndSize(context)
-                                Toast.makeText(context, "Restaurada carpeta predeterminada de la app", Toast.LENGTH_SHORT).show()
-                            },
-                            modifier = Modifier.fillMaxWidth().height(42.dp),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Filled.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Restaurar Carpeta Predeterminada", fontSize = 12.sp)
-                        }
+                    OutlinedButton(
+                        onClick = {
+                            ImageStorageManager.resetToDefaultStorage(context)
+                            currentPath = ImageStorageManager.getStorageLocationDescription(context)
+                            stats = ImageStorageManager.getSavedImagesCountAndSize(context)
+                            Toast.makeText(context, "Carpeta predeterminada: MiNegocio 📁", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(42.dp),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Filled.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Restaurar Carpeta Predeterminada", fontSize = 12.sp)
                     }
                 }
             }

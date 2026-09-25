@@ -55,6 +55,17 @@ import com.xxcamixx.contabilidad.ui.dialogs.ExpandedImageDialog
 import com.xxcamixx.contabilidad.util.formatMoneyMain
 import com.xxcamixx.contabilidad.util.formatMoneySec
 import java.util.Locale
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
+import com.xxcamixx.contabilidad.ui.components.tour.CoachMarkOverlay
+import com.xxcamixx.contabilidad.ui.components.tour.TourCatalog
+import com.xxcamixx.contabilidad.ui.components.tour.TourManager
+import com.xxcamixx.contabilidad.ui.components.tour.TourTarget
+import com.xxcamixx.contabilidad.ui.components.tour.TourZone
+import kotlinx.coroutines.delay
 
 @Composable
 fun InventoryScreen(
@@ -72,12 +83,27 @@ fun InventoryScreen(
     onLongDeleteClick: (Product) -> Unit,
     onInfoClick: (Product) -> Unit,
     onAddImageClick: (Product) -> Unit,
-    onOpenScanner: () -> Unit = {}
+    onOpenScanner: () -> Unit = {},
+    userId: String = ""
 ) {
+    val context = LocalContext.current
     var searchQuery by remember { mutableStateOf("") }
     var sortBy by remember { mutableStateOf("A-Z") }
     var expandedImageUri by remember { mutableStateOf<String?>(null) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
+
+    var isTourActive by remember { mutableStateOf(false) }
+    var currentTourStepIndex by remember { mutableStateOf(0) }
+    val tourTargetsBounds = remember { mutableStateMapOf<TourTarget, Rect>() }
+    val tourSteps = remember { TourCatalog.getStepsForZone(TourZone.INVENTORY) }
+
+    LaunchedEffect(userId) {
+        delay(600L)
+        if (!TourManager.isZoneSeen(context, userId, TourZone.INVENTORY)) {
+            currentTourStepIndex = 0
+            isTourActive = true
+        }
+    }
 
     val focusManager = LocalFocusManager.current
     LaunchedEffect(Unit) { focusManager.clearFocus() }
@@ -87,7 +113,10 @@ fun InventoryScreen(
             Row(modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primary).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { focusManager.clearFocus(); onBack() }) { Icon(Icons.Filled.ArrowBack, contentDescription = "Atrás", tint = MaterialTheme.colorScheme.onPrimary) }
                 Text("Inventario \uD83D\uDCE6", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.weight(1f))
-                IconButton(onClick = { focusManager.clearFocus(); onOpenScanner() }) {
+                IconButton(
+                    onClick = { focusManager.clearFocus(); onOpenScanner() },
+                    modifier = Modifier.onGloballyPositioned { tourTargetsBounds[TourTarget.INV_SCAN_BTN] = it.boundsInWindow() }
+                ) {
                     Icon(Icons.Filled.CameraAlt, contentDescription = "Escáner Visual IA", tint = MaterialTheme.colorScheme.onPrimary)
                 }
             }
@@ -102,7 +131,10 @@ fun InventoryScreen(
                         Icon(Icons.Filled.CameraAlt, contentDescription = "Escanear Producto", tint = MaterialTheme.colorScheme.primary)
                     }
                 },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .onGloballyPositioned { tourTargetsBounds[TourTarget.INV_SEARCH_BAR] = it.boundsInWindow() },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp)
             )
@@ -136,7 +168,10 @@ fun InventoryScreen(
 
             if (categories.isNotEmpty()) {
                 LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .onGloballyPositioned { tourTargetsBounds[TourTarget.INV_CATEGORIES_ROW] = it.boundsInWindow() },
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     item {
@@ -186,8 +221,34 @@ fun InventoryScreen(
                 }
             }
         }
-        FloatingActionButton(onClick = { focusManager.clearFocus(); onAddProductClick(selectedCategory) }, containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp).padding(bottom = 16.dp)) { Icon(Icons.Filled.Add, contentDescription = "Agregar Producto") }
+        FloatingActionButton(
+            onClick = { focusManager.clearFocus(); onAddProductClick(selectedCategory) },
+            containerColor = MaterialTheme.colorScheme.secondary,
+            contentColor = MaterialTheme.colorScheme.onSecondary,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(16.dp)
+                .padding(bottom = 16.dp)
+                .onGloballyPositioned { tourTargetsBounds[TourTarget.INV_ADD_BTN] = it.boundsInWindow() }
+        ) { Icon(Icons.Filled.Add, contentDescription = "Agregar Producto") }
 
         if (expandedImageUri != null) { ExpandedImageDialog(imageUri = expandedImageUri!!, onDismiss = { expandedImageUri = null }) }
+
+        CoachMarkOverlay(
+            visible = isTourActive && tourSteps.isNotEmpty(),
+            steps = tourSteps,
+            currentStepIndex = currentTourStepIndex,
+            targetsBounds = tourTargetsBounds,
+            onNext = { if (currentTourStepIndex < tourSteps.size - 1) currentTourStepIndex++ },
+            onPrev = { if (currentTourStepIndex > 0) currentTourStepIndex-- },
+            onSkip = {
+                TourManager.markZoneSeen(context, userId, TourZone.INVENTORY)
+                isTourActive = false
+            },
+            onFinish = {
+                TourManager.markZoneSeen(context, userId, TourZone.INVENTORY)
+                isTourActive = false
+            }
+        )
     }
 }
