@@ -10,7 +10,6 @@ import com.xxcamixx.contabilidad.data.AppDatabase
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
 
 class CloudSyncWorker(appContext: Context, workerParams: WorkerParameters) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result {
@@ -26,7 +25,7 @@ class CloudSyncWorker(appContext: Context, workerParams: WorkerParameters) : Cor
             val comercioMovements = db.getBackupComercioMovements()
             val cierreSessions = db.getBackupCierreSessions()
 
-            val newData = BackupData(
+            val currentData = BackupData(
                 transactions = transactions,
                 reminders = reminders,
                 fiadores = fiadores,
@@ -37,22 +36,59 @@ class CloudSyncWorker(appContext: Context, workerParams: WorkerParameters) : Cor
                 cierreSessions = cierreSessions
             )
             val timeString = SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
-            val newRecord = BackupRecord(UUID.randomUUID().toString(), "Automático - $timeString", System.currentTimeMillis(), newData)
+            val autoRecord = BackupRecord(
+                id = "auto_sync_latest",
+                name = "Sincronización Automática ($timeString)",
+                timestamp = System.currentTimeMillis(),
+                data = currentData
+            )
 
-            val remotePayload = RetrofitInstance.api.getBackup(userId)
+            val remotePayload = try { RetrofitInstance.api.getBackup(userId) } catch (_: Exception) { null }
             val existingBackups = mutableListOf<BackupRecord>()
 
             if (remotePayload != null) {
-                if (remotePayload.backups != null) { existingBackups.addAll(remotePayload.backups) }
-                else if (remotePayload.transactions != null) { existingBackups.add(BackupRecord("old", "Respaldo Antiguo", 0L, BackupData(remotePayload.transactions, remotePayload.reminders ?: emptyList(), remotePayload.fiadores ?: emptyList(), remotePayload.products ?: emptyList()))) }
+                if (remotePayload.backups != null) {
+                    existingBackups.addAll(remotePayload.backups.filter { it.id != "auto_sync_latest" })
+                } else if (remotePayload.transactions != null) {
+                    existingBackups.add(
+                        BackupRecord(
+                            "old",
+                            "Respaldo Antiguo",
+                            0L,
+                            BackupData(
+                                remotePayload.transactions,
+                                remotePayload.reminders ?: emptyList(),
+                                remotePayload.fiadores ?: emptyList(),
+                                remotePayload.products ?: emptyList()
+                            )
+                        )
+                    )
+                }
             }
 
-            existingBackups.add(0, newRecord)
-            if (existingBackups.size > 15) { existingBackups.removeAt(existingBackups.size - 1) }
+            existingBackups.add(0, autoRecord)
+            if (existingBackups.size > 20) {
+                existingBackups.removeAt(existingBackups.size - 1)
+            }
 
-            RetrofitInstance.api.uploadBackup(userId, CloudPayload(backups = existingBackups))
-            applicationContext.getSharedPreferences("FinancePrefs_$userId", Context.MODE_PRIVATE).edit().putLong("lastSync", System.currentTimeMillis()).apply()
+            val payload = CloudPayload(
+                backups = existingBackups,
+                transactions = transactions,
+                reminders = reminders,
+                fiadores = fiadores,
+                products = products,
+                comercioProducts = comercioProducts,
+                comercioPedidos = comercioPedidos,
+                comercioMovements = comercioMovements,
+                cierreSessions = cierreSessions
+            )
+
+            RetrofitInstance.api.uploadBackup(userId, payload)
+            applicationContext.getSharedPreferences("FinancePrefs_$userId", Context.MODE_PRIVATE)
+                .edit().putLong("lastSync", System.currentTimeMillis()).apply()
             Result.success()
-        } catch (_: Exception) { Result.retry() }
+        } catch (_: Exception) {
+            Result.retry()
+        }
     }
 }

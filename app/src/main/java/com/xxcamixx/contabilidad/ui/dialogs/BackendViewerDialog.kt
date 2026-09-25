@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -82,6 +84,10 @@ fun BackendViewerDialog(
                     if (email.equals(viewModel?.userId, ignoreCase = true)) {
                         viewModel?.checkAndAutoRestoreIfEmpty()
                     }
+                    try {
+                        val summaryRes = RetrofitInstance.api.getBackupsSummary().backups
+                        backupsSummary = summaryRes
+                    } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -340,6 +346,35 @@ fun BackendViewerDialog(
         }
     }
 
+    // Derivaciones para los 3 Modos Operativos (Personal, Tienda y Pedidos)
+    val personalTransactions = remember(clientTransactions) {
+        clientTransactions.filter { !it.description.startsWith("Venta: ", ignoreCase = true) && !it.category.equals("Tienda", ignoreCase = true) }
+    }
+    val storeTransactions = remember(clientTransactions) {
+        clientTransactions.filter { it.description.startsWith("Venta: ", ignoreCase = true) || it.category.equals("Tienda", ignoreCase = true) }
+    }
+    val storeProducts = remember(activeProducts) {
+        activeProducts.filter { it.category != "Comercio" }
+    }
+    val deletedStoreProducts = remember(deletedProducts) {
+        deletedProducts.filter { it.category != "Comercio" }
+    }
+    val personalFiadores = remember(clientFiadores) {
+        clientFiadores.filter { !it.isStore && it.originMode != "TIENDA" }
+    }
+    val storeFiadores = remember(clientFiadores) {
+        clientFiadores.filter { it.isStore || it.originMode == "TIENDA" }
+    }
+    val personalCierres = remember(clientCierres) {
+        clientCierres.filter { it.mode.contains("PERSONAL", ignoreCase = true) || it.mode.contains("TODOS", ignoreCase = true) }
+    }
+    val tiendaCierres = remember(clientCierres) {
+        clientCierres.filter { it.mode.contains("TIENDA", ignoreCase = true) || it.mode.contains("TODOS", ignoreCase = true) }
+    }
+    val pedidosCierres = remember(clientCierres) {
+        clientCierres.filter { it.mode.contains("PEDIDOS", ignoreCase = true) || it.mode.contains("COMERCIO", ignoreCase = true) || it.mode.contains("TODOS", ignoreCase = true) }
+    }
+
     fun updateBackupData(
         description: String,
         transform: (BackupData) -> BackupData
@@ -391,7 +426,7 @@ fun BackendViewerDialog(
                 .fillMaxSize()
                 .padding(12.dp),
             shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.background,
+            color = Color(0xFF121216),
             border = BorderStroke(1.dp, Color(0xFF2E2E36))
         ) {
             Column(modifier = Modifier.fillMaxSize().padding(14.dp)) {
@@ -584,7 +619,7 @@ fun BackendViewerDialog(
                     }
 
                     if (showClientSelector || selectedUserEmail == null) {
-                        // Tarjetas métricas de clientes
+                        // Tarjetas métricas de clientes simétricas
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -599,70 +634,120 @@ fun BackendViewerDialog(
                             }
 
                             Card(
-                                modifier = Modifier.weight(1f).height(48.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C20)),
-                                border = BorderStroke(1.dp, Color(0xFF2E2E36))
+                                modifier = Modifier.weight(1f).height(54.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A20)),
+                                border = BorderStroke(1.dp, Color(0xFF2C2C36))
                             ) {
                                 Column(
-                                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
-                                    Text("Clientes", fontSize = 10.sp, color = Color(0xFF9E9E9E), maxLines = 1)
-                                    Text("${usersMap.size}", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text("👥 Clientes", fontSize = 11.sp, color = Color(0xFFAAAAAA), maxLines = 1, fontWeight = FontWeight.Medium)
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text("${usersMap.size}", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
                                 }
                             }
 
                             Card(
-                                modifier = Modifier.weight(1f).height(48.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C20)),
-                                border = BorderStroke(1.dp, Color(0xFF2E2E36))
+                                modifier = Modifier.weight(1f).height(54.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A20)),
+                                border = BorderStroke(1.dp, Color(0xFF2C2C36))
                             ) {
                                 Column(
-                                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
-                                    Text("Respaldos", fontSize = 10.sp, color = Color(0xFF9E9E9E), maxLines = 1)
-                                    Text("$usersWithBackupCount", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    Text("☁️ Respaldos", fontSize = 11.sp, color = Color(0xFFAAAAAA), maxLines = 1, fontWeight = FontWeight.Medium)
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text("$usersWithBackupCount", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
 
                             Card(
-                                modifier = Modifier.weight(1f).height(48.dp),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1C1C20)),
-                                border = BorderStroke(1.dp, Color(0xFF2E2E36))
+                                modifier = Modifier.weight(1f).height(54.dp),
+                                shape = RoundedCornerShape(10.dp),
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A20)),
+                                border = BorderStroke(1.dp, Color(0xFF2C2C36))
                             ) {
                                 Column(
-                                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 6.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center
                                 ) {
-                                    Text("En línea", fontSize = 10.sp, color = Color(0xFF9E9E9E), maxLines = 1)
-                                    Text("$onlineCount", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                                    Text("🟢 En línea", fontSize = 11.sp, color = Color(0xFFAAAAAA), maxLines = 1, fontWeight = FontWeight.Medium)
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text("$onlineCount", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
                                 }
                             }
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // Buscador de clientes
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("Buscar cliente por correo o nombre...", fontSize = 12.sp) },
-                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = Color(0xFF9E9E9E), modifier = Modifier.size(16.dp)) },
-                            trailingIcon = {
+                        // Buscador de clientes simétrico y sin cortes de texto
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF18181E),
+                            border = BorderStroke(1.dp, Color(0xFF2E2E38))
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Filled.Search,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                BasicTextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    textStyle = androidx.compose.ui.text.TextStyle(
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Normal
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    decorationBox = { innerTextField ->
+                                        if (searchQuery.isEmpty()) {
+                                            Text(
+                                                "Buscar cliente por correo o nombre...",
+                                                color = Color(0xFF7E7E8E),
+                                                fontSize = 12.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                )
                                 if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(Icons.Filled.Close, contentDescription = "Limpiar", tint = Color(0xFF9E9E9E), modifier = Modifier.size(16.dp))
+                                    IconButton(
+                                        onClick = { searchQuery = "" },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = "Limpiar",
+                                            tint = Color(0xFF9E9E9E),
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                     }
                                 }
-                            },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            shape = RoundedCornerShape(8.dp),
-                            singleLine = true
-                        )
+                            }
+                        }
 
                         Spacer(modifier = Modifier.height(6.dp))
 
@@ -845,57 +930,55 @@ fun BackendViewerDialog(
                     Spacer(modifier = Modifier.height(6.dp))
 
                     if (currentUser != null) {
-                        // Resumen superior de Cierres de caja del cliente seleccionado (Clickeable a pestañas)
-                        if (clientCierres.isNotEmpty()) {
-                            BackendCierresSummaryTopCard(
-                                cierres = clientCierres,
-                                currencyFormat = currencyFormat,
-                                onSelectTab = { selectedTab = it }
-                            )
-                            Spacer(modifier = Modifier.height(6.dp))
-                        }
+                        // Resumen superior interactivo de los 3 Modos y Cierres (Siempre visible y clickeable)
+                        val personalNet = personalTransactions.filter { it.isIncome }.sumOf { it.amount } - personalTransactions.filter { !it.isIncome }.sumOf { it.amount }
+                        val tiendaStk = storeProducts.sumOf { it.stock }
+                        val pedidosStk = clientComercioProducts.sumOf { it.quantityInStock.toInt() }
 
-                        // Pestañas de Navegación de Datos
+                        BackendCierresSummaryTopCard(
+                            personalSaldo = personalNet,
+                            personalTxCount = personalTransactions.size,
+                            tiendaStock = tiendaStk,
+                            tiendaProdCount = storeProducts.size,
+                            pedidosCount = clientPedidos.size,
+                            pedidosStock = pedidosStk,
+                            cierres = clientCierres,
+                            currencyFormat = currencyFormat,
+                            onSelectTab = { selectedTab = it }
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Pestañas de Navegación de los 3 Modos Operativos y Cierres
                         ScrollableTabRow(
                             selectedTabIndex = selectedTab,
-                            edgePadding = 0.dp,
-                            containerColor = Color(0xFF18181A),
+                            edgePadding = 4.dp,
+                            containerColor = Color(0xFF141418),
                             contentColor = MaterialTheme.colorScheme.primary
                         ) {
                             Tab(
                                 selected = selectedTab == 0,
                                 onClick = { selectedTab = 0 },
-                                text = { Text("🔒 Cierres (${clientCierres.size})", fontSize = 12.sp, maxLines = 1) }
+                                text = { Text("👤 Modo Personal", fontSize = 12.sp, maxLines = 1, fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Medium) }
                             )
                             Tab(
                                 selected = selectedTab == 1,
                                 onClick = { selectedTab = 1 },
-                                text = { Text("🏪 Productos (${activeProducts.size})", fontSize = 12.sp, maxLines = 1) }
+                                text = { Text("🏪 Modo Tienda", fontSize = 12.sp, maxLines = 1, fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Medium) }
                             )
                             Tab(
                                 selected = selectedTab == 2,
                                 onClick = { selectedTab = 2 },
-                                text = { Text("💰 Finanzas (${clientTransactions.size})", fontSize = 12.sp, maxLines = 1) }
+                                text = { Text("📦 Modo Pedidos", fontSize = 12.sp, maxLines = 1, fontWeight = if (selectedTab == 2) FontWeight.Bold else FontWeight.Medium) }
                             )
                             Tab(
                                 selected = selectedTab == 3,
                                 onClick = { selectedTab = 3 },
-                                text = { Text("📦 Pedidos (${clientPedidos.size})", fontSize = 12.sp, maxLines = 1) }
+                                text = { Text("🔒 Cierres (${clientCierres.size})", fontSize = 12.sp, maxLines = 1, fontWeight = if (selectedTab == 3) FontWeight.Bold else FontWeight.Medium) }
                             )
                             Tab(
                                 selected = selectedTab == 4,
                                 onClick = { selectedTab = 4 },
-                                text = { Text("👥 Fiadores (${clientFiadores.size})", fontSize = 12.sp, maxLines = 1) }
-                            )
-                            Tab(
-                                selected = selectedTab == 5,
-                                onClick = { selectedTab = 5 },
-                                text = { Text("🗂️ Respaldos", fontSize = 12.sp, maxLines = 1) }
-                            )
-                            Tab(
-                                selected = selectedTab == 6,
-                                onClick = { selectedTab = 6 },
-                                text = { Text("📄 RAW", fontSize = 12.sp, maxLines = 1) }
+                                text = { Text("🗂️ Respaldos & RAW", fontSize = 12.sp, maxLines = 1, fontWeight = if (selectedTab == 4) FontWeight.Bold else FontWeight.Medium) }
                             )
                         }
 
@@ -908,38 +991,47 @@ fun BackendViewerDialog(
                             ) {
                                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                             }
-                        } else if (selectedClientPayload == null) {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().weight(1f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Filled.CloudOff, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(48.dp))
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text("Este cliente aún no tiene respaldos guardados en el servidor.", color = Color.Gray, fontSize = 13.sp)
-                                }
-                            }
                         } else {
                             when (selectedTab) {
-                                0 -> BackendCierresTab(clientCierres, currencyFormat, dateFormat, ::updateBackupData)
-                                1 -> BackendProductsTab(
-                                    activeProducts = activeProducts,
-                                    deletedProducts = deletedProducts,
-                                    currencyFormat = currencyFormat,
-                                    onUpdateData = ::updateBackupData
-                                )
-                                2 -> BackendTransactionsTab(clientTransactions, currencyFormat, dateFormat, ::updateBackupData)
-                                3 -> BackendPedidosTab(
-                                    clientPedidos = clientPedidos,
-                                    clientComercioProducts = clientComercioProducts,
-                                    clientMovements = clientMovements,
+                                0 -> BackendPersonalModeTab(
+                                    transactions = personalTransactions,
+                                    fiadores = personalFiadores,
+                                    cierres = personalCierres,
                                     currencyFormat = currencyFormat,
                                     dateFormat = dateFormat,
                                     onUpdateData = ::updateBackupData
                                 )
-                                4 -> BackendFiadoresTab(clientFiadores, currencyFormat, dateFormat, ::updateBackupData)
-                                5 -> BackendBackupsTab(selectedClientPayload?.backups ?: emptyList(), dateFormat)
-                                6 -> BackendRawJsonTab(selectedClientPayload, gson, context)
+                                1 -> BackendTiendaModeTab(
+                                    products = storeProducts,
+                                    deletedProducts = deletedStoreProducts,
+                                    transactions = storeTransactions,
+                                    fiadores = storeFiadores,
+                                    cierres = tiendaCierres,
+                                    currencyFormat = currencyFormat,
+                                    dateFormat = dateFormat,
+                                    onUpdateData = ::updateBackupData
+                                )
+                                2 -> BackendPedidosModeTab(
+                                    clientPedidos = clientPedidos,
+                                    clientComercioProducts = clientComercioProducts,
+                                    clientMovements = clientMovements,
+                                    cierres = pedidosCierres,
+                                    currencyFormat = currencyFormat,
+                                    dateFormat = dateFormat,
+                                    onUpdateData = ::updateBackupData
+                                )
+                                3 -> BackendCierresTab(
+                                    cierres = clientCierres,
+                                    currencyFormat = currencyFormat,
+                                    dateFormat = dateFormat,
+                                    onUpdateData = ::updateBackupData
+                                )
+                                4 -> BackendBackupsAndRawTab(
+                                    payload = selectedClientPayload,
+                                    dateFormat = dateFormat,
+                                    gson = gson,
+                                    context = context
+                                )
                             }
                         }
                     } else {
@@ -3250,17 +3342,20 @@ private fun ServerCapacityCard(
 
 @Composable
 private fun BackendCierresSummaryTopCard(
+    personalSaldo: Double,
+    personalTxCount: Int,
+    tiendaStock: Int,
+    tiendaProdCount: Int,
+    pedidosCount: Int,
+    pedidosStock: Int,
     cierres: List<CierreSession>,
     currencyFormat: NumberFormat,
     onSelectTab: (Int) -> Unit
 ) {
-    if (cierres.isEmpty()) return
-
     val totalIncomes = cierres.sumOf { it.totalIncomes }
     val totalExpenses = cierres.sumOf { it.totalExpenses }
     val netBalance = totalIncomes - totalExpenses
 
-    // Agrupación por los tres modos
     val personalCierres = cierres.filter { it.mode.contains("PERSONAL", ignoreCase = true) }
     val tiendaCierres = cierres.filter { it.mode.contains("TIENDA", ignoreCase = true) }
     val pedidosCierres = cierres.filter { it.mode.contains("PEDIDOS", ignoreCase = true) || it.mode.contains("COMERCIO", ignoreCase = true) }
@@ -3269,27 +3364,22 @@ private fun BackendCierresSummaryTopCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF17171C)),
-        border = BorderStroke(1.dp, Color(0xFF332B1A))
+        border = BorderStroke(1.dp, Color(0xFF2C2C36))
     ) {
         Column(modifier = Modifier.padding(8.dp)) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onSelectTab(0) },
+                    .clickable { onSelectTab(3) },
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    modifier = Modifier.weight(1f).padding(end = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "🔒 Resumen de Cierres de Caja",
+                        "🔒 Resumen Cierres de Caja",
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Surface(
@@ -3301,88 +3391,44 @@ private fun BackendCierresSummaryTopCard(
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                            softWrap = false
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                         )
                     }
                 }
                 Text(
-                    "Neto: ${currencyFormat.format(netBalance)}",
-                    fontSize = 12.sp,
+                    "Cierres Neto: ${currencyFormat.format(netBalance)}",
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (netBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935),
-                    softWrap = false
+                    color = if (netBalance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935)
                 )
             }
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Ingresos vs Egresos Totales simétricos
+            // Desglose simétrico de los 3 Modos Operativos clickeables que llevan a su modo respectivo
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFF1E1E22),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text("🟢 Ventas / Ingresos", fontSize = 9.sp, color = Color(0xFF9E9E9E), maxLines = 1)
-                        Text(
-                            currencyFormat.format(totalIncomes),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF4CAF50),
-                            softWrap = false
-                        )
-                    }
-                }
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color(0xFF1E1E22),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text("🔴 Egresos / Gastos", fontSize = 9.sp, color = Color(0xFF9E9E9E), maxLines = 1)
-                        Text(
-                            currencyFormat.format(totalExpenses),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFE53935),
-                            softWrap = false
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Desglose visual en los 3 modos clickeables para saltar directo a la pestaña correspondiente
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                // Modo Personal -> Finanzas (Tab 2)
+                // Modo Personal (Tab 0)
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = Color(0xFF14243B),
                     border = BorderStroke(1.dp, Color(0xFF1976D2).copy(alpha = 0.4f)),
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { onSelectTab(2) }
+                        .clickable { onSelectTab(0) }
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("👤 Personal ↗", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64B5F6), maxLines = 1, softWrap = false)
+                        Text("👤 Personal ↗", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF64B5F6), maxLines = 1)
                         Text(
-                            "${personalCierres.size} c. (${currencyFormat.format(personalCierres.sumOf { it.totalIncomes })})",
+                            "Saldo ${currencyFormat.format(personalSaldo)}",
                             fontSize = 8.sp,
-                            color = Color(0xFFBBDEFB),
+                            color = if (personalSaldo >= 0) Color(0xFFBBDEFB) else Color(0xFFFF8A80),
                             maxLines = 1,
-                            softWrap = false
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
 
-                // Modo Tienda -> Productos (Tab 1)
+                // Modo Tienda (Tab 1)
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = Color(0xFF2E2614),
@@ -3392,39 +3438,447 @@ private fun BackendCierresSummaryTopCard(
                         .clickable { onSelectTab(1) }
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🏪 Tienda ↗", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFD700), maxLines = 1, softWrap = false)
+                        Text("🏪 Tienda ↗", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFD700), maxLines = 1)
                         Text(
-                            "${tiendaCierres.size} c. (${currencyFormat.format(tiendaCierres.sumOf { it.totalIncomes })})",
+                            "$tiendaProdCount prods | $tiendaStock stk",
                             fontSize = 8.sp,
                             color = Color(0xFFFFF176),
                             maxLines = 1,
-                            softWrap = false
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
 
-                // Modo Pedidos / Comercio -> Pedidos (Tab 3)
+                // Modo Pedidos (Tab 2)
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = Color(0xFF281C2E),
                     border = BorderStroke(1.dp, Color(0xFFBA68C8).copy(alpha = 0.4f)),
                     modifier = Modifier
                         .weight(1f)
-                        .clickable { onSelectTab(3) }
+                        .clickable { onSelectTab(2) }
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("📦 Pedidos ↗", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFCE93D8), maxLines = 1, softWrap = false)
+                        Text("📦 Pedidos ↗", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFCE93D8), maxLines = 1)
                         Text(
-                            "${pedidosCierres.size} c. (${currencyFormat.format(pedidosCierres.sumOf { it.totalIncomes })})",
+                            "$pedidosCount ped. | $pedidosStock stk",
                             fontSize = 8.sp,
                             color = Color(0xFFE1BEE7),
                             maxLines = 1,
-                            softWrap = false
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
             }
         }
+    }
+}
+
+// =========================================================================
+// COMPOSABLES WRAPPER PARA CADA MODO OPERATIVO (PERSONAL, TIENDA, PEDIDOS)
+// =========================================================================
+
+@Composable
+private fun ColumnScope.BackendPersonalModeTab(
+    transactions: List<Transaction>,
+    fiadores: List<Fiador>,
+    cierres: List<CierreSession>,
+    currencyFormat: NumberFormat,
+    dateFormat: SimpleDateFormat,
+    onUpdateData: (String, (BackupData) -> BackupData) -> Unit
+) {
+    var personalSubTab by remember { mutableStateOf(0) } // 0: Transacciones, 1: Fiadores, 2: Cierres
+
+    val totalIncome = transactions.filter { it.isIncome }.sumOf { it.amount }
+    val totalExpense = transactions.filter { !it.isIncome }.sumOf { it.amount }
+    val balance = totalIncome - totalExpense
+    val totalDebt = fiadores.sumOf { maxOf(0.0, it.amount - it.paidAmount) }
+
+    // Banner de métricas del Modo Personal
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF14243B).copy(alpha = 0.6f)),
+        border = BorderStroke(1.dp, Color(0xFF1976D2).copy(alpha = 0.4f))
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("👤 Modo Personal", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF64B5F6))
+                Text(
+                    "Saldo Neto: ${currencyFormat.format(balance)}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = if (balance >= 0) Color(0xFF4CAF50) else Color(0xFFE53935)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1A1A22),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                        Text("🟢 Ingresos", fontSize = 9.sp, color = Color(0xFF9E9E9E))
+                        Text(currencyFormat.format(totalIncome), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1A1A22),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                        Text("🔴 Gastos", fontSize = 9.sp, color = Color(0xFF9E9E9E))
+                        Text(currencyFormat.format(totalExpense), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFE53935))
+                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1A1A22),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                        Text("👥 Fiadores", fontSize = 9.sp, color = Color(0xFF9E9E9E))
+                        Text(currencyFormat.format(totalDebt), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFB74D))
+                    }
+                }
+            }
+        }
+    }
+
+    Spacer(modifier = Modifier.height(6.dp))
+
+    // Selector de sub-sección del modo personal
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF16161A)).padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (personalSubTab == 0) MaterialTheme.colorScheme.primary else Color.Transparent,
+            modifier = Modifier.weight(1f).clickable { personalSubTab = 0 }
+        ) {
+            Text(
+                "💰 Transacciones (${transactions.size})",
+                fontSize = 11.sp,
+                fontWeight = if (personalSubTab == 0) FontWeight.Bold else FontWeight.Medium,
+                color = if (personalSubTab == 0) Color.Black else Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(vertical = 5.dp)
+            )
+        }
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (personalSubTab == 1) MaterialTheme.colorScheme.primary else Color.Transparent,
+            modifier = Modifier.weight(1f).clickable { personalSubTab = 1 }
+        ) {
+            Text(
+                "👥 Fiadores (${fiadores.size})",
+                fontSize = 11.sp,
+                fontWeight = if (personalSubTab == 1) FontWeight.Bold else FontWeight.Medium,
+                color = if (personalSubTab == 1) Color.Black else Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(vertical = 5.dp)
+            )
+        }
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (personalSubTab == 2) MaterialTheme.colorScheme.primary else Color.Transparent,
+            modifier = Modifier.weight(1f).clickable { personalSubTab = 2 }
+        ) {
+            Text(
+                "🔒 Cierres (${cierres.size})",
+                fontSize = 11.sp,
+                fontWeight = if (personalSubTab == 2) FontWeight.Bold else FontWeight.Medium,
+                color = if (personalSubTab == 2) Color.Black else Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(vertical = 5.dp)
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(6.dp))
+
+    when (personalSubTab) {
+        0 -> BackendTransactionsTab(transactions, currencyFormat, dateFormat, onUpdateData)
+        1 -> BackendFiadoresTab(fiadores, currencyFormat, dateFormat, onUpdateData)
+        2 -> BackendCierresTab(cierres, currencyFormat, dateFormat, onUpdateData)
+    }
+}
+
+@Composable
+private fun ColumnScope.BackendTiendaModeTab(
+    products: List<Product>,
+    deletedProducts: List<Product>,
+    transactions: List<Transaction>,
+    fiadores: List<Fiador>,
+    cierres: List<CierreSession>,
+    currencyFormat: NumberFormat,
+    dateFormat: SimpleDateFormat,
+    onUpdateData: (String, (BackupData) -> BackupData) -> Unit
+) {
+    var tiendaSubTab by remember { mutableStateOf(0) } // 0: Inventario, 1: Ventas/Gastos, 2: Fiadores, 3: Cierres
+
+    val totalStock = products.sumOf { it.stock }
+    val totalCost = products.sumOf { it.stock * it.purchasePrice }
+    val totalSaleValue = products.sumOf { it.stock * it.price }
+    val totalStoreVentas = transactions.filter { it.isIncome }.sumOf { it.amount }
+
+    // Banner de métricas del Modo Tienda
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF2E2614).copy(alpha = 0.6f)),
+        border = BorderStroke(1.dp, Color(0xFFFFD700).copy(alpha = 0.4f))
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("🏪 Modo Tienda", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFFFD700))
+                Text(
+                    "Ventas: ${currencyFormat.format(totalStoreVentas)}",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    color = Color(0xFF4CAF50)
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1A1A22),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                        Text("📦 Prods / Stock", fontSize = 9.sp, color = Color(0xFF9E9E9E))
+                        Text("${products.size} / $totalStock uds", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1A1A22),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                        Text("💰 Costo Inv.", fontSize = 9.sp, color = Color(0xFF9E9E9E))
+                        Text(currencyFormat.format(totalCost), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFFFB74D))
+                    }
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFF1A1A22),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
+                        Text("🏷️ Valor Venta", fontSize = 9.sp, color = Color(0xFF9E9E9E))
+                        Text(currencyFormat.format(totalSaleValue), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF81C784))
+                    }
+                }
+            }
+        }
+    }
+
+    Spacer(modifier = Modifier.height(6.dp))
+
+    // Selector de sub-sección del modo tienda
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF16161A)).padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (tiendaSubTab == 0) MaterialTheme.colorScheme.primary else Color.Transparent,
+            modifier = Modifier.weight(1f).clickable { tiendaSubTab = 0 }
+        ) {
+            Text(
+                "📦 Inventario (${products.size})",
+                fontSize = 11.sp,
+                fontWeight = if (tiendaSubTab == 0) FontWeight.Bold else FontWeight.Medium,
+                color = if (tiendaSubTab == 0) Color.Black else Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(vertical = 5.dp)
+            )
+        }
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (tiendaSubTab == 1) MaterialTheme.colorScheme.primary else Color.Transparent,
+            modifier = Modifier.weight(1f).clickable { tiendaSubTab = 1 }
+        ) {
+            Text(
+                "💵 Ventas (${transactions.size})",
+                fontSize = 11.sp,
+                fontWeight = if (tiendaSubTab == 1) FontWeight.Bold else FontWeight.Medium,
+                color = if (tiendaSubTab == 1) Color.Black else Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(vertical = 5.dp)
+            )
+        }
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (tiendaSubTab == 2) MaterialTheme.colorScheme.primary else Color.Transparent,
+            modifier = Modifier.weight(1f).clickable { tiendaSubTab = 2 }
+        ) {
+            Text(
+                "👥 Fiadores (${fiadores.size})",
+                fontSize = 11.sp,
+                fontWeight = if (tiendaSubTab == 2) FontWeight.Bold else FontWeight.Medium,
+                color = if (tiendaSubTab == 2) Color.Black else Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(vertical = 5.dp)
+            )
+        }
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (tiendaSubTab == 3) MaterialTheme.colorScheme.primary else Color.Transparent,
+            modifier = Modifier.weight(1f).clickable { tiendaSubTab = 3 }
+        ) {
+            Text(
+                "🔒 Cierres (${cierres.size})",
+                fontSize = 11.sp,
+                fontWeight = if (tiendaSubTab == 3) FontWeight.Bold else FontWeight.Medium,
+                color = if (tiendaSubTab == 3) Color.Black else Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(vertical = 5.dp)
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(6.dp))
+
+    when (tiendaSubTab) {
+        0 -> BackendProductsTab(products, deletedProducts, currencyFormat, onUpdateData)
+        1 -> BackendTransactionsTab(transactions, currencyFormat, dateFormat, onUpdateData)
+        2 -> BackendFiadoresTab(fiadores, currencyFormat, dateFormat, onUpdateData)
+        3 -> BackendCierresTab(cierres, currencyFormat, dateFormat, onUpdateData)
+    }
+}
+
+@Composable
+private fun ColumnScope.BackendPedidosModeTab(
+    clientPedidos: List<ComercioPedido>,
+    clientComercioProducts: List<ComercioProduct>,
+    clientMovements: List<ComercioMovement>,
+    cierres: List<CierreSession>,
+    currencyFormat: NumberFormat,
+    dateFormat: SimpleDateFormat,
+    onUpdateData: (String, (BackupData) -> BackupData) -> Unit
+) {
+    var pedidosSubTab by remember { mutableStateOf(0) } // 0: Pedidos y Productos, 1: Cierres Pedidos
+
+    // Selector superior si hay cierres de pedidos
+    if (cierres.isNotEmpty()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF16161A)).padding(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (pedidosSubTab == 0) MaterialTheme.colorScheme.primary else Color.Transparent,
+                modifier = Modifier.weight(1f).clickable { pedidosSubTab = 0 }
+            ) {
+                Text(
+                    "📦 Pedidos & Productos (${clientPedidos.size})",
+                    fontSize = 11.sp,
+                    fontWeight = if (pedidosSubTab == 0) FontWeight.Bold else FontWeight.Medium,
+                    color = if (pedidosSubTab == 0) Color.Black else Color.White,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(vertical = 5.dp)
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = if (pedidosSubTab == 1) MaterialTheme.colorScheme.primary else Color.Transparent,
+                modifier = Modifier.weight(1f).clickable { pedidosSubTab = 1 }
+            ) {
+                Text(
+                    "🔒 Cierres Pedidos (${cierres.size})",
+                    fontSize = 11.sp,
+                    fontWeight = if (pedidosSubTab == 1) FontWeight.Bold else FontWeight.Medium,
+                    color = if (pedidosSubTab == 1) Color.Black else Color.White,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(vertical = 5.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+    }
+
+    if (pedidosSubTab == 0) {
+        BackendPedidosTab(
+            clientPedidos = clientPedidos,
+            clientComercioProducts = clientComercioProducts,
+            clientMovements = clientMovements,
+            currencyFormat = currencyFormat,
+            dateFormat = dateFormat,
+            onUpdateData = onUpdateData
+        )
+    } else {
+        BackendCierresTab(
+            cierres = cierres,
+            currencyFormat = currencyFormat,
+            dateFormat = dateFormat,
+            onUpdateData = onUpdateData
+        )
+    }
+}
+
+@Composable
+private fun ColumnScope.BackendBackupsAndRawTab(
+    payload: CloudPayload?,
+    dateFormat: SimpleDateFormat,
+    gson: Gson,
+    context: Context
+) {
+    var rawSubTab by remember { mutableStateOf(0) } // 0: Respaldos, 1: RAW JSON
+
+    Row(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Color(0xFF16161A)).padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (rawSubTab == 0) MaterialTheme.colorScheme.primary else Color.Transparent,
+            modifier = Modifier.weight(1f).clickable { rawSubTab = 0 }
+        ) {
+            Text(
+                "🗂️ Historial Respaldos (${payload?.backups?.size ?: 0})",
+                fontSize = 11.sp,
+                fontWeight = if (rawSubTab == 0) FontWeight.Bold else FontWeight.Medium,
+                color = if (rawSubTab == 0) Color.Black else Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(vertical = 5.dp)
+            )
+        }
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (rawSubTab == 1) MaterialTheme.colorScheme.primary else Color.Transparent,
+            modifier = Modifier.weight(1f).clickable { rawSubTab = 1 }
+        ) {
+            Text(
+                "📄 Inspeccionar JSON RAW",
+                fontSize = 11.sp,
+                fontWeight = if (rawSubTab == 1) FontWeight.Bold else FontWeight.Medium,
+                color = if (rawSubTab == 1) Color.Black else Color.White,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.padding(vertical = 5.dp)
+            )
+        }
+    }
+
+    Spacer(modifier = Modifier.height(6.dp))
+
+    if (rawSubTab == 0) {
+        BackendBackupsTab(payload?.backups ?: emptyList(), dateFormat)
+    } else {
+        BackendRawJsonTab(payload, gson, context)
     }
 }
 

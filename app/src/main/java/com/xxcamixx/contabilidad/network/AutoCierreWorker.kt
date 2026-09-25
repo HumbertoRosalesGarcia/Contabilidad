@@ -1,13 +1,21 @@
 package com.xxcamixx.contabilidad.network
 
 import android.content.Context
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.xxcamixx.contabilidad.data.AppDatabase
 import com.xxcamixx.contabilidad.model.CierreSession
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class AutoCierreWorker(appContext: Context, workerParams: WorkerParameters) : CoroutineWorker(appContext, workerParams) {
     override suspend fun doWork(): Result {
@@ -71,10 +79,24 @@ class AutoCierreWorker(appContext: Context, workerParams: WorkerParameters) : Co
             }
 
             prefs.edit().putLong("lastAutoCierreTimestamp", now).apply()
+
+            // Trigger immediate cloud sync for the new closures
+            try {
+                val syncRequest = OneTimeWorkRequestBuilder<CloudSyncWorker>()
+                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                    .setInputData(workDataOf("USER_ID" to userId))
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                    .build()
+                WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+                    "OfflineAutoSync_$userId",
+                    ExistingWorkPolicy.REPLACE,
+                    syncRequest
+                )
+            } catch (_: Exception) {}
+
             Result.success()
         } catch (_: Exception) {
             Result.retry()
         }
     }
 }
-

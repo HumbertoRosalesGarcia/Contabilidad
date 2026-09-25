@@ -15,9 +15,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
@@ -137,6 +144,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     fun deleteCierreSession(session: CierreSession) {
         viewModelScope.launch {
             dao.deleteCierreSession(session)
+            triggerAutoCloudSync()
         }
     }
 
@@ -204,6 +212,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
     var pocketDebt by mutableStateOf(userPrefs.getFloat("pocketDebt_${_selectedCountryFlow.value}", if (_selectedCountryFlow.value == "Colombia") userPrefs.getFloat("pocketDebt", 0f) else 0f).toDouble()); private set
 
     init {
+        registerNetworkCallback()
         scheduleAutoSync(application, autoSyncFrequency, autoSyncHour, autoSyncMinute)
         scheduleAutoCierre(application, autoCierreEnabled, autoCierreFrequency, autoCierreHour, autoCierreMinute)
         checkPendingAutoCierre()
@@ -214,6 +223,7 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
             } catch (e: Exception) {}
             checkAndAutoRestoreIfEmpty()
             reconcileComercioMovementsIntegrity()
+            triggerAutoCloudSync(delayMs = 1200L)
         }
     }
 
@@ -389,17 +399,43 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     }
                 }
                 userPrefs.edit().putLong("lastAutoCierreTimestamp", now).apply()
+                triggerAutoCloudSync(delayMs = 0L)
             } catch (_: Exception) {}
         }
     }
 
+    fun scheduleOfflineSyncWorker() {
+        if (userId.isBlank() || userId == "guest_user") return
+        try {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+            val syncRequest = OneTimeWorkRequestBuilder<CloudSyncWorker>()
+                .setConstraints(constraints)
+                .setInputData(workDataOf("USER_ID" to userId))
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 10, TimeUnit.SECONDS)
+                .build()
+            WorkManager.getInstance(getApplication()).enqueueUniqueWork(
+                "OfflineAutoSync_$userId",
+                ExistingWorkPolicy.REPLACE,
+                syncRequest
+            )
+        } catch (_: Exception) {}
+    }
+
     private var autoSyncJob: kotlinx.coroutines.Job? = null
 
-    fun triggerAutoCloudSync(delayMs: Long = 1000L) {
+    fun triggerAutoCloudSync(delayMs: Long = 800L) {
         if (userId.isBlank() || userId == "guest_user") return
+
+        // Proactively prime offline background sync in case network is unavailable or app process gets closed
+        scheduleOfflineSyncWorker()
+
         autoSyncJob?.cancel()
         autoSyncJob = viewModelScope.launch(Dispatchers.IO) {
-            kotlinx.coroutines.delay(delayMs)
+            if (delayMs > 0) {
+                kotlinx.coroutines.delay(delayMs)
+            }
             try {
                 val transactions = dao.getBackupTransactions().map { it.copy(imageUri = null) }
                 val reminders = dao.getBackupReminders()
@@ -436,11 +472,30 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                 if (existingBackups.size > 20) {
                     existingBackups.removeAt(existingBackups.size - 1)
                 }
-                RetrofitInstance.api.uploadBackup(userId, CloudPayload(backups = existingBackups))
+                val payload = CloudPayload(
+                    backups = existingBackups,
+                    transactions = transactions,
+                    reminders = reminders,
+                    fiadores = fiadores,
+                    products = products,
+                    comercioProducts = comercioProducts,
+                    comercioPedidos = comercioPedidos,
+                    comercioMovements = comercioMovements,
+                    cierreSessions = cierreSessions
+                )
+                RetrofitInstance.api.uploadBackup(userId, payload)
                 val now = System.currentTimeMillis()
                 userPrefs.edit().putLong("lastSync", now).apply()
                 launch(Dispatchers.Main) { lastSyncDate = now }
-            } catch (_: Exception) {}
+
+                // Live sync completed successfully; cancel redundant offline worker
+                try {
+                    WorkManager.getInstance(getApplication()).cancelUniqueWork("OfflineAutoSync_$userId")
+                } catch (_: Exception) {}
+            } catch (e: Exception) {
+                // If live sync failed (no internet or network failure), ensure worker is scheduled
+                scheduleOfflineSyncWorker()
+            }
         }
     }
 
@@ -530,8 +585,18 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
                     else if (remotePayload.transactions != null) { existingBackups.add(BackupRecord("old", "Respaldo Antiguo", 0L, BackupData(remotePayload.transactions, remotePayload.reminders ?: emptyList(), remotePayload.fiadores ?: emptyList(), remotePayload.products ?: emptyList()))) }
                 }
                 existingBackups.add(0, newRecord)
-                if (existingBackups.size > 15) { existingBackups.removeAt(existingBackups.size - 1) }
-                RetrofitInstance.api.uploadBackup(userId, CloudPayload(backups = existingBackups))
+                val payload = CloudPayload(
+                    backups = existingBackups,
+                    transactions = transactions,
+                    reminders = reminders,
+                    fiadores = fiadores,
+                    products = products,
+                    comercioProducts = comercioProducts,
+                    comercioPedidos = comercioPedidos,
+                    comercioMovements = comercioMovements,
+                    cierreSessions = cierreSessions
+                )
+                RetrofitInstance.api.uploadBackup(userId, payload)
                 val now = System.currentTimeMillis()
                 userPrefs.edit().putLong("lastSync", now).apply()
                 launch(Dispatchers.Main) { lastSyncDate = now; onResult("¡Respaldo '$backupName' guardado! ☁️✅"); isSyncing = false; syncMessage = "" }
@@ -1140,4 +1205,35 @@ class FinanceViewModel(application: Application, val userId: String) : AndroidVi
         }
     }
 
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    private fun registerNetworkCallback() {
+        try {
+            val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: Network) {
+                    // Instantly sync when device connects to internet
+                    triggerAutoCloudSync(delayMs = 200L)
+                }
+            }
+            cm.registerNetworkCallback(request, networkCallback!!)
+        } catch (_: Exception) {}
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            if (networkCallback != null) {
+                val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                cm?.unregisterNetworkCallback(networkCallback!!)
+                networkCallback = null
+            }
+        } catch (_: Exception) {}
+    }
+
 }
+
